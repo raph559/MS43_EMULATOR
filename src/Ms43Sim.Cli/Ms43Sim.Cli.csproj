@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ms43sim</AssemblyName>
+    <RootNamespace>Ms43Sim.Cli</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Ms43Sim.Core\Ms43Sim.Core.csproj" />
+  </ItemGroup>
+
+</Project>
