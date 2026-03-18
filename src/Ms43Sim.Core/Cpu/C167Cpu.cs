@@ -124,6 +124,22 @@ public sealed partial class C167Cpu
     {
         var hi = op >> 4;
         var lo = op & 0xF;
+        switch (lo)
+        {
+            case 0xD:
+                ExecuteJump(op, b1, w1);
+                return;
+            case 0xE:
+            case 0xF:
+                ExecuteBitSetClear(op, b1);
+                return;
+            case 0xA when hi < 2:
+                ExecuteBitField(op, b1, w1);
+                return;
+            case 0xA when hi < 8:
+                ExecuteBitLogic(op, b1, w1);
+                return;
+        }
         if (hi < 8)
         {
             if (lo <= 9)
@@ -153,6 +169,12 @@ public sealed partial class C167Cpu
                 return;
             case 0xAC: case 0xBC:
                 ExecuteShift(op, b1);
+                return;
+            case 0x8A: case 0x9A: case 0xAA: case 0xBA:
+                ExecuteJumpOnBit(op, b1, w1);
+                return;
+            case 0xEA: case 0x9C: case 0xFA:
+                ExecuteJump(op, b1, w1);
                 return;
             case 0xF0: case 0xE0: case 0xE6: case 0xF2: case 0xF6: case 0xA8: case 0x98: case 0xB8:
             case 0x88: case 0xC8: case 0xD8: case 0xE8: case 0xD4: case 0xC4: case 0x84: case 0x94:

@@ -31,7 +31,7 @@ public class MoveTests
         Assert.Equal(0x0042, t.R(6));
     }
 
-    [Fact(Skip = "until Task 10: needs BSET")]
+    [Fact]
     public void ExplicitPswWrite_Wins()
     {
         var t = TestMachine.Create("E6880300 6F88");
