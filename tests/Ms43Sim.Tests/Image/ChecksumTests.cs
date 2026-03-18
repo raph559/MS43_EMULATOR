@@ -29,6 +29,17 @@ public class ChecksumTests
     }
 
     [Fact]
+    public void ErasedImage_IsReportedNotThrown()
+    {
+        // An all-FFh image has a seed pointer at the last byte and range counts of FFFFh.
+        var r = Checksums.Verify(Enumerable.Repeat((byte)0xFF, 0x80000).ToArray()).ToDictionary(c => c.Kind);
+        Assert.Equal(5, r.Count);
+        Assert.Contains("65535 ranges", r[ChecksumKind.ProgramCrc].Problem);
+        Assert.False(r[ChecksumKind.ProgramCrc].Ok);
+        Assert.Null(r[ChecksumKind.BootCrc].Problem);
+    }
+
+    [Fact]
     public void Fix_LeavesCorrectCandidateUnchanged()
     {
         var b = TestBins.E85CamPortBytes.ToArray();

@@ -20,18 +20,25 @@ public sealed class SfrFile
     readonly Func<ushort>?[] sfrRead = new Func<ushort>?[AreaWords], esfrRead = new Func<ushort>?[AreaWords];
     readonly Action<ushort>?[] sfrWrite = new Action<ushort>?[AreaWords], esfrWrite = new Action<ushort>?[AreaWords];
     readonly string?[] sfrOwner = new string?[AreaWords], esfrOwner = new string?[AreaWords];
+    readonly Func<ushort>?[] sfrPeek = new Func<ushort>?[AreaWords], esfrPeek = new Func<ushort>?[AreaWords];
 
     public SfrFile(AccessInventory inventory) => this.inventory = inventory;
 
     public static bool Contains(uint address) =>
         address is >= SfrBase and <= 0xFFFF || address is >= EsfrBase and <= 0xF1FF;
 
-    public void Register(uint address, string owner, Func<ushort>? read, Action<ushort>? write)
+    /// <summary>
+    /// Hands an address to a component. <paramref name="peek"/> returns the live value without
+    /// side effects (for reports, hashes and tests); without it, Peek reads plain storage.
+    /// </summary>
+    public void Register(uint address, string owner, Func<ushort>? read, Action<ushort>? write,
+        Func<ushort>? peek = null)
     {
         var (_, _, reads, writes, owners, i) = Locate(address);
         reads[i] = read;
         writes[i] = write;
         owners[i] = owner;
+        (address >= SfrBase ? sfrPeek : esfrPeek)[i] = peek;
     }
 
     public bool IsModelled(uint address)
@@ -76,7 +83,8 @@ public sealed class SfrFile
     public ushort Peek(uint address)
     {
         var (_, store, _, _, _, i) = Locate(address);
-        return store[i];
+        var peek = (address >= SfrBase ? sfrPeek : esfrPeek)[i];
+        return peek != null ? peek() : store[i];
     }
 
     public void Poke(uint address, ushort value)

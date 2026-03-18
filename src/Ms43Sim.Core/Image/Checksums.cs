@@ -4,9 +4,10 @@ namespace Ms43Sim.Core;
 
 public enum ChecksumKind { ProgramSum, CalibrationSum, BootCrc, ProgramCrc, CalibrationCrc }
 
-public sealed record ChecksumResult(ChecksumKind Kind, int StoredAt, uint Stored, uint Computed)
+/// <summary>One checksum. <paramref name="Problem"/> is set when the image's descriptor is not usable.</summary>
+public sealed record ChecksumResult(ChecksumKind Kind, int StoredAt, uint Stored, uint Computed, string? Problem = null)
 {
-    public bool Ok => Stored == Computed;
+    public bool Ok => Problem == null && Stored == Computed;
 }
 
 /// <summary>
@@ -17,6 +18,11 @@ public sealed record ChecksumResult(ChecksumKind Kind, int StoredAt, uint Stored
 public static class Checksums
 {
     const int Mask = 0x7FFFF;
+
+    // A real MS43 descriptor lists 2-6 ranges; more means the bytes are not a descriptor (an
+    // erased or foreign image). Reporting that, instead of hashing 65535 ranges, keeps any bin
+    // loadable.
+    const int MaxRanges = 16;
 
     const int ProgramSumStore = 0x6FDAE, ProgramSumSeed = 0x6FDB2, ProgramSumRanges = 0x6FDBE;
     const int CalSumStore = 0x72FFC, CalSumSeed = 0x6FDB8, CalSumRanges = 0x6FDCE;
@@ -30,23 +36,35 @@ public static class Checksums
             MonitorSum(image, ProgramSumSeed, ProgramSumRanges)),
         new ChecksumResult(ChecksumKind.CalibrationSum, CalSumStore, U32(image, CalSumStore),
             MonitorSum(image, CalSumSeed, CalSumRanges)),
-        new ChecksumResult(ChecksumKind.BootCrc, BootCrcStore, U16(image, BootCrcStore), BootCrc(image)),
-        new ChecksumResult(ChecksumKind.ProgramCrc, ProgramCrcStore, U16(image, ProgramCrcStore),
-            BlockCrc(image, ProgramCrcStore, (int)(U32(image, ProgramCrcSeedPointer) & Mask))),
-        new ChecksumResult(ChecksumKind.CalibrationCrc, CalCrcStore, U16(image, CalCrcStore),
-            BlockCrc(image, CalCrcStore, (int)(U32(image, CalCrcSeedPointer) & Mask))),
+        BootResult(image),
+        BlockResult(image, ChecksumKind.ProgramCrc, ProgramCrcStore, ProgramCrcSeedPointer),
+        BlockResult(image, ChecksumKind.CalibrationCrc, CalCrcStore, CalCrcSeedPointer),
     };
+
+    static ChecksumResult BlockResult(ReadOnlySpan<byte> image, ChecksumKind kind, int store, int seedPointer)
+    {
+        var (crc, problem) = BlockCrc(image, store, (int)(U32(image, seedPointer) & Mask));
+        return new ChecksumResult(kind, store, U16(image, store), crc, problem);
+    }
 
     /// <summary>Recomputes all five, sums first: the calibration sum sits inside the calibration CRC range.</summary>
     public static void Fix(Span<byte> image)
     {
         BinaryPrimitives.WriteUInt32LittleEndian(image[ProgramSumStore..], MonitorSum(image, ProgramSumSeed, ProgramSumRanges));
         BinaryPrimitives.WriteUInt32LittleEndian(image[CalSumStore..], MonitorSum(image, CalSumSeed, CalSumRanges));
-        BinaryPrimitives.WriteUInt16LittleEndian(image[BootCrcStore..], (ushort)BootCrc(image));
-        BinaryPrimitives.WriteUInt16LittleEndian(image[ProgramCrcStore..],
-            (ushort)BlockCrc(image, ProgramCrcStore, (int)(U32(image, ProgramCrcSeedPointer) & Mask)));
-        BinaryPrimitives.WriteUInt16LittleEndian(image[CalCrcStore..],
-            (ushort)BlockCrc(image, CalCrcStore, (int)(U32(image, CalCrcSeedPointer) & Mask)));
+        var (bootCrc, bootProblem) = BootCrc(image);
+        if (bootProblem == null)
+            BinaryPrimitives.WriteUInt16LittleEndian(image[BootCrcStore..], (ushort)bootCrc);
+        FixBlock(image, ProgramCrcStore, ProgramCrcSeedPointer);
+        FixBlock(image, CalCrcStore, CalCrcSeedPointer);
+    }
+
+    /// <summary>Leaves a block with an unusable descriptor as it is.</summary>
+    static void FixBlock(Span<byte> image, int store, int seedPointer)
+    {
+        var (crc, problem) = BlockCrc(image, store, (int)(U32(image, seedPointer) & Mask));
+        if (problem == null)
+            BinaryPrimitives.WriteUInt16LittleEndian(image[store..], (ushort)crc);
     }
 
     /// <summary>u32 seed plus every little-endian u16 over two [start, end) ranges.</summary>
@@ -57,7 +75,7 @@ public static class Checksums
         {
             var start = (int)(U32(image, rangesAt + 8 * i) & Mask);
             var end = (int)(U32(image, rangesAt + 8 * i + 4) & Mask);
-            var words = (end - start) / 2;
+            var words = Math.Max(0, (end - start) / 2);
             for (var w = 0; w < words; w++)
                 sum += U16(image, start + 2 * w);
         }
@@ -65,25 +83,37 @@ public static class Checksums
     }
 
     /// <summary>The boot block CRC: one inclusive range at 0x3C28, seed word at 0x3FE6.</summary>
-    static uint BootCrc(ReadOnlySpan<byte> image)
+    static (uint Crc, string? Problem) BootCrc(ReadOnlySpan<byte> image)
     {
         var start = (int)(U32(image, BootCrcStore + 4) & Mask);
         var end = (int)(U32(image, BootCrcStore + 8) & Mask);
-        return Crc16(image[start..(end + 1)], U16(image, BootCrcSeed));
+        if (start > end)
+            return (0, $"boot descriptor at 0x{BootCrcStore + 4:X5}: the range starts after it ends");
+        return (Crc16(image[start..(end + 1)], U16(image, BootCrcSeed)), null);
+    }
+
+    static ChecksumResult BootResult(ReadOnlySpan<byte> image)
+    {
+        var (crc, problem) = BootCrc(image);
+        return new ChecksumResult(ChecksumKind.BootCrc, BootCrcStore, U16(image, BootCrcStore), crc, problem);
     }
 
     /// <summary>Descriptor: +0 u16 crc, +2 u16 count, +4 count × (u32 start, u32 end), inclusive.</summary>
-    static uint BlockCrc(ReadOnlySpan<byte> image, int descriptor, int seedAt)
+    static (uint Crc, string? Problem) BlockCrc(ReadOnlySpan<byte> image, int descriptor, int seedAt)
     {
         uint crc = U16(image, seedAt);
         int count = U16(image, descriptor + 2);
+        if (count > MaxRanges)
+            return (0, $"descriptor at 0x{descriptor:X5} lists {count} ranges (at most {MaxRanges} expected)");
         for (var i = 0; i < count; i++)
         {
             var start = (int)(U32(image, descriptor + 4 + 8 * i) & Mask);
             var end = (int)(U32(image, descriptor + 8 + 8 * i) & Mask);
+            if (start > end)
+                return (0, $"descriptor at 0x{descriptor:X5}: range {i} starts after it ends");
             crc = Crc16(image[start..(end + 1)], crc);
         }
-        return crc;
+        return (crc, null);
     }
 
     /// <summary>CRC-16, reflected polynomial 0xA001, byte-wise, no final XOR.</summary>
@@ -98,7 +128,10 @@ public static class Checksums
         return crc & 0xFFFF;
     }
 
-    static ushort U16(ReadOnlySpan<byte> image, int offset) => BinaryPrimitives.ReadUInt16LittleEndian(image[offset..]);
+    // Reads wrap at 512 KiB, as the flash mirrors, so a pointer to the last byte cannot overrun.
+    static ushort U16(ReadOnlySpan<byte> image, int offset) =>
+        (ushort)(image[offset & Mask] | (image[(offset + 1) & Mask] << 8));
 
-    static uint U32(ReadOnlySpan<byte> image, int offset) => BinaryPrimitives.ReadUInt32LittleEndian(image[offset..]);
+    static uint U32(ReadOnlySpan<byte> image, int offset) =>
+        U16(image, offset) | ((uint)U16(image, offset + 2) << 16);
 }
