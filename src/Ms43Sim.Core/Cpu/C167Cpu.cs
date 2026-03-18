@@ -122,8 +122,38 @@ public sealed partial class C167Cpu
 
     void Execute(byte op, byte b1, ushort w1)
     {
+        var hi = op >> 4;
+        var lo = op & 0xF;
+        if (hi < 8)
+        {
+            if (lo <= 9)
+            {
+                ExecuteArithmetic(op, b1, w1);
+                return;
+            }
+            if (lo == 0xB && op != 0x3B)
+            {
+                ExecuteMulDiv(op, b1);
+                return;
+            }
+            if (lo == 0xC)
+            {
+                ExecuteShift(op, b1);
+                return;
+            }
+        }
         switch (op)
         {
+            case 0x81: case 0x91: case 0xA1: case 0xB1:
+                ExecuteNegateComplement(op, b1);
+                return;
+            case 0x80: case 0x90: case 0xA0: case 0xB0: case 0x82: case 0x92: case 0xA2: case 0xB2:
+            case 0x86: case 0x96: case 0xA6: case 0xB6:
+                ExecuteCompareStep(op, b1, w1);
+                return;
+            case 0xAC: case 0xBC:
+                ExecuteShift(op, b1);
+                return;
             case 0xF0: case 0xE0: case 0xE6: case 0xF2: case 0xF6: case 0xA8: case 0x98: case 0xB8:
             case 0x88: case 0xC8: case 0xD8: case 0xE8: case 0xD4: case 0xC4: case 0x84: case 0x94:
                 ExecuteMoveWord(op, b1, w1);
