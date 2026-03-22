@@ -5,8 +5,8 @@ namespace Ms43Sim.Core;
 public enum StopReason { CycleBudget, StopCondition, PowerDown }
 
 /// <summary>
-/// One emulated MS43: the bus, the SFR file, the CPU, the scheduler and the diagnostics.
-/// The interrupt controller and peripherals are added by later parts of plan 1.
+/// One emulated MS43: the bus, the SFR file, the CPU with its interrupt controller, the
+/// watchdog and CAPCOM timers, the scheduler and the diagnostics.
 /// </summary>
 public sealed partial class Machine : ICpuHost
 {
@@ -26,6 +26,8 @@ public sealed partial class Machine : ICpuHost
         Cpu = new C167Cpu(Bus, Sfrs, Events, Branches, this, () => Cycles);
         Interrupts = new InterruptController(Sfrs, Bus);
         Cpu.Interrupts = Interrupts;
+        Watchdog = new Watchdog(Scheduler, Sfrs, Reset, () => Cpu.InitDone);
+        Capcom = new CapcomTimers(Scheduler, Sfrs, Interrupts, Events);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
     }
@@ -43,6 +45,11 @@ public sealed partial class Machine : ICpuHost
     public BranchTrace Branches { get; }
     public C167Cpu Cpu { get; }
     public InterruptController Interrupts { get; }
+    public Watchdog Watchdog { get; }
+    public CapcomTimers Capcom { get; }
+
+    public int WatchdogResets { get; private set; }
+    public int SoftwareResets { get; private set; }
 
     public ulong Cycles => Scheduler.Now;
     public ulong Instructions { get; private set; }
@@ -58,6 +65,28 @@ public sealed partial class Machine : ICpuHost
         Bus.ChipSelects.Recompute();
         Cpu.Reset();
         Interrupts.Reset();
+        Watchdog.OnReset(ResetKind.PowerOn);
+        Capcom.OnReset();
+    }
+
+    /// <summary>
+    /// A watchdog or software reset: every SFR and the CPU return to their reset values, RAM is
+    /// kept, and the CPU restarts at 00:0000 (UM §5, "Reset Functions").
+    /// </summary>
+    public void Reset(ResetKind kind)
+    {
+        Events.Add((c, pc) => new ResetEvent(c, pc, kind));
+        Branches.Add(new BranchRecord(Cycles, Cpu.InstructionAddress, 0, BranchKind.Reset));
+        if (kind == ResetKind.Watchdog)
+            WatchdogResets++;
+        else if (kind == ResetKind.Software)
+            SoftwareResets++;
+        Sfrs.ResetAll();
+        Bus.ChipSelects.Recompute();
+        Cpu.Reset();
+        Interrupts.Reset();
+        Watchdog.OnReset(kind);
+        Capcom.OnReset();
     }
 
     /// <summary>Calls <paramref name="hook"/> each time the CPU is about to execute at <paramref name="cpuAddress"/>.</summary>
@@ -67,6 +96,17 @@ public sealed partial class Machine : ICpuHost
     /// <summary>One CPU step (see the plan's "What one Step() does"), then the clock advances by its states.</summary>
     public void StepOnce()
     {
+        if (Cpu.Mode == CpuMode.Idle)
+        {
+            if (!Interrupts.AnyEnabledRequest)
+            {
+                // IDLE: nothing runs until the next timed event (or an enabled request) wakes the CPU.
+                var next = Scheduler.NextDue;
+                Scheduler.Advance(next == ulong.MaxValue ? Cycles + 2 : next);
+                return;
+            }
+            Cpu.Wake();
+        }
         if (instructionHooks.Count > 0 && instructionHooks.TryGetValue(Cpu.Address, out var hook))
             hook(this);
         var states = Cpu.Step();
@@ -84,21 +124,25 @@ public sealed partial class Machine : ICpuHost
                 return StopReason.PowerDown;
             if (stopWhen != null && stopWhen(this))
                 return StopReason.StopCondition;
+            if (Cpu.Mode == CpuMode.Idle && !Interrupts.AnyEnabledRequest)
+            {
+                Scheduler.Advance(Math.Min(Scheduler.NextDue, end));
+                continue;
+            }
             StepOnce();
         }
         return StopReason.CycleBudget;
     }
 
-    // ICpuHost: plan 1 Task 13 gives these their watchdog and reset behaviour.
-    void ICpuHost.Srvwdt() { }
+    void ICpuHost.Srvwdt() => Watchdog.Service();
 
-    bool ICpuHost.Diswdt() => true;
+    bool ICpuHost.Diswdt() => Watchdog.Disable();
 
-    void ICpuHost.Einit() { }
+    void ICpuHost.Einit() => Watchdog.OnEinit();
 
-    void ICpuHost.SoftwareReset() { }
+    void ICpuHost.SoftwareReset() => Reset(ResetKind.Software);
 
-    void ICpuHost.PowerDown() { }
+    void ICpuHost.PowerDown() => Events.Add((c, pc) => new UnsupportedEvent(c, pc, "PWRDN: the run stops here"));
 
     /// <summary>A hash of everything a run can change; equal hashes mean equal machine states.</summary>
     public string StateHash()

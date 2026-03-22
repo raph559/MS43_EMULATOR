@@ -88,6 +88,13 @@ public sealed partial class C167Cpu
         stackLimitHit = false;
     }
 
+    /// <summary>Leaves IDLE mode (an enabled interrupt request ends it, UM §5.1).</summary>
+    public void Wake()
+    {
+        if (Mode == CpuMode.Idle)
+            Mode = CpuMode.Running;
+    }
+
     /// <summary>Places the CPU at CSP:IP (tests only).</summary>
     public void Jump(byte newCsp, ushort newIp)
     {
