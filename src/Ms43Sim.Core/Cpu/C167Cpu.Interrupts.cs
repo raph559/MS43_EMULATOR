@@ -63,6 +63,7 @@ public sealed partial class C167Cpu
         if (increment == 3)
             increment = 2;   // the reserved '11' is changed to '10' by hardware
 
+        dataStates += bus.AccessStates(source) + bus.AccessStates(destination);
         if (isByte)
         {
             bus.Write8(destination, bus.Read8(source));

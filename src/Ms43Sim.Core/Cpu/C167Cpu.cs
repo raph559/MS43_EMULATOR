@@ -25,6 +25,8 @@ public sealed partial class C167Cpu
     readonly ushort[] dpp = new ushort[4];
     uint instructionAddress;
     readonly bool[] erasedSegmentSeen = new bool[256];
+    int dataStates;
+    bool branchTaken;
 
     public C167Cpu(PhysicalBus bus, SfrFile sfrs, EventLog log, BranchTrace trace, ICpuHost host, Func<ulong> cycles)
     {
@@ -112,8 +114,10 @@ public sealed partial class C167Cpu
         if (Mode != CpuMode.Running)
             return 2;
         instructionAddress = Address;
+        dataStates = 0;
+        branchTaken = false;
         if (TryEnterPendingTrap() || TryServeInterrupt())
-            return FinishStep();
+            return FinishStep(Timing.EntryStates + dataStates);
 
         var w0 = Fetch(ip);
         if (w0 == 0xFFFF)
@@ -145,11 +149,11 @@ public sealed partial class C167Cpu
                 tfr |= TrapBit(trap.Kind);
         }
 
-        return FinishStep();
+        return FinishStep(Timing.MinStates(op, b1, branchTaken) + FetchStates(size) + dataStates);
     }
 
     /// <summary>A stack limit crossed during this step is entered now, unless a class A trap is in service.</summary>
-    int FinishStep()
+    int FinishStep(int states)
     {
         if (stackLimitHit)
         {
@@ -157,7 +161,16 @@ public sealed partial class C167Cpu
             if (inServiceA == 0 && (tfr & ClassAMask) != 0)
                 EnterTrap(HighestClassA(tfr), csp, ip);
         }
-        return 2;
+        return states;
+    }
+
+    /// <summary>ISM §7.2: +4/+6 states from internal RAM, else 1 ACT per instruction word.</summary>
+    int FetchStates(int size)
+    {
+        var region = bus.Decode(instructionAddress);
+        if (region is Region.Iram or Region.Sfr or Region.Esfr or Region.Reserved)
+            return size == 2 ? 4 : 6;
+        return size / 2 * bus.AccessStates(instructionAddress);
     }
 
     ushort Fetch(ushort at) => bus.Read16(((uint)csp << 16) | at, AccessKind.Fetch);

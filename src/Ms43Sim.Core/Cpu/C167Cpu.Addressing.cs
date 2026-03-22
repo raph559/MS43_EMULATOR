@@ -56,18 +56,25 @@ public sealed partial class C167Cpu
     ushort ReadWord(ushort logical)
     {
         CheckWordAlignment(logical);
-        return bus.Read16(DataAddress(logical));
+        return bus.Read16(Counted(DataAddress(logical)));
     }
 
     void WriteWord(ushort logical, ushort value)
     {
         CheckWordAlignment(logical);
-        bus.Write16(DataAddress(logical), value);
+        bus.Write16(Counted(DataAddress(logical)), value);
     }
 
-    byte ReadByte(ushort logical) => bus.Read8(DataAddress(logical));
+    byte ReadByte(ushort logical) => bus.Read8(Counted(DataAddress(logical)));
 
-    void WriteByte(ushort logical, byte value) => bus.Write8(DataAddress(logical), value);
+    void WriteByte(ushort logical, byte value) => bus.Write8(Counted(DataAddress(logical)), value);
+
+    /// <summary>Adds the bus states of one data access (ISM §7.3: 1 ACT for an external operand).</summary>
+    uint Counted(uint physical)
+    {
+        dataStates += bus.AccessStates(physical);
+        return physical;
+    }
 
     /// <summary>Word operands at odd addresses are not executed (ISM §6.2): ILLOPA, pushed IP = the next instruction.</summary>
     void CheckWordAlignment(ushort logical)

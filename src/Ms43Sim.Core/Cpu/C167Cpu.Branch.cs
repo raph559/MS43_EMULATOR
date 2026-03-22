@@ -9,6 +9,7 @@ public sealed partial class C167Cpu
         if ((target & 1) != 0)
             IllegalInstructionAccess(newCsp, target);
         trace.Add(new BranchRecord(cycles(), instructionAddress, ((uint)newCsp << 16) | target, kind));
+        branchTaken = true;
         csp = newCsp;
         ip = target;
     }
