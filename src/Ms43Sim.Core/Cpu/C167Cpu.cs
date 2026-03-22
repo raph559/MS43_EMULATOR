@@ -84,6 +84,8 @@ public sealed partial class C167Cpu
         instructionAddress = 0;
         Array.Clear(erasedSegmentSeen);
         ResetExtend();
+        inServiceA = inServiceB = 0;
+        stackLimitHit = false;
     }
 
     /// <summary>Places the CPU at CSP:IP (tests only).</summary>
@@ -94,10 +96,18 @@ public sealed partial class C167Cpu
         instructionAddress = Address;
     }
 
-    /// <summary>Executes one instruction and returns the states it took.</summary>
+    /// <summary>
+    /// One step (plan Task 8, "What one Step() does"): enter a pending trap, or else execute one
+    /// instruction, entering its trap within the same step if it faults. Returns the states.
+    /// </summary>
     public int Step()
     {
+        if (Mode != CpuMode.Running)
+            return 2;
         instructionAddress = Address;
+        if (TryEnterPendingTrap())
+            return 2;
+
         var w0 = Fetch(ip);
         if (w0 == 0xFFFF)
             NoteErasedFlash();
@@ -106,7 +116,34 @@ public sealed partial class C167Cpu
         var size = OpcodeTable.Size(op, b1);
         var w1 = size == 4 ? Fetch((ushort)(ip + 2)) : (ushort)0;
         ip = (ushort)(ip + size);
-        Execute(op, b1, w1);
+
+        var pswBefore = psw;
+        var extendBefore = extendCount;
+        extendJustSet = false;
+        try
+        {
+            Execute(op, b1, w1);
+            if (!extendJustSet && extendBefore > 0 && --extendCount == 0)
+                ResetExtend();
+        }
+        catch (TrapException trap)
+        {
+            // The faulting instruction is not executed: its flag updates are undone.
+            if (trap.Kind != TrapKind.IllegalInstructionAccess)
+                psw = pswBefore;
+            var classA = trap.Kind is TrapKind.Nmi or TrapKind.StackOverflow or TrapKind.StackUnderflow;
+            if (inServiceA == 0 && (classA || inServiceB == 0))
+                EnterTrap(trap.Kind, trap.PushedCsp, trap.PushedIp);
+            else
+                tfr |= TrapBit(trap.Kind);
+        }
+
+        if (stackLimitHit)
+        {
+            stackLimitHit = false;
+            if (inServiceA == 0 && (tfr & ClassAMask) != 0)
+                EnterTrap(HighestClassA(tfr), csp, ip);
+        }
         return 2;
     }
 
@@ -170,6 +207,24 @@ public sealed partial class C167Cpu
             case 0xAC: case 0xBC:
                 ExecuteShift(op, b1);
                 return;
+            case 0xCA: case 0xAB: case 0xBB: case 0xDA: case 0xE2: case 0xCB: case 0xDB: case 0xEB: case 0xFB:
+                ExecuteCallReturn(op, b1, w1);
+                return;
+            case 0xEC: case 0xFC: case 0xC6: case 0xD6:
+                ExecuteStack(op, b1, w1);
+                return;
+            case 0x9B:
+                ExecuteTrapInstruction(b1);
+                return;
+            case 0xA7: case 0xA5: case 0xB5: case 0xB7: case 0x87: case 0x97:
+                ExecuteProtected(op, b1, w1);
+                return;
+            case 0xD1 when !OpcodeTable.IsUndefined(op, b1):
+                ExecuteAtomicExtr(b1);
+                return;
+            case 0xD7: case 0xDC:
+                ExecuteExtend(op, b1, w1);
+                return;
             case 0x8A: case 0x9A: case 0xAA: case 0xBA:
                 ExecuteJumpOnBit(op, b1, w1);
                 return;
@@ -188,9 +243,9 @@ public sealed partial class C167Cpu
                 ExecuteMoveExtend(op, b1, w1);
                 return;
             default:
-                throw new NotImplementedException(OpcodeTable.IsUndefined(op, b1)
-                    ? $"undefined opcode {op:X2}h (UNDOPC arrives in Task 11)"
-                    : $"opcode {op:X2}h ({OpcodeTable.Mnemonic(op, b1)})");
+                if (OpcodeTable.IsUndefined(op, b1))
+                    throw new TrapException(TrapKind.UndefinedOpcode, (byte)(instructionAddress >> 16), (ushort)instructionAddress);
+                throw new NotImplementedException($"opcode {op:X2}h ({OpcodeTable.Mnemonic(op, b1)})");
         }
     }
 
@@ -285,11 +340,18 @@ public sealed partial class C167Cpu
         sfrs.Register(0xFFAC, "cpu", () => tfr, v => tfr = v, () => tfr);
     }
 
+    /// <summary>SYSCON cannot be changed after EINIT (UM §4); BUSCONx and ADDRSELx stay writable.</summary>
     void WriteSyscon(ushort value)
     {
+        if (InitDone)
+        {
+            log.Add((c, pc) => new ConfigLockedWriteEvent(c, pc, 0xFF12, value));
+            return;
+        }
         syscon = value;
         bus.XperipheralsEnabled = (value & 0x0004) != 0;   // XPEN
     }
 
-    void WriteSp(ushort value) => sp = value;
+    /// <summary>An explicit write to SP is checked against STKOV/STKUN like a push or pop.</summary>
+    void WriteSp(ushort value) => ChangeSp(value);
 }

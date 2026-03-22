@@ -15,6 +15,7 @@ public sealed partial class C167Cpu
         extendKind = ExtendKind.None;
         extendValue = 0;
         extrActive = false;
+        extendCount = 0;
     }
 
     /// <summary>Short 'reg' (00-EF: SFR, or ESFR under EXTR; F0-FF: GPR) — physical SFR address.</summary>
@@ -68,10 +69,10 @@ public sealed partial class C167Cpu
 
     void WriteByte(ushort logical, byte value) => bus.Write8(DataAddress(logical), value);
 
-    /// <summary>Word operands at odd addresses are not executed (ISM §6.2): Task 11 makes this the ILLOPA trap.</summary>
+    /// <summary>Word operands at odd addresses are not executed (ISM §6.2): ILLOPA, pushed IP = the next instruction.</summary>
     void CheckWordAlignment(ushort logical)
     {
         if ((logical & 1) != 0)
-            throw new NotImplementedException("odd word operand (ILLOPA arrives in Task 11)");
+            throw new TrapException(TrapKind.IllegalOperandAccess, csp, ip);
     }
 }
