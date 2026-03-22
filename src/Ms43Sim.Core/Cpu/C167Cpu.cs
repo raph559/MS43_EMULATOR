@@ -105,8 +105,8 @@ public sealed partial class C167Cpu
         if (Mode != CpuMode.Running)
             return 2;
         instructionAddress = Address;
-        if (TryEnterPendingTrap())
-            return 2;
+        if (TryEnterPendingTrap() || TryServeInterrupt())
+            return FinishStep();
 
         var w0 = Fetch(ip);
         if (w0 == 0xFFFF)
@@ -138,6 +138,12 @@ public sealed partial class C167Cpu
                 tfr |= TrapBit(trap.Kind);
         }
 
+        return FinishStep();
+    }
+
+    /// <summary>A stack limit crossed during this step is entered now, unless a class A trap is in service.</summary>
+    int FinishStep()
+    {
         if (stackLimitHit)
         {
             stackLimitHit = false;
@@ -224,6 +230,8 @@ public sealed partial class C167Cpu
                 return;
             case 0xD7: case 0xDC:
                 ExecuteExtend(op, b1, w1);
+                return;
+            case 0xCC:  // NOP
                 return;
             case 0x8A: case 0x9A: case 0xAA: case 0xBA:
                 ExecuteJumpOnBit(op, b1, w1);

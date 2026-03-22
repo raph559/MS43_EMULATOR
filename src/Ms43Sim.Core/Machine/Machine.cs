@@ -24,6 +24,8 @@ public sealed partial class Machine : ICpuHost
         Sfrs.ResetAll();
         Bus = new PhysicalBus(image.Image, options.ExternalRamBytes, Sfrs, Inventory, Events, options.UnmodelledReadValue);
         Cpu = new C167Cpu(Bus, Sfrs, Events, Branches, this, () => Cycles);
+        Interrupts = new InterruptController(Sfrs, Bus);
+        Cpu.Interrupts = Interrupts;
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
     }
@@ -40,6 +42,7 @@ public sealed partial class Machine : ICpuHost
     public AccessInventory Inventory { get; }
     public BranchTrace Branches { get; }
     public C167Cpu Cpu { get; }
+    public InterruptController Interrupts { get; }
 
     public ulong Cycles => Scheduler.Now;
     public ulong Instructions { get; private set; }
@@ -54,6 +57,7 @@ public sealed partial class Machine : ICpuHost
         Sfrs.ResetAll();
         Bus.ChipSelects.Recompute();
         Cpu.Reset();
+        Interrupts.Reset();
     }
 
     /// <summary>Calls <paramref name="hook"/> each time the CPU is about to execute at <paramref name="cpuAddress"/>.</summary>
