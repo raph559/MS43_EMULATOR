@@ -1,4 +1,5 @@
 bin/
 obj/
-refs/
-runs/
+# anchored: an unanchored "runs/" also matched src/Ms43Sim.Core/Runs/ (core.ignorecase)
+/refs/
+/runs/
