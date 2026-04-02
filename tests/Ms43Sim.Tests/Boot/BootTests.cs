@@ -58,6 +58,19 @@ public class BootTests
         Assert.Contains(r.Events.OfType<TrapEvent>(), e => e.Kind == TrapKind.IllegalInstructionAccess && e.PushedIp == 0x366B);
     }
 
+    [Fact] public void EndlessTraps_AreCountedPastTheLogCap_AndTheReportSaysHowMany()
+    {
+        var b = new byte[0x80000];
+        b[0x00] = 0x8B;                                               // 00:0000: undefined opcode
+        b[0x28] = 0xFB; b[0x29] = 0x88;                               // class B vector: RETI with TFR still set
+        var r = BootRun.Run(FlashImageBuilder.Raw(FirmwareImage.FromBytes(b)), new(MaxCycles: 500_000));
+        Assert.True(r.CountOf<TrapEvent>() > EventLog.TrapAndResetCapacity, $"{r.CountOf<TrapEvent>()} traps");
+        Assert.Equal(EventLog.TrapAndResetCapacity, r.Events.Count(e => e is TrapEvent or ResetEvent));
+        var md = BootReportWriter.Report(r);
+        Assert.Contains($"Traps: {r.CountOf<TrapEvent>():N0}", md);
+        Assert.Contains($"events not kept because the log was full: {r.EventsDropped:N0}", md);
+    }
+
     [Fact] public void UnknownBootBlock_SkipsCheckpoints_WithoutThrowing()
     {
         var b = new byte[0x80000];                                    // all zero: 0000 = ADD R0,R0 forever

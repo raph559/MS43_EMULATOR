@@ -18,12 +18,18 @@ public sealed record BootResult(
     int SoftwareResets,
     int SrvwdtCount,
     IReadOnlyList<SimEvent> Events,
+    IReadOnlyDictionary<Type, long> EventCounts,
+    long EventsDropped,
     IReadOnlyList<AccessRecord> Inventory,
     IReadOnlyList<BranchRecord> LastBranches,
     ulong Cycles,
     ulong Instructions,
     string StateHash,
-    IReadOnlyList<string> Assumptions);
+    IReadOnlyList<string> Assumptions)
+{
+    /// <summary>Events of type T the run raised, including those the log did not keep.</summary>
+    public long CountOf<T>() where T : SimEvent => EventCounts.GetValueOrDefault(typeof(T));
+}
 
 /// <summary>
 /// Runs an image from power-on and watches the MS43 boot block (`MS43000624141549`, shared by
@@ -76,7 +82,7 @@ public static class BootRun
 
         var events = machine.Events.All.ToList();
         var outcome = resets >= 2 ? BootOutcome.ResetLoop
-            : events.OfType<TrapEvent>().Any() ? BootOutcome.Trapped
+            : machine.Events.CountOf<TrapEvent>() > 0 ? BootOutcome.Trapped
             : handedOver ? BootOutcome.HandedOver
             : machine.Watchdog.ServiceCount > 0 ? BootOutcome.StayedInBoot
             : BootOutcome.NoProgress;
@@ -84,7 +90,8 @@ public static class BootRun
         return new BootResult(
             image, outcome, passes.Select(p => p.Build()).ToList(), target, recognised,
             machine.WatchdogResets, machine.SoftwareResets, machine.Watchdog.ServiceCount,
-            events, machine.Inventory.Records, machine.Branches.Last(),
+            events, new Dictionary<Type, long>(machine.Events.Counts), machine.Events.Dropped,
+            machine.Inventory.Records, machine.Branches.Last(),
             machine.Cycles, machine.Instructions, machine.StateHash(),
             Assumptions(machineOptions, recognised));
     }

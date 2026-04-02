@@ -18,7 +18,8 @@ public static class BootReportWriter
 
     public static string Cpu(uint address) => $"{address >> 16:X2}:{address & 0xFFFF:X4}";
 
-    static string Report(BootResult r)
+    /// <summary>The text of boot-report.md.</summary>
+    public static string Report(BootResult r)
     {
         var s = new StringBuilder();
         s.AppendLine("# Boot report").AppendLine();
@@ -42,6 +43,7 @@ public static class BootReportWriter
         s.AppendLine($"- Handover target: {Cpu(r.HandoverTarget)}");
         s.AppendLine($"- Boot checkpoints recognised: {(r.CheckpointsRecognised ? "yes" : "no")}");
         s.AppendLine($"- Watchdog resets: {r.WatchdogResets}; software resets: {r.SoftwareResets}; SRVWDT executed: {r.SrvwdtCount:N0}");
+        s.AppendLine($"- Traps: {r.CountOf<TrapEvent>():N0}; events not kept because the log was full: {r.EventsDropped:N0}");
         s.AppendLine();
 
         s.AppendLine("## Boot passes").AppendLine();
@@ -54,11 +56,12 @@ public static class BootReportWriter
         }
         s.AppendLine();
 
-        var traps = r.Events.OfType<TrapEvent>().ToList();
+        var trapsAndResets = r.Events.Where(e => e is TrapEvent or ResetEvent).ToList();
         s.AppendLine("## Resets and traps").AppendLine();
-        if (traps.Count == 0 && r.WatchdogResets + r.SoftwareResets == 0)
+        if (trapsAndResets.Count == 0)
             s.AppendLine("None.");
-        foreach (var e in r.Events.Where(e => e is TrapEvent or ResetEvent))
+        Truncated(s, trapsAndResets.Count, r.CountOf<TrapEvent>() + r.CountOf<ResetEvent>());
+        foreach (var e in trapsAndResets)
         {
             s.AppendLine(e switch
             {
@@ -71,19 +74,26 @@ public static class BootReportWriter
 
         s.AppendLine("## Erased-flash execution").AppendLine();
         var erased = r.Events.OfType<ErasedFlashExecutionEvent>().ToList();
-        s.AppendLine(erased.Count == 0 ? "None." : string.Join(Environment.NewLine,
-            erased.Select(e => $"- cycle {e.Cycle:N0}: the CPU fetched FFFFh (erased flash) at {Cpu(e.Pc)}")));
+        if (erased.Count == 0)
+            s.AppendLine("None.");
+        Truncated(s, erased.Count, r.CountOf<ErasedFlashExecutionEvent>());
+        foreach (var e in erased)
+            s.AppendLine($"- cycle {e.Cycle:N0}: the CPU fetched FFFFh (erased flash) at {Cpu(e.Pc)}");
         s.AppendLine();
 
         s.AppendLine("## Flash writes").AppendLine();
-        var writes = r.Events.OfType<FlashWriteEvent>().ToList();
-        s.AppendLine(writes.Count == 0 ? "None." : $"{writes.Count} write(s); first: {Cpu(writes[0].Pc)} wrote {writes[0].Value:X4}h to 0x{writes[0].Address:X6}.");
+        var writeCount = r.CountOf<FlashWriteEvent>();
+        var firstWrite = r.Events.OfType<FlashWriteEvent>().FirstOrDefault();
+        s.AppendLine(writeCount == 0 ? "None."
+            : $"{writeCount:N0} write(s)" + (firstWrite is { } w ? $"; first: {Cpu(w.Pc)} wrote {w.Value:X4}h to 0x{w.Address:X6}." : "."));
         s.AppendLine();
 
         var other = r.Events.Where(e => e is UnsupportedEvent or ConfigLockedWriteEvent).ToList();
-        if (other.Count > 0)
+        var otherCount = r.CountOf<UnsupportedEvent>() + r.CountOf<ConfigLockedWriteEvent>();
+        if (otherCount > 0)
         {
             s.AppendLine("## Other events").AppendLine();
+            Truncated(s, other.Count, otherCount);
             foreach (var e in other)
                 s.AppendLine(e switch
                 {
@@ -124,4 +134,11 @@ public static class BootReportWriter
     }
 
     static string Hex4(ushort? value) => value is { } v ? v.ToString("X4") + "h" : "—";
+
+    /// <summary>Says so when the event log kept only part of a list (EventLog caps).</summary>
+    static void Truncated(StringBuilder s, int listed, long total)
+    {
+        if (listed < total)
+            s.AppendLine($"The log kept the first {listed:N0} of {total:N0}; the rest are counted only.").AppendLine();
+    }
 }

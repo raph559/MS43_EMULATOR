@@ -98,7 +98,7 @@ public static class Program
 
         output.WriteLine($"outcome: {result.Outcome}");
         output.WriteLine($"handover target {BootReportWriter.Cpu(result.HandoverTarget)}; boot passes: {result.Passes.Count}; " +
-                         $"watchdog resets: {result.WatchdogResets}; traps: {result.Events.OfType<TrapEvent>().Count()}");
+                         $"watchdog resets: {result.WatchdogResets}; traps: {result.CountOf<TrapEvent>()}");
         output.WriteLine($"report: {Path.Combine(outDir, "boot-report.md")}");
         var seconds = clock.Elapsed.TotalSeconds;
         output.WriteLine($"ran {result.Instructions:N0} instructions, {result.Cycles:N0} cycles in {seconds:0.00} s " +
