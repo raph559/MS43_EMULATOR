@@ -74,7 +74,9 @@ Each is also listed in every boot report.
 - **EINIT clears SWR/SHWR/LHWR but not WDTR.** The boot reads WDTR after its EINIT.
 - **Watchdog-reset flags:** a watchdog reset sets only WDTR, SRST only SWR, and power-on none.
 - **Traps:**
-  - a trap ends any EXT*/ATOMIC range;
+  - class A traps wait for the end of an EXT*/ATOMIC range and a class B trap ends it (UM
+    §21.8); the rest of the range then runs without the lock or the override;
+  - EXT*/ATOMIC work even while a class B flag is pending (UM §21.8 says they do not);
   - a faulting instruction's flag updates are undone;
   - stack-limit traps push the IP after the instruction that moved SP.
 - **Interrupt, PEC and trap entries** cost 4 states. The second-order timing effects of ISM

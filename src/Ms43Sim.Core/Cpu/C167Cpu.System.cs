@@ -155,12 +155,16 @@ public sealed partial class C167Cpu
         : (flags & 0x0002) != 0 ? TrapKind.IllegalInstructionAccess
         : TrapKind.IllegalBusAccess;
 
-    /// <summary>A trap whose flag is still (or newly) set, entered at an instruction boundary as its own step.</summary>
+    /// <summary>
+    /// A trap whose flag is still (or newly) set, entered at an instruction boundary as its own step.
+    /// Class A waits for the end of an ATOMIC/EXT* range; class B does not, and its entry ends the
+    /// range (UM §21.8, ISM p. 39).
+    /// </summary>
     bool TryEnterPendingTrap()
     {
         if (tfr == 0)
             return false;
-        if ((tfr & ClassAMask) != 0 && inServiceA == 0)
+        if ((tfr & ClassAMask) != 0 && inServiceA == 0 && !InterruptsLocked)
         {
             EnterTrap(HighestClassA(tfr), csp, ip);
             return true;
@@ -176,7 +180,8 @@ public sealed partial class C167Cpu
     /// <summary>
     /// Push PSW, CSP (unless SGTDIS) and the given IP; ILVL = 15; CSP = 0; IP = vector. The
     /// in-service counter goes up before the pushes, so a stack overflow caused by the entry
-    /// itself only sets its flag. [assumption] A trap ends any EXT* range.
+    /// itself only sets its flag. A class B trap ends any ATOMIC/EXT* range (UM §21.8); class A
+    /// traps are only entered outside one.
     /// </summary>
     void EnterTrap(TrapKind kind, byte pushedCsp, ushort pushedIp)
     {

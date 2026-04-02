@@ -152,13 +152,16 @@ public sealed partial class C167Cpu
         return FinishStep(Timing.MinStates(op, b1, branchTaken) + FetchStates(size) + dataStates);
     }
 
-    /// <summary>A stack limit crossed during this step is entered now, unless a class A trap is in service.</summary>
+    /// <summary>
+    /// A stack limit crossed during this step is entered now, unless a class A trap is in service
+    /// or an ATOMIC/EXT* range is still open (then it stays pending in TFR).
+    /// </summary>
     int FinishStep(int states)
     {
         if (stackLimitHit)
         {
             stackLimitHit = false;
-            if (inServiceA == 0 && (tfr & ClassAMask) != 0)
+            if (inServiceA == 0 && !InterruptsLocked && (tfr & ClassAMask) != 0)
                 EnterTrap(HighestClassA(tfr), csp, ip);
         }
         return states;
