@@ -9,47 +9,74 @@ public sealed partial class C167Cpu
 
     enum ShiftOp { Rol, Ror, Shl, Shr, Ashr }
 
-    /// <summary>Rows 0-7, columns 0-9: the eight operations in every addressing form.</summary>
+    /// <summary>
+    /// Rows 0-7, columns 0-9: the eight operations in every addressing form. op1 is read once,
+    /// and CMP stores nothing: on an SFR a write-back would have side effects (ISM: CMP is
+    /// (op1) - (op2) with no destination).
+    /// </summary>
     void ExecuteArithmetic(byte op, byte b1, ushort w1)
     {
         var operation = (AluOp)(op >> 4);
+        var store = operation != AluOp.Cmp;
         var lo = op & 0xF;
         var isByte = (lo & 1) != 0;
         int n = b1 >> 4, m = b1 & 0xF;
         switch (lo)
         {
             case 0:  // Rn, Rm
-                SetR(n, Alu(operation, R(n), R(m), false, R(n)));
+            {
+                var r = Alu(operation, R(n), R(m), false);
+                if (store) SetR(n, r);
                 return;
+            }
             case 1:  // Rbn, Rbm
-                SetRb(n, (byte)Alu(operation, Rb(n), Rb(m), true, Rb(n)));
+            {
+                var r = Alu(operation, Rb(n), Rb(m), true);
+                if (store) SetRb(n, (byte)r);
                 return;
+            }
             case 2:  // reg, mem
-                WriteReg(b1, Alu(operation, ReadReg(b1), ReadWord(w1), false, ReadReg(b1)));
+            {
+                var a = ReadReg(b1);
+                var r = Alu(operation, a, ReadWord(w1), false);
+                if (store) WriteReg(b1, r);
                 return;
+            }
             case 3:
-                WriteRegByte(b1, (byte)Alu(operation, ReadRegByte(b1), ReadByte(w1), true, ReadRegByte(b1)));
+            {
+                var a = ReadRegByte(b1);
+                var r = Alu(operation, a, ReadByte(w1), true);
+                if (store) WriteRegByte(b1, (byte)r);
                 return;
-            case 4:  // mem, reg
+            }
+            case 4:  // mem, reg (44h/45h, CMP mem,reg, do not exist: they never get here)
             {
                 var a = ReadWord(w1);
-                var result = Alu(operation, a, ReadReg(b1), false, a);
-                if (operation != AluOp.Cmp) WriteWord(w1, result);
+                var r = Alu(operation, a, ReadReg(b1), false);
+                if (store) WriteWord(w1, r);
                 return;
             }
             case 5:
             {
                 var a = ReadByte(w1);
-                var result = (byte)Alu(operation, a, ReadRegByte(b1), true, a);
-                if (operation != AluOp.Cmp) WriteByte(w1, result);
+                var r = Alu(operation, a, ReadRegByte(b1), true);
+                if (store) WriteByte(w1, (byte)r);
                 return;
             }
             case 6:  // reg, #data16
-                WriteReg(b1, Alu(operation, ReadReg(b1), w1, false, ReadReg(b1)));
+            {
+                var a = ReadReg(b1);
+                var r = Alu(operation, a, w1, false);
+                if (store) WriteReg(b1, r);
                 return;
+            }
             case 7:  // reg, #data8
-                WriteRegByte(b1, (byte)Alu(operation, ReadRegByte(b1), (byte)w1, true, ReadRegByte(b1)));
+            {
+                var a = ReadRegByte(b1);
+                var r = Alu(operation, a, (byte)w1, true);
+                if (store) WriteRegByte(b1, (byte)r);
                 return;
+            }
             default: // 8/9: Rn, #data3 | [Ri] | [Ri+]
             {
                 ushort operand;
@@ -65,19 +92,22 @@ public sealed partial class C167Cpu
                         SetR(m & 3, (ushort)(pointer + (isByte ? 1 : 2)));
                 }
                 if (isByte)
-                    SetRb(n, (byte)Alu(operation, Rb(n), operand, true, Rb(n)));
+                {
+                    var r = Alu(operation, Rb(n), operand, true);
+                    if (store) SetRb(n, (byte)r);
+                }
                 else
-                    SetR(n, Alu(operation, R(n), operand, false, R(n)));
+                {
+                    var r = Alu(operation, R(n), operand, false);
+                    if (store) SetR(n, r);
+                }
                 return;
             }
         }
     }
 
-    /// <summary>
-    /// Computes op1 OP op2, sets the flags, and returns what the destination should hold
-    /// (op1 unchanged for CMP, so the caller can write it back without effect).
-    /// </summary>
-    ushort Alu(AluOp operation, ushort a, ushort b, bool isByte, ushort unchanged)
+    /// <summary>Computes op1 OP op2, sets the flags, and returns the result (the caller does not store it for CMP).</summary>
+    ushort Alu(AluOp operation, ushort a, ushort b, bool isByte)
     {
         uint mask = isByte ? 0xFFu : 0xFFFFu;
         uint msb = isByte ? 0x80u : 0x8000u;
@@ -114,7 +144,7 @@ public sealed partial class C167Cpu
         SetFlag(PswFlags.Z, r == 0 && (!sticky || Flag(PswFlags.Z)));
         SetFlag(PswFlags.E, b == msb);
         SetFlag(PswFlags.N, (r & msb) != 0);
-        return operation == AluOp.Cmp ? unchanged : (ushort)r;
+        return (ushort)r;
     }
 
     void LogicCarryOverflow()
@@ -162,21 +192,21 @@ public sealed partial class C167Cpu
             case 0x0:  // Rw(m), #data4(n)
             {
                 var reg = b1 & 0xF;
-                Alu(AluOp.Cmp, R(reg), (ushort)(b1 >> 4), false, 0);
+                Alu(AluOp.Cmp, R(reg), (ushort)(b1 >> 4), false);
                 SetR(reg, (ushort)(R(reg) + step));
                 return;
             }
             case 0x2:  // Rw, mem
             {
                 var a = ReadReg(b1);
-                Alu(AluOp.Cmp, a, ReadWord(w1), false, a);
+                Alu(AluOp.Cmp, a, ReadWord(w1), false);
                 WriteReg(b1, (ushort)(a + step));
                 return;
             }
             default:   // 0x6: Rw, #data16
             {
                 var a = ReadReg(b1);
-                Alu(AluOp.Cmp, a, w1, false, a);
+                Alu(AluOp.Cmp, a, w1, false);
                 WriteReg(b1, (ushort)(a + step));
                 return;
             }
