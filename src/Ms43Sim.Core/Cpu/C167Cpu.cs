@@ -185,6 +185,8 @@ public sealed partial class C167Cpu
 
     void Execute(byte op, byte b1, ushort w1)
     {
+        if (OpcodeTable.IsUndefined(op, b1))
+            throw new TrapException(TrapKind.UndefinedOpcode, (byte)(instructionAddress >> 16), (ushort)instructionAddress);
         var hi = op >> 4;
         var lo = op & 0xF;
         switch (lo)
@@ -245,7 +247,7 @@ public sealed partial class C167Cpu
             case 0xA7: case 0xA5: case 0xB5: case 0xB7: case 0x87: case 0x97:
                 ExecuteProtected(op, b1, w1);
                 return;
-            case 0xD1 when !OpcodeTable.IsUndefined(op, b1):
+            case 0xD1:
                 ExecuteAtomicExtr(b1);
                 return;
             case 0xD7: case 0xDC:
@@ -271,8 +273,6 @@ public sealed partial class C167Cpu
                 ExecuteMoveExtend(op, b1, w1);
                 return;
             default:
-                if (OpcodeTable.IsUndefined(op, b1))
-                    throw new TrapException(TrapKind.UndefinedOpcode, (byte)(instructionAddress >> 16), (ushort)instructionAddress);
                 throw new NotImplementedException($"opcode {op:X2}h ({OpcodeTable.Mnemonic(op, b1)})");
         }
     }

@@ -61,6 +61,10 @@ public class StackCallTrapTests
         Assert.Equal((TrapKind.UndefinedOpcode, 0x1000u),
             TestMachine.Create("8B00").Step().M.Events.All.OfType<TrapEvent>().Select(e => (e.Kind, e.PushedIp)).Single());
 
+    [Fact] public void CmpMemReg_IsNotAnInstruction_RaisesUndopc() =>   // ISM: CMP has no mem,reg form (44h/45h)
+        Assert.Equal((TrapKind.UndefinedOpcode, 0x1000u),
+            TestMachine.Create("44F100F8").Step().M.Events.All.OfType<TrapEvent>().Select(e => (e.Kind, e.PushedIp)).Single());
+
     [Fact] public void MalformedSrvwdt_IsProtectionFault() =>
         Assert.Equal((TrapKind.ProtectionFault, 0x1000u),
             TestMachine.Create("A758A7A6").Step().M.Events.All.OfType<TrapEvent>().Select(e => (e.Kind, e.PushedIp)).Single());

@@ -85,9 +85,14 @@ public static class OpcodeTable
         _ => mnemonic[op]!,
     };
 
-    /// <summary>True for opcodes the C167 does not define, including the reserved ATOMIC/EXTR sub-operations.</summary>
+    /// <summary>
+    /// True for opcodes the C167 does not define: the gaps of the table, the reserved ATOMIC/EXTR
+    /// sub-operations, and 44h/45h. tools/c167dis.py lists 44h/45h as "CMP mem,reg", but the ISM
+    /// has no such form (CMP stores nothing), so they keep that spelling in listings and raise
+    /// UNDOPC when executed.
+    /// </summary>
     public static bool IsUndefined(byte op, byte b1) =>
-        mnemonic[op] == null || (op == 0xD1 && (b1 >> 6) is 1 or 3);
+        mnemonic[op] == null || op is 0x44 or 0x45 || (op == 0xD1 && (b1 >> 6) is 1 or 3);
 
     static void Set(int op, string? name, int length)
     {
