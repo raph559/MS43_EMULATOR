@@ -35,11 +35,14 @@ public sealed record BootResult(
 /// Runs an image from power-on and watches the MS43 boot block (`MS43000624141549`, shared by
 /// the car, release and stock files). Checkpoints, CPU addresses in segment 0:
 /// 0x2E30 the register self-test passed; 0x2FA2 R15 is the RAM-test word; 0x2CE0 RL4 is the
-/// ID-check result. The handover target is CSP:IP from the words at 0x6ED08:0x6ED06.
+/// ID-check result. The handover target is CSP:IP from the words at 0x6ED08:0x6ED06. A target
+/// inside the boot block (00:0000-00:7FFF) is not watched: the boot's own code runs there, so
+/// the hook would fire without a handover (a zeroed pointer names the reset vector).
 /// </summary>
 public static class BootRun
 {
     const uint SelfTestPassed = 0x002E30, RamTestWord = 0x002FA2, IdCheck = 0x002CE0;
+    const uint BootBlockEnd = 0x008000;
 
     public static BootResult Run(FlashedImage image, BootRunOptions? options = null)
     {
@@ -62,11 +65,13 @@ public static class BootRun
             machine.OnInstruction(RamTestWord, m => passes[^1].RamTestWord ??= m.Cpu.R(15));
             machine.OnInstruction(IdCheck, m => passes[^1].IdCheck ??= (byte)m.Cpu.R(4));
         }
-        machine.OnInstruction(target, m =>
-        {
-            passes[^1].HandoverCycle ??= m.Cycles;
-            handedOver = true;
-        });
+        var targetInBoot = target < BootBlockEnd;
+        if (!targetInBoot)
+            machine.OnInstruction(target, m =>
+            {
+                passes[^1].HandoverCycle ??= m.Cycles;
+                handedOver = true;
+            });
 
         var resets = 0;
         machine.Run(options.MaxCycles, m =>
@@ -93,10 +98,10 @@ public static class BootRun
             events, new Dictionary<Type, long>(machine.Events.Counts), machine.Events.Dropped,
             machine.Inventory.Records, machine.Branches.Last(),
             machine.Cycles, machine.Instructions, machine.StateHash(),
-            Assumptions(machineOptions, recognised));
+            Assumptions(machineOptions, recognised, targetInBoot ? target : null));
     }
 
-    static IReadOnlyList<string> Assumptions(MachineOptions options, bool recognised)
+    static IReadOnlyList<string> Assumptions(MachineOptions options, bool recognised, uint? targetInBoot)
     {
         var list = new List<string>
         {
@@ -112,6 +117,8 @@ public static class BootRun
         };
         if (!recognised)
             list.Add("boot block not recognised: checkpoints skipped (the MS43 boot-block bytes are not at 0x2E30/0x2FA2/0x2CE0)");
+        if (targetInBoot is { } t)
+            list.Add($"handover target {BootReportWriter.Cpu(t)} lies inside the boot block (00:0000-00:7FFF), where the boot's own code runs: it is not watched, so no handover is reported");
         return list;
     }
 

@@ -58,6 +58,16 @@ public class BootTests
         Assert.Contains(r.Events.OfType<TrapEvent>(), e => e.Kind == TrapKind.IllegalInstructionAccess && e.PushedIp == 0x366B);
     }
 
+    [Fact] public void ZeroedHandoverPointer_IsNotReportedAsAHandover()
+    {
+        var b = Car.ToArray();
+        Array.Clear(b, 0x6ED06, 4);                                   // target 00:0000, the reset vector
+        var r = BootRun.Run(FlashImageBuilder.AsFlashedFull(FirmwareImage.FromBytes(b)), new(MaxCycles: 2_000_000));
+        Assert.NotEqual(BootOutcome.HandedOver, r.Outcome);
+        Assert.All(r.Passes, p => Assert.Null(p.HandoverCycle));
+        Assert.Contains(r.Assumptions, a => a.Contains("inside the boot block"));
+    }
+
     [Fact] public void EndlessTraps_AreCountedPastTheLogCap_AndTheReportSaysHowMany()
     {
         var b = new byte[0x80000];
