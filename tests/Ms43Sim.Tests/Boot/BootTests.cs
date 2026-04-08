@@ -89,6 +89,21 @@ public class BootTests
         Assert.Contains(r.Assumptions, a => a.Contains("checkpoints"));
     }
 
+    [Fact] public void Assumptions_ListEverySimplification()
+    {
+        var r = BootRun.Run(FlashImageBuilder.Raw(FirmwareImage.FromBytes(new byte[0x80000])), new(MaxCycles: 1_000));
+        var all = string.Join("\n", r.Assumptions);
+        var phrases = new[]
+        {
+            "00'F200-00'F5FF reads 0000h", "XRAM and the CAN module are external accesses of 2 states",
+            "RWDC and ALECTL", "MUL/DIV are not interruptible", "division: on V", "given as X or U",
+            "UM Table 13-2", "SYSCON cannot be written after EINIT", "class A traps wait for the end",
+            "class B trap flag is pending", "flag updates are undone", "stack-limit traps push the IP",
+            "STKSZ", "AM29F400", "ISM §7.3", "pipeline effects",
+        };
+        Assert.Empty(phrases.Where(p => !all.Contains(p)));
+    }
+
     [Fact] public void SameImage_SameResult()
     {
         var o = new BootRunOptions(MaxCycles: 2_000_000, StopAtFirstHandover: true);
