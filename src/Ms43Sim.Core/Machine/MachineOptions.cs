@@ -13,4 +13,7 @@ public sealed record MachineOptions
     public ushort UnmodelledReadValue { get; init; } = 0xFFFF;
 
     public int BranchTraceDepth { get; init; } = 64;
+
+    /// <summary>What the car puts on the ECU's inputs; by default key on, engine stopped.</summary>
+    public BoardInputs Inputs { get; init; } = BoardInputs.KeyOnEngineStopped;
 }

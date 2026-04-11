@@ -15,11 +15,11 @@ public class SfrOperandTests
 
     [Fact] public void AluOnUnmodelledSfr_ReadsOnce_AndCmpNeverWrites()
     {
-        var t = TestMachine.Create("46E00000 06E00100");                  // CMP P2,#0 ; ADD P2,#1
+        var t = TestMachine.Create("46800000 06800100");                  // CMP P0L,#0 ; ADD P0L,#1
         t.Step(2);
-        var p2 = t.M.Inventory.Records.Where(r => r.Address == 0xFFC0).ToList();
-        Assert.Equal(2, p2.Single(r => r.Kind == AccessKind.Read).Count);  // one read per instruction
-        Assert.Equal(1, p2.Single(r => r.Kind == AccessKind.Write).Count); // only the ADD writes
+        var p0l = t.M.Inventory.Records.Where(r => r.Address == 0xFF00).ToList();
+        Assert.Equal(2, p0l.Single(r => r.Kind == AccessKind.Read).Count);  // one read per instruction
+        Assert.Equal(1, p0l.Single(r => r.Kind == AccessKind.Write).Count); // only the ADD writes
     }
 
     [Fact] public void CmpPollOnTimer_DoesNotRestartTheTimer()
