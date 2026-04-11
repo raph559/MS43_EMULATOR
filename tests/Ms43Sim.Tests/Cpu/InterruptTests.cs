@@ -84,6 +84,17 @@ public class PecTests
         Assert.Equal((0x0000, 0x00A0), (t.Sfr(0xFEC0), t.Cpu.IP));
     }
 
+    [Fact] public void TransferThatRaisesTheSameRequest_KeepsItPending()
+    {
+        // The PEC acknowledges the request before it moves the data, so a request the transfer
+        // itself raises (a write to SSCTB sets SSCTIR) is not lost. Here the transfer writes
+        // F8h (IR|IE|ILVL14) into ADCIC.
+        var t = TestMachine.Create("CC00 CC00").WriteSfr(0xFEC0, 0x0002)        // word, no INC, COUNT=2
+            .Poke16(0xFCE0, 0xF900).Poke16(0xFCE2, 0xFF98).Poke16(0xF900, 0x00F8).WriteSfr(0xFF98, 0x00F8);
+        t.Psw = 0x0800; t.Step();
+        Assert.Equal((0x00F8, 0x0001), (t.Sfr(0xFF98), t.Sfr(0xFEC0)));
+    }
+
     [Fact] public void ByteTransfer_IncrementsSource()
     {
         var t = TestMachine.Create("CC00 CC00").WriteSfr(0xFEC0, 0x0502)        // INC=10, BWT=1, COUNT=2

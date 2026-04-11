@@ -75,7 +75,9 @@ public sealed partial class C167Cpu
     /// One PEC transfer (UM §5.2): byte or word between two segment-0 addresses held in IRAM at
     /// FCE0+4x (source) and FCE2+4x (destination), no DPPs. COUNT: FF continuous; 02-FE count
     /// down and clear IR; 01 → 00 and IR stays set, so the interrupt follows. A word transfer
-    /// with an odd pointer raises ILLOPA instead (returns false).
+    /// with an odd pointer raises ILLOPA instead (returns false). The request is acknowledged
+    /// before the data moves, so a request the move itself raises (a write to SSCTB sets
+    /// SSCTIR) stays pending.
     /// </summary>
     bool PecTransfer(InterruptController irq, int index, int channel, ushort pecc)
     {
@@ -87,34 +89,29 @@ public sealed partial class C167Cpu
         var increment = (pecc >> 9) & 3;
         if (increment == 3)
             increment = 2;   // the reserved '11' is changed to '10' by hardware
+        var count = pecc & 0xFF;
+        if (count != 0xFF)
+            count--;
 
         dataStates += bus.AccessStates(source) + bus.AccessStates(destination);
+        if (!isByte && ((source | destination) & 1) != 0)
+        {
+            EnterTrap(TrapKind.IllegalOperandAccess, csp, ip);
+            return false;
+        }
+        if (count != 0)
+            irq.ClearRequest(index);
         if (isByte)
-        {
             bus.Write8(destination, bus.Read8(source));
-        }
         else
-        {
-            if (((source | destination) & 1) != 0)
-            {
-                EnterTrap(TrapKind.IllegalOperandAccess, csp, ip);
-                return false;
-            }
             bus.Write16(destination, bus.Read16(source));
-        }
 
         var step = (ushort)(isByte ? 1 : 2);
         if (increment == 1)
             WriteIramWord(destinationPointer, (ushort)(destination + step));
         else if (increment == 2)
             WriteIramWord(sourcePointer, (ushort)(source + step));
-
-        var count = pecc & 0xFF;
-        if (count != 0xFF)
-            count--;
         sfrs.Poke(PeccBase + 2u * (uint)channel, (ushort)((pecc & 0xFF00 & ~0x0600) | (increment << 9) | count));
-        if (count != 0)
-            irq.ClearRequest(index);
         return true;
     }
 }

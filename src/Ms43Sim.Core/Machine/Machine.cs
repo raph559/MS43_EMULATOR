@@ -6,7 +6,7 @@ public enum StopReason { CycleBudget, StopCondition, PowerDown }
 
 /// <summary>
 /// One emulated MS43: the bus, the SFR file, the CPU with its interrupt controller, the
-/// watchdog, CAPCOM timers and ports, the board, the scheduler and the diagnostics.
+/// watchdog, CAPCOM timers, ports and SSC, the board, the scheduler and the diagnostics.
 /// </summary>
 public sealed partial class Machine : ICpuHost
 {
@@ -32,6 +32,7 @@ public sealed partial class Machine : ICpuHost
         Ports = new Ports(Sfrs, Board);
         Board.DigitalInputChanged += Ports.InputChanged;
         Bus.AttachDevice(3, Board.Latch);
+        Ssc = new Ssc(Scheduler, Sfrs, Interrupts, Events, Board.Spi);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
     }
@@ -53,6 +54,7 @@ public sealed partial class Machine : ICpuHost
     public CapcomTimers Capcom { get; }
     public Board Board { get; }
     public Ports Ports { get; }
+    public Ssc Ssc { get; }
 
     public int WatchdogResets { get; private set; }
     public int SoftwareResets { get; private set; }
@@ -79,6 +81,7 @@ public sealed partial class Machine : ICpuHost
         Watchdog.OnReset(ResetKind.PowerOn);
         Capcom.OnReset();
         Ports.OnReset();
+        Ssc.OnReset();
         Board.Latch.PowerOn();
     }
 
@@ -101,6 +104,7 @@ public sealed partial class Machine : ICpuHost
         Watchdog.OnReset(kind);
         Capcom.OnReset();
         Ports.OnReset();
+        Ssc.OnReset();
     }
 
     /// <summary>Calls <paramref name="hook"/> each time the CPU is about to execute at <paramref name="cpuAddress"/>.</summary>

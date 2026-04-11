@@ -1,8 +1,8 @@
 namespace Ms43Sim.Core;
 
 /// <summary>
-/// The ECU board around the C167CR: it puts <see cref="BoardInputs"/> on the pins and holds the
-/// output latch on CS3. Later tasks add the devices on the SSC.
+/// The ECU board around the C167CR: it puts <see cref="BoardInputs"/> on the pins, holds the
+/// output latch on CS3 and the SSC lines. Later tasks add the devices on the SSC.
 /// </summary>
 public sealed class Board : IPinEnvironment
 {
@@ -22,10 +22,14 @@ public sealed class Board : IPinEnvironment
     /// <summary>The write-only latch on CS3: chip selects, multiplexer select, main-relay hold.</summary>
     public OutputLatch Latch { get; }
 
+    /// <summary>The SSC lines and the slaves on them.</summary>
+    public SscBus Spi { get; } = new();
+
     /// <summary>(port, bit) of each input whose level changed through <see cref="SetInputs"/>.</summary>
     public event Action<int, int>? DigitalInputChanged;
 
-    public bool InputLevel(int port, int bit) => LevelIn(Inputs, port, bit);
+    /// <summary>P3.8 is MRST: the firmware reads it as the EEPROM's ready line [obs].</summary>
+    public bool InputLevel(int port, int bit) => port == 3 && bit == 8 ? Spi.MrstLevel : LevelIn(Inputs, port, bit);
 
     public void SetInputs(BoardInputs inputs)
     {
