@@ -95,10 +95,12 @@ is not watched because the boot's own code runs there.
   - signed division truncates toward zero, and the remainder takes the dividend's sign;
   - DIV −32768/−1 gives MDL = 8000h without V (the ISM sets V only for a zero divisor).
 - Traps:
-  - class A traps wait for the end of an EXT*/ATOMIC range and a class B trap ends it (UM
-    §21.8); the rest of the range then runs without the lock or the override;
+  - class A traps wait for the end of an EXT*/ATOMIC range and a class B trap ends it; the
+    rest of the range then runs without the lock or the override (UM §21.8, ISM p. 39);
   - EXT*/ATOMIC work even while a class B flag is pending (UM §21.8 says they do not);
-  - an ATOMIC or EXT* inside a running range replaces it;
+  - an ATOMIC or EXT* inside a running range reloads the single counter (ISM p. 39) and
+    replaces the override, so an ATOMIC inside an EXTP range ends the page override (the ISM
+    does not say; the car's code nests only ATOMIC → EXTP/EXTR and EXTR → EXTR);
   - a faulting instruction's flag updates are undone;
   - stack-limit traps push the IP of the instruction after the one that moved SP (UM).
 - Stack limits:

@@ -239,6 +239,10 @@ public sealed partial class C167Cpu
         BeginExtend(page ? ExtendKind.Page : ExtendKind.Segment, value, extr: sub >= 2, range: ((b1 >> 4) & 3) + 1);
     }
 
+    /// <summary>
+    /// One counter for every ATOMIC/EXT* sequence: a new one inside a running range reloads it
+    /// (ISM p. 39) and also replaces the override [assumption: the ISM does not say].
+    /// </summary>
     void BeginExtend(ExtendKind kind, uint value, bool extr, int range)
     {
         extendKind = kind;

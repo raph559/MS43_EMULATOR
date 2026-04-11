@@ -125,9 +125,9 @@ public static class BootRun
             // CPU
             "MUL/DIV are not interruptible: MULIP stays 0 and a pending interrupt waits for the instruction to end (the ISM says they are interruptible) [assumption]",
             "division: on V (a zero divisor, or a DIVL/DIVLU quotient too large for a word) MDH and MDL keep their old values; signed division truncates toward zero and the remainder takes the dividend's sign; DIV -32768/-1 gives MDL = 8000h without V (the ISM sets V only for a zero divisor) [assumption]",
-            "class A traps wait for the end of an ATOMIC/EXT* range and a class B trap ends it (UM §21.8); the rest of the range then runs without the lock or the override [assumption]",
+            "class A traps wait for the end of an ATOMIC/EXT* range and a class B trap ends it; the rest of the range then runs without the lock or the override (UM §21.8, ISM p. 39)",
             "ATOMIC/EXT* still lock and override while a class B trap flag is pending (UM §21.8: they then do not work)",
-            "an ATOMIC or EXT* inside a running range replaces it, so an ATOMIC inside an EXTP range ends the page override [assumption: the ISM is ambiguous]",
+            "an ATOMIC or EXT* inside a running range reloads the single counter (ISM p. 39) and replaces the override, so an ATOMIC inside an EXTP range ends the page override [assumption: the ISM does not say; the car's code nests only ATOMIC → EXTP/EXTR and EXTR → EXTR]",
             "a faulting instruction's flag updates are undone [assumption]",
             "stack-limit traps push the IP of the instruction after the one that moved SP (UM). Every SP write is checked, MOV SP included (UM: only pushes and subtractions for STKOV, pops and additions for STKUN), and SP, STKOV, STKUN and CP keep bits 15:12 as written (UM: tied to 1)",
             "SYSCON.STKSZ is not modelled: the system stack never wraps",
