@@ -31,6 +31,7 @@ public sealed partial class Machine : ICpuHost
         Board = new Board(options.Inputs, Events);
         Ports = new Ports(Sfrs, Board);
         Board.DigitalInputChanged += Ports.InputChanged;
+        Bus.AttachDevice(3, Board.Latch);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
     }
@@ -78,6 +79,7 @@ public sealed partial class Machine : ICpuHost
         Watchdog.OnReset(ResetKind.PowerOn);
         Capcom.OnReset();
         Ports.OnReset();
+        Board.Latch.PowerOn();
     }
 
     /// <summary>

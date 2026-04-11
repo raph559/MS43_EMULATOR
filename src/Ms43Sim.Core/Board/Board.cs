@@ -1,8 +1,8 @@
 namespace Ms43Sim.Core;
 
 /// <summary>
-/// The ECU board around the C167CR: it puts <see cref="BoardInputs"/> on the pins. Later tasks
-/// add the devices on the external bus and the SSC.
+/// The ECU board around the C167CR: it puts <see cref="BoardInputs"/> on the pins and holds the
+/// output latch on CS3. Later tasks add the devices on the SSC.
 /// </summary>
 public sealed class Board : IPinEnvironment
 {
@@ -14,9 +14,13 @@ public sealed class Board : IPinEnvironment
     {
         Inputs = inputs;
         this.log = log;
+        Latch = new OutputLatch(log);
     }
 
     public BoardInputs Inputs { get; private set; }
+
+    /// <summary>The write-only latch on CS3: chip selects, multiplexer select, main-relay hold.</summary>
+    public OutputLatch Latch { get; }
 
     /// <summary>(port, bit) of each input whose level changed through <see cref="SetInputs"/>.</summary>
     public event Action<int, int>? DigitalInputChanged;
