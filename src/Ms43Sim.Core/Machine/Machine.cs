@@ -52,7 +52,12 @@ public sealed partial class Machine : ICpuHost
     public int SoftwareResets { get; private set; }
 
     public ulong Cycles => Scheduler.Now;
+
+    /// <summary>Instructions executed (a faulting one whose trap is entered counts as an entry).</summary>
     public ulong Instructions { get; private set; }
+
+    /// <summary>Trap and interrupt entries and PEC transfers: CPU steps that executed no instruction.</summary>
+    public ulong Entries { get; private set; }
 
     /// <summary>Power-on: RAM powers up as 00h (for determinism), every SFR takes its reset value.</summary>
     public void PowerOn()
@@ -93,7 +98,11 @@ public sealed partial class Machine : ICpuHost
     public void OnInstruction(uint cpuAddress, Action<Machine> hook) =>
         instructionHooks[cpuAddress] = instructionHooks.TryGetValue(cpuAddress, out var existing) ? existing + hook : hook;
 
-    /// <summary>One CPU step (see the plan's "What one Step() does"), then the clock advances by its states.</summary>
+    /// <summary>
+    /// One CPU step (see the plan's "What one Step() does"), then the clock advances by its states.
+    /// In IDLE an enabled request is first offered as a PEC transfer, which leaves the CPU idle
+    /// (UM §20.1); any other request wakes it.
+    /// </summary>
     public void StepOnce()
     {
         if (Cpu.Mode == CpuMode.Idle)
@@ -105,12 +114,22 @@ public sealed partial class Machine : ICpuHost
                 Scheduler.Advance(next == ulong.MaxValue ? Cycles + 2 : next);
                 return;
             }
+            if (Cpu.TryServePecWhileIdle(out var pecStates))
+            {
+                Entries++;
+                Scheduler.Advance(Cycles + (ulong)pecStates);
+                return;
+            }
             Cpu.Wake();
         }
         if (instructionHooks.Count > 0 && instructionHooks.TryGetValue(Cpu.Address, out var hook))
             hook(this);
+        var running = Cpu.Mode == CpuMode.Running;
         var states = Cpu.Step();
-        Instructions++;
+        if (Cpu.LastStepWasEntry)
+            Entries++;
+        else if (running)
+            Instructions++;
         Scheduler.Advance(Cycles + (ulong)states);
     }
 
@@ -160,6 +179,7 @@ public sealed partial class Machine : ICpuHost
         sha.AppendData(BitConverter.GetBytes(Cpu.Address));
         sha.AppendData(BitConverter.GetBytes(Cycles));
         sha.AppendData(BitConverter.GetBytes(Instructions));
+        sha.AppendData(BitConverter.GetBytes(Entries));
         return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
     }
 

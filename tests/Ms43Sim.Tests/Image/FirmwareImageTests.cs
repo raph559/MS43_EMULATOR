@@ -8,7 +8,8 @@ public class FirmwareImageTests
     [Fact]
     public void Load_RejectsWrongSize()
     {
-        var path = Path.GetTempFileName();
+        using var dir = new TempDirectory();
+        var path = dir.File("short.bin");
         File.WriteAllBytes(path, new byte[0x10000]);
         var ex = Assert.Throws<InvalidDataException>(() => FirmwareImage.Load(path));
         Assert.Contains("524288", ex.Message);

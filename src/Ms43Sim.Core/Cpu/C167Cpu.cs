@@ -62,6 +62,12 @@ public sealed partial class C167Cpu
 
     public CpuMode Mode { get; private set; }
 
+    /// <summary>
+    /// The last <see cref="Step"/> (or <see cref="TryServePecWhileIdle"/>) entered a trap or an
+    /// interrupt, or made a PEC transfer, instead of executing an instruction.
+    /// </summary>
+    public bool LastStepWasEntry { get; private set; }
+
     /// <summary>EINIT has executed since the last reset.</summary>
     public bool InitDone { get; private set; }
 
@@ -111,13 +117,17 @@ public sealed partial class C167Cpu
     /// </summary>
     public int Step()
     {
+        LastStepWasEntry = false;
         if (Mode != CpuMode.Running)
             return 2;
         instructionAddress = Address;
         dataStates = 0;
         branchTaken = false;
         if (TryEnterPendingTrap() || TryServeInterrupt())
+        {
+            LastStepWasEntry = true;
             return FinishStep(Timing.EntryStates + dataStates);
+        }
 
         var w0 = Fetch(ip);
         if (w0 == 0xFFFF)
@@ -144,9 +154,14 @@ public sealed partial class C167Cpu
                 psw = pswBefore;
             var classA = trap.Kind is TrapKind.Nmi or TrapKind.StackOverflow or TrapKind.StackUnderflow;
             if (inServiceA == 0 && (classA || inServiceB == 0))
+            {
                 EnterTrap(trap.Kind, trap.PushedCsp, trap.PushedIp);
+                LastStepWasEntry = true;
+            }
             else
+            {
                 tfr |= TrapBit(trap.Kind);
+            }
         }
 
         return FinishStep(Timing.MinStates(op, b1, branchTaken) + FetchStates(size) + dataStates);

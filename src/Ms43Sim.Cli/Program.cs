@@ -83,6 +83,8 @@ public static class Program
             return UsageError(error, "boot needs a BIN");
         if (raw && (partialOnto != null || ecuBoot != null))
             return UsageError(error, "--raw cannot be combined with --partial-onto or --ecu-boot");
+        if (partialOnto != null && ecuBoot != null)
+            return UsageError(error, "--ecu-boot cannot be combined with --partial-onto: a partial write keeps the ECU's program and boot block");
 
         var file = FirmwareImage.Load(bin);
         var image = raw ? FlashImageBuilder.Raw(file)

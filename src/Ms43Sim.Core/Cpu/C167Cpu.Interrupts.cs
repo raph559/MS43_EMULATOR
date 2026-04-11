@@ -18,18 +18,43 @@ public sealed partial class C167Cpu
             return false;
         if (!irq.TryArbitrate(psw >> 12, out var index, out var level, out var group))
             return false;
-        if (level >= 14)
-        {
-            var channel = (level == 15 ? 4 : 0) + group;
-            var pecc = sfrs.Peek(PeccBase + 2u * (uint)channel);
-            if ((pecc & 0xFF) != 0)
-            {
-                PecTransfer(irq, index, channel, pecc);
-                return true;
-            }
-        }
-        EnterInterrupt(irq, index, level);
+        if (IsPecRequest(level, group, out var channel, out var pecc))
+            PecTransfer(irq, index, channel, pecc);
+        else
+            EnterInterrupt(irq, index, level);
         return true;
+    }
+
+    /// <summary>
+    /// IDLE with an enabled request pending (UM §20.1): a request the CPU would serve as a PEC
+    /// transfer is transferred and the CPU stays idle. Anything else ends IDLE, and so does an
+    /// IDLE inside an ATOMIC/EXT* range, which serves no PEC (UM §21.8). A transfer that raises
+    /// ILLOPA (odd word pointer) also ends IDLE, in the trap routine.
+    /// </summary>
+    public bool TryServePecWhileIdle(out int states)
+    {
+        states = 0;
+        LastStepWasEntry = false;
+        if (Interrupts is not { } irq || (psw & (ushort)PswFlags.IEN) == 0 || InterruptsLocked)
+            return false;
+        if (!irq.TryArbitrate(psw >> 12, out var index, out var level, out var group)
+            || !IsPecRequest(level, group, out var channel, out var pecc))
+            return false;
+        instructionAddress = Address;
+        dataStates = 0;
+        if (!PecTransfer(irq, index, channel, pecc))
+            Mode = CpuMode.Running;
+        LastStepWasEntry = true;
+        states = FinishStep(Timing.EntryStates + dataStates);
+        return true;
+    }
+
+    /// <summary>ILVL 14/15 with that channel's PECCx COUNT ≠ 0: channel = GLVL (+4 at ILVL 15).</summary>
+    bool IsPecRequest(int level, int group, out int channel, out ushort pecc)
+    {
+        channel = (level == 15 ? 4 : 0) + group;
+        pecc = level >= 14 ? sfrs.Peek(PeccBase + 2u * (uint)channel) : (ushort)0;
+        return (pecc & 0xFF) != 0;
     }
 
     void EnterInterrupt(InterruptController irq, int index, int level)
@@ -50,9 +75,9 @@ public sealed partial class C167Cpu
     /// One PEC transfer (UM §5.2): byte or word between two segment-0 addresses held in IRAM at
     /// FCE0+4x (source) and FCE2+4x (destination), no DPPs. COUNT: FF continuous; 02-FE count
     /// down and clear IR; 01 → 00 and IR stays set, so the interrupt follows. A word transfer
-    /// with an odd pointer raises ILLOPA.
+    /// with an odd pointer raises ILLOPA instead (returns false).
     /// </summary>
-    void PecTransfer(InterruptController irq, int index, int channel, ushort pecc)
+    bool PecTransfer(InterruptController irq, int index, int channel, ushort pecc)
     {
         var sourcePointer = PecPointerBase + 4u * (uint)channel;
         var destinationPointer = sourcePointer + 2;
@@ -73,7 +98,7 @@ public sealed partial class C167Cpu
             if (((source | destination) & 1) != 0)
             {
                 EnterTrap(TrapKind.IllegalOperandAccess, csp, ip);
-                return;
+                return false;
             }
             bus.Write16(destination, bus.Read16(source));
         }
@@ -90,5 +115,6 @@ public sealed partial class C167Cpu
         sfrs.Poke(PeccBase + 2u * (uint)channel, (ushort)((pecc & 0xFF00 & ~0x0600) | (increment << 9) | count));
         if (count != 0)
             irq.ClearRequest(index);
+        return true;
     }
 }
