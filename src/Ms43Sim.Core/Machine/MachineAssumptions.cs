@@ -18,7 +18,7 @@ public static class MachineAssumptions
         $"a chip-select window with no device reads {options.UnmodelledReadValue:X4}h [assumption]",
         "the reserved area 00'F200-00'F5FF reads 0000h and ignores writes [assumption]",
         "flash writes are recorded and ignored: the AM29F400 command set (program, erase, status reads) is not modelled",
-        "not modelled yet (plain SFR storage): GPT1/2, CAPCOM compare/capture and T7/T8, ADC, PWM, ASC0; the CAN module is plain RAM",
+        "not modelled yet (plain SFR storage): CAPCOM compare/capture and T7/T8, ADC, PWM, ASC0; the CAN module is plain RAM",
         "no NMI source and no ILLBUS trap: the NMI pin and bus errors are not modelled",
         // reset state
         "reset values of the pin-dependent registers: SYSCON = 0000h, BUSCON0 = 0680h [assumption]",
@@ -55,6 +55,8 @@ public static class MachineAssumptions
         "EEPROM M93C86: write cycle tW = 5 ms (120,000 cycles); ready (1) or busy (0) on DO while its chip select is high and no instruction is clocked; the write enable is cleared at power-on; a READ continues into the next word; instructions clocked during a write cycle are ignored; a power-on during a write cycle abandons it [assumption]",
         "output-driver chip A: a 16-bit shift register (SPI mode 1) whose \"no fault\" answer is the complement of the command it latched at its previous transfer [obs]",
         "output-driver chip B: a 32-bit shift register answering FFFF FFFFh (no fault); it releases MISO until the monitoring module has sent its first ADh frame [inf]",
+        // on-chip peripherals
+        "GPT1/2: the prescalers run from power-on, so timer steps fall on multiples of 8 × 2^TxI (GPT1) or 4 × 2^TxI (GPT2) cycles; not modelled, each reported: T3 incremental interface mode, T2/T4 reload, capture and incremental interface modes, T2/T4 counting T3OTL, the reserved mode codes, and CT3 = 1; T3OUT and T6OUT do not drive their pins [assumption]",
         "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
     };
 

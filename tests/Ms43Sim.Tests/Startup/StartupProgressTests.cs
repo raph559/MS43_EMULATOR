@@ -27,6 +27,18 @@ public class StartupProgressTests
         Assert.True(m.Board.ChipA.Transfers >= 1);                         // job 0 completed, so the dispatcher ran
     }
 
+    [Fact] public void Car_ReachesTheMainLoop_InsideTheBootsWatchdogWindow()
+    {
+        var m = Car();
+        ulong? serviced = null, mainLoop = null;
+        m.OnInstruction(0x002EFC, x => serviced ??= x.Cycles);
+        m.OnInstruction(0x0E0094, x => mainLoop ??= x.Cycles);
+        m.Run(10_000_000, _ => mainLoop != null);
+        Assert.NotNull(mainLoop);
+        Assert.Equal(0, m.WatchdogResets + m.SoftwareResets);
+        Assert.True(mainLoop - serviced < 3_604_480, $"{mainLoop - serviced} cycles");
+    }
+
     [Fact] public void Car_StartupToTheEepromLoads_IsDeterministic()
     {
         string Hash() { var m = Car(); var done = false; m.OnInstruction(0x0E3700, _ => done = true); m.Run(10_000_000, _ => done); return m.StateHash(); }
