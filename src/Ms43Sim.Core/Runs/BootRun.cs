@@ -103,39 +103,7 @@ public static class BootRun
 
     static IReadOnlyList<string> Assumptions(MachineOptions options, bool recognised, uint? targetInBoot)
     {
-        var list = new List<string>
-        {
-            // clock and chip
-            $"fCPU = {options.CpuHz / 1e6:0.###} MHz [inf: the boot's T1 loop counts 375 ticks of fCPU/64 per ms; ASC0 S0BG = 4Dh gives 9,615 baud]",
-            "chip: C167CR — no XPERCON, so F024h is plain storage reading 0000h at reset",
-            // memory map and devices
-            $"external RAM: {options.ExternalRamBytes} bytes on CS2, mirrored inside a larger window",
-            $"a chip-select window with no device reads {options.UnmodelledReadValue:X4}h [assumption]",
-            "the reserved area 00'F200-00'F5FF reads 0000h and ignores writes [assumption]",
-            "flash writes are recorded and ignored: the AM29F400 command set (program, erase, status reads) is not modelled",
-            "CAN module modelled as plain RAM",
-            "ADC, ASC0, SSC, GPT1/2, CAPCOM compare/capture, PWM and ports are not modelled (plain SFR storage)",
-            "no NMI source and no ILLBUS trap: the NMI pin and bus errors are not modelled",
-            // reset state
-            "reset values of the pin-dependent registers: SYSCON = 0000h, BUSCON0 = 0680h [assumption]",
-            "other reset-value digits given as X or U in the UM (pin-dependent or undefined) are 0, e.g. in RP0H [assumption]",
-            "RAM powers up as 00h (for determinism)",
-            "WDTCON reset flags differ from UM Table 13-2: power-on sets none (UM: LHWR, SHWR, SWR), a watchdog reset only WDTR (UM: also SWR), and SRST clears WDTR (UM: leaves it). EINIT and SRVWDT follow the table. The boot reads WDTR at 00:2E5C",
-            "SYSCON cannot be written after EINIT (UM); BUSCONx and ADDRSELx still can (the program rewrites BUSCON4) [assumption]",
-            // CPU
-            "MUL/DIV are not interruptible: MULIP stays 0 and a pending interrupt waits for the instruction to end (the ISM says they are interruptible) [assumption]",
-            "division: on V (a zero divisor, or a DIVL/DIVLU quotient too large for a word) MDH and MDL keep their old values; signed division truncates toward zero and the remainder takes the dividend's sign; DIV -32768/-1 gives MDL = 8000h without V (the ISM sets V only for a zero divisor) [assumption]",
-            "class A traps wait for the end of an ATOMIC/EXT* range and a class B trap ends it; the rest of the range then runs without the lock or the override (UM §21.8, ISM p. 39)",
-            "ATOMIC/EXT* still lock and override while a class B trap flag is pending (UM §21.8: they then do not work)",
-            "an ATOMIC or EXT* inside a running range reloads the single counter (ISM p. 39) and replaces the override, so an ATOMIC inside an EXTP range ends the page override [assumption: the ISM does not say; the car's code nests only ATOMIC → EXTP/EXTR and EXTR → EXTR]",
-            "a faulting instruction's flag updates are undone [assumption]",
-            "stack-limit traps push the IP of the instruction after the one that moved SP (UM). Every SP write is checked, MOV SP included (UM: only pushes and subtractions for STKOV, pops and additions for STKUN), and SP, STKOV, STKUN and CP keep bits 15:12 as written (UM: tied to 1)",
-            "SYSCON.STKSZ is not modelled: the system stack never wraps",
-            // timing
-            "instruction timing: ISM Table 11 plus bus states; interrupt, PEC and trap entries cost 4 states [assumption]",
-            "bus states: ACT = 2 (3 on a multiplexed bus) + (15 - MCTC) + (1 - MTTC) per access, RWDC and ALECTL add nothing [assumption];XRAM and the CAN module are external accesses of 2 states (no waitstates) [assumption]",
-            "not modelled: the second-order timing effects of ISM §7.3, and pipeline effects (CP/SP write latency, the interrupt acceptance delay after IEN/xxIC writes, the stall after a PSW write)",
-        };
+        var list = MachineAssumptions.For(options).ToList();
         if (!recognised)
             list.Add("boot block not recognised: checkpoints skipped (the MS43 boot-block bytes are not at 0x2E30/0x2FA2/0x2CE0)");
         if (targetInBoot is { } t)

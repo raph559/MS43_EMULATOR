@@ -31,8 +31,9 @@ public sealed partial class Machine : ICpuHost
         Board = new Board(options.Inputs, Events);
         Ports = new Ports(Sfrs, Board);
         Board.DigitalInputChanged += Ports.InputChanged;
-        Bus.AttachDevice(3, Board.Latch);
         Ssc = new Ssc(Scheduler, Sfrs, Interrupts, Events, Board.Spi);
+        Board.AttachDevices(Scheduler, Ssc, Events, options.EepromImage);
+        Bus.AttachDevice(3, Board.Latch);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
     }
@@ -82,7 +83,7 @@ public sealed partial class Machine : ICpuHost
         Capcom.OnReset();
         Ports.OnReset();
         Ssc.OnReset();
-        Board.Latch.PowerOn();
+        Board.PowerOn();
     }
 
     /// <summary>
@@ -105,6 +106,7 @@ public sealed partial class Machine : ICpuHost
         Capcom.OnReset();
         Ports.OnReset();
         Ssc.OnReset();
+        Board.OnCpuReset();
     }
 
     /// <summary>Calls <paramref name="hook"/> each time the CPU is about to execute at <paramref name="cpuAddress"/>.</summary>
@@ -193,6 +195,11 @@ public sealed partial class Machine : ICpuHost
         sha.AppendData(BitConverter.GetBytes(Cycles));
         sha.AppendData(BitConverter.GetBytes(Instructions));
         sha.AppendData(BitConverter.GetBytes(Entries));
+        sha.AppendData(Board.Eeprom.ToImage());
+        sha.AppendData([Board.Latch.Value]);
+        var monitor = Board.Monitor;
+        foreach (var counter in new[] { monitor.Exchanges, monitor.ExchangesSinceReset, monitor.ErrorCounter, monitor.WrongAnswers, monitor.UnexpectedAnswers })
+            sha.AppendData(BitConverter.GetBytes(counter));
         return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
     }
 

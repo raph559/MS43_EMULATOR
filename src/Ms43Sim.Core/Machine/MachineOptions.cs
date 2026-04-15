@@ -16,4 +16,7 @@ public sealed record MachineOptions
 
     /// <summary>What the car puts on the ECU's inputs; by default key on, engine stopped.</summary>
     public BoardInputs Inputs { get; init; } = BoardInputs.KeyOnEngineStopped;
+
+    /// <summary>The EEPROM's 2,048 bytes; null means blank, every word FFFFh [owner].</summary>
+    public byte[]? EepromImage { get; init; }
 }
