@@ -23,3 +23,6 @@ public sealed record FlashWriteEvent(ulong Cycle, uint Pc, uint Address, ushort 
 public sealed record ConfigLockedWriteEvent(ulong Cycle, uint Pc, uint Address, ushort Value) : SimEvent(Cycle, Pc);
 
 public sealed record UnsupportedEvent(ulong Cycle, uint Pc, string What) : SimEvent(Cycle, Pc);
+
+/// <summary>Something the monitoring module saw on its side of the exchange: a wrong answer that is not the seed, a bad frame, an abort.</summary>
+public sealed record MonitoringEvent(ulong Cycle, uint Pc, string What) : SimEvent(Cycle, Pc);
