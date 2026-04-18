@@ -68,6 +68,9 @@ public sealed partial class Machine : ICpuHost
     public Asc0 Asc0 { get; }
     public CanModule Can { get; }
 
+    /// <summary>The CPU address of every SRVWDT executed.</summary>
+    public event Action<uint>? WatchdogServiced;
+
     public int WatchdogResets { get; private set; }
     public int SoftwareResets { get; private set; }
 
@@ -188,7 +191,11 @@ public sealed partial class Machine : ICpuHost
         return StopReason.CycleBudget;
     }
 
-    void ICpuHost.Srvwdt() => Watchdog.Service();
+    void ICpuHost.Srvwdt()
+    {
+        Watchdog.Service();
+        WatchdogServiced?.Invoke(Cpu.InstructionAddress);
+    }
 
     bool ICpuHost.Diswdt() => Watchdog.Disable();
 

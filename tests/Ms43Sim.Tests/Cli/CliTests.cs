@@ -1,3 +1,4 @@
+using Ms43Sim.Cli;
 using Ms43Sim.Tests.Support;
 
 namespace Ms43Sim.Tests.Cli;
@@ -23,6 +24,42 @@ public class CliTests
         Assert.Contains("0E:366A", md);
         Assert.True(File.Exists(dir.File("inventory.csv")));
     }
+
+    static string CarPath => TestImages.CarPath;
+
+    [Fact] public void Run_WritesReportInventoryAndEeprom()
+    {
+        using var dir = new TempDirectory();
+        Assert.Equal(0, Program.Run(new[] { "run", CarPath, "--seconds", "0.3", "--out", dir.Path }, TextWriter.Null, TextWriter.Null));
+        Assert.True(File.Exists(dir.File("run-report.md")) && File.Exists(dir.File("inventory.csv")));
+        Assert.Equal(2048, new FileInfo(dir.File("eeprom.bin")).Length);
+    }
+
+    [Fact] public void Run_EepromOfTheWrongSize_ExitsWithCode3()
+    {
+        using var dir = new TempDirectory();
+        File.WriteAllBytes(dir.File("small.bin"), new byte[1024]);
+        var err = new StringWriter();
+        Assert.Equal(3, Program.Run(new[] { "run", CarPath, "--eeprom", dir.File("small.bin"), "--out", dir.Path }, TextWriter.Null, err));
+        Assert.Contains("2,048", err.ToString());
+    }
+
+    [Fact] public void Run_NeverWritesTheInputEeprom()
+    {
+        using var dir = new TempDirectory();
+        var input = Enumerable.Range(0, 2048).Select(i => (byte)i).ToArray();
+        File.WriteAllBytes(dir.File("in.bin"), input);
+        Program.Run(new[] { "run", CarPath, "--seconds", "0.3", "--eeprom", dir.File("in.bin"), "--out", dir.File("out") }, TextWriter.Null, TextWriter.Null);
+        Assert.Equal(input, File.ReadAllBytes(dir.File("in.bin")));
+    }
+
+    [Theory]
+    [InlineData("--seconds 0")]
+    [InlineData("--seconds 601")]
+    [InlineData("--raw --partial-onto CAR")]
+    public void Run_UsageErrors_ExitWithCode2(string options) =>
+        Assert.Equal(2, Program.Run(new[] { "run", CarPath }.Concat(options.Split(' ').Select(o => o == "CAR" ? CarPath : o)).ToArray(),
+            TextWriter.Null, TextWriter.Null));
 
     [Fact] public void Boot_EcuBootWithPartialOnto_IsAUsageError()
     {

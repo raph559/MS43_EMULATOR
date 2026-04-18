@@ -44,4 +44,13 @@ public class WatchdogTests
         t.Step(2);
         Assert.Equal((1, 0x0004), (t.M.SoftwareResets, t.Sfr(0xFFAE) & 0x0004));
     }
+
+    [Fact] public void WatchdogServiced_ReportsTheAddressOfEachSrvwdt()
+    {
+        var t = TestMachine.Create("A758A7A7 CC00 A758A7A7");
+        var seen = new List<uint>();
+        t.M.WatchdogServiced += seen.Add;
+        t.Step(3);
+        Assert.Equal(new uint[] { 0x1000, 0x1006 }, seen);
+    }
 }
