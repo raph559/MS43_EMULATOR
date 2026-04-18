@@ -6,7 +6,7 @@ public enum StopReason { CycleBudget, StopCondition, PowerDown }
 
 /// <summary>
 /// One emulated MS43: the bus, the SFR file, the CPU with its interrupt controller, the
-/// watchdog, ports, SSC, GPT, CAPCOM, ADC and PWM, the board, the scheduler and the diagnostics.
+/// watchdog and on-chip peripherals, the board, the scheduler and the diagnostics.
 /// </summary>
 public sealed partial class Machine : ICpuHost
 {
@@ -36,6 +36,7 @@ public sealed partial class Machine : ICpuHost
         Capcom = new Capcom(Scheduler, Sfrs, Interrupts, Ports, Gpt, Events);
         Adc = new Adc(Scheduler, Sfrs, Interrupts, Board.AnalogVolts, Events);
         Pwm = new Pwm(Scheduler, Sfrs, Interrupts, Events);
+        Asc0 = new Asc0(Scheduler, Sfrs, Interrupts, Events);
         Bus.AttachDevice(3, Board.Latch);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
@@ -62,6 +63,7 @@ public sealed partial class Machine : ICpuHost
     public Gpt Gpt { get; }
     public Adc Adc { get; }
     public Pwm Pwm { get; }
+    public Asc0 Asc0 { get; }
 
     public int WatchdogResets { get; private set; }
     public int SoftwareResets { get; private set; }
@@ -92,6 +94,7 @@ public sealed partial class Machine : ICpuHost
         Gpt.OnReset();
         Adc.OnReset();
         Pwm.OnReset();
+        Asc0.OnReset();
         Board.PowerOn();
     }
 
@@ -118,6 +121,7 @@ public sealed partial class Machine : ICpuHost
         Gpt.OnReset();
         Adc.OnReset();
         Pwm.OnReset();
+        Asc0.OnReset();
         Board.OnCpuReset();
     }
 
