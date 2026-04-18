@@ -39,6 +39,17 @@ public class StartupProgressTests
         Assert.True(mainLoop - serviced < 3_604_480, $"{mainLoop - serviced} cycles");
     }
 
+    [Fact] public void Car_RunsOneSecondPastTheMainLoop_WithoutTheAdcFreshnessReset()
+    {
+        var m = Car();
+        ulong? mainLoop = null;
+        m.OnInstruction(0x0E0094, x => mainLoop ??= x.Cycles);
+        m.Run(10_000_000, _ => mainLoop != null);
+        m.Run(24_000_000);
+        Assert.NotEqual(0x0010, m.Bus.Peek16(0xE7FC));                      // no forced reset for a stale AN1
+        Assert.True(m.Adc.Conversions > 10_000, $"{m.Adc.Conversions} conversions");   // about 11 per ms
+    }
+
     [Fact] public void Car_StartupToTheEepromLoads_IsDeterministic()
     {
         string Hash() { var m = Car(); var done = false; m.OnInstruction(0x0E3700, _ => done = true); m.Run(10_000_000, _ => done); return m.StateHash(); }

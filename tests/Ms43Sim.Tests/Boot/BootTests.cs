@@ -35,9 +35,21 @@ public class BootTests
         var r = BootRun.Run(Erased(0x10000, 0x70000), new(MaxCycles: 20_000_000));
         Assert.Equal(BootOutcome.StayedInBoot, r.Outcome);
         Assert.Equal(0, r.WatchdogResets);
-        Assert.True(r.SrvwdtCount >= 100);
+        Assert.True(r.SrvwdtCount >= 70, $"{r.SrvwdtCount} SRVWDT");  // key on: about every 10 ms (79 in 20 M cycles)
         Assert.Equal((ushort)0xC000, r.Passes[0].RamTestWord);        // tag invalid (bit 15) + 16 KiB fail (bit 14)
         Assert.Null(r.Passes[0].IdCheck);
+    }
+
+    [Fact] public void ProgramAreaErased_KeyOff_DropsTheMainRelay_AndWaitsForKl15()
+    {
+        // 00:1F5A: latch := 58h (relay released), then SRVWDT and an AN1 sample until it reaches
+        // C3h, then SRST. Plan 1, without an ADC, read AN1 as 0 V and only ever saw this path.
+        var m = Machine.Create(Erased(0x10000, 0x70000),
+            new MachineOptions { Inputs = BoardInputs.KeyOnEngineStopped.WithIgnition(false) });
+        m.PowerOn();
+        m.Run(20_000_000);
+        Assert.Equal((0, false), (m.WatchdogResets + m.SoftwareResets, m.Board.Latch.MainRelayHeld));
+        Assert.True(m.Watchdog.ServiceCount >= 100, $"{m.Watchdog.ServiceCount} SRVWDT");
     }
 
     [Fact] public void ProgramSectorErased_HandsOverThenResetLoops()

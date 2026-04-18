@@ -18,7 +18,7 @@ public static class MachineAssumptions
         $"a chip-select window with no device reads {options.UnmodelledReadValue:X4}h [assumption]",
         "the reserved area 00'F200-00'F5FF reads 0000h and ignores writes [assumption]",
         "flash writes are recorded and ignored: the AM29F400 command set (program, erase, status reads) is not modelled",
-        "not modelled yet (plain SFR storage): ADC, PWM, ASC0; the CAN module is plain RAM",
+        "not modelled yet (plain SFR storage): PWM, ASC0; the CAN module is plain RAM",
         "no NMI source and no ILLBUS trap: the NMI pin and bus errors are not modelled",
         // reset state
         "reset values of the pin-dependent registers: SYSCON = 0000h, BUSCON0 = 0680h [assumption]",
@@ -58,6 +58,7 @@ public static class MachineAssumptions
         // on-chip peripherals
         "GPT1/2: the prescalers run from power-on, so timer steps fall on multiples of 8 × 2^TxI (GPT1) or 4 × 2^TxI (GPT2) cycles; not modelled, each reported: T3 incremental interface mode, T2/T4 reload, capture and incremental interface modes, T2/T4 counting T3OTL, the reserved mode codes, and CT3 = 1; T3OUT and T6OUT do not drive their pins [assumption]",
         "CAPCOM: the prescalers run from power-on (steps fall on multiples of 2^(TxI + 3) cycles); a match is the timer stepping or reloading to CCx, never a software write of the timer or of CCx; not modelled, each reported: the double-register compare mode and the reserved counter inputs TxI = 1xx [assumption]",
+        "ADC: fixed-channel single conversion only; the channel is sampled when the conversion starts; not modelled, each reported once: ADM ≠ 00, ADWR and ADCIN (the conversion then runs as a single one); ADDAT2 is plain storage and ADCRQ from CC31 is ignored",
         "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
     };
 
