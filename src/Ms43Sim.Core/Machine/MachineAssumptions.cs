@@ -18,7 +18,7 @@ public static class MachineAssumptions
         $"a chip-select window with no device reads {options.UnmodelledReadValue:X4}h [assumption]",
         "the reserved area 00'F200-00'F5FF reads 0000h and ignores writes [assumption]",
         "flash writes are recorded and ignored: the AM29F400 command set (program, erase, status reads) is not modelled",
-        "not modelled yet: the CAN module is plain RAM",
+        "not modelled: the second CAN controller on CS4 (00'EE00, 16 KiB development units); its accesses go to the inventory",
         "no NMI source and no ILLBUS trap: the NMI pin and bus errors are not modelled",
         // reset state
         "reset values of the pin-dependent registers: SYSCON = 0000h, BUSCON0 = 0680h [assumption]",
@@ -61,6 +61,7 @@ public static class MachineAssumptions
         "ADC: fixed-channel single conversion only; the channel is sampled when the conversion starts; not modelled, each reported once: ADM ≠ 00, ADWR and ADCIN (the conversion then runs as a single one); ADDAT2 is plain storage and ADCRQ from CC31 is ignored",
         "PWM: mode 0 (edge aligned) only; PIRx is set when PTx restarts at 0000h, not when the timer starts; a counter started above its period runs to FFFFh first; not modelled, each reported once: mode 1, burst and single shot; the outputs do not drive the P7 pins [assumption]",
         "ASC0: asynchronous modes only; transmission starts without the divide-by-16 latency; received frames are clean (no framing or parity errors); a loopback frame arrives at the end of its stop bits; not modelled, each reported once: synchronous mode and the reserved modes [assumption]",
+        "CAN: every transmitted frame is acknowledged and no other node sends [stub: CAN partners]; a frame lasts (44 + 8·DLC + 3) bit times, no stuff bits, extended frames alike; object 15 matches under the global mask only; not modelled: remote frames (each request reported), error counters, bus-off and the last-message mask [assumption]",
         "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
     };
 

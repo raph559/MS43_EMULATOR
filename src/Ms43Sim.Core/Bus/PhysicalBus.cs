@@ -19,6 +19,7 @@ public sealed class PhysicalBus
     readonly ushort unmodelledReadValue;
     readonly int externalRamMask;
     readonly IExternalDevice?[] devices = new IExternalDevice?[5];
+    CanModule? can;
 
     public PhysicalBus(FirmwareImage flash, int externalRamBytes, SfrFile sfrs, AccessInventory inv, EventLog log,
         ushort unmodelledReadValue)
@@ -37,7 +38,6 @@ public sealed class PhysicalBus
 
     public byte[] Iram { get; } = new byte[0x800];          // 00'F600-00'FDFF
     public byte[] Xram { get; } = new byte[0x800];          // 00'E000-00'E7FF
-    public byte[] CanStub { get; } = new byte[0x100];       // 00'EF00-00'EFFF [stub: plain RAM]
     public byte[] ExternalRam { get; }
 
     public ChipSelects ChipSelects { get; }
@@ -46,6 +46,11 @@ public sealed class PhysicalBus
     public bool XperipheralsEnabled { get; set; }
 
     public void AttachDevice(int chipSelect, IExternalDevice device) => devices[chipSelect] = device;
+
+    /// <summary>The on-chip CAN module that answers at 00'EF00-00'EFFF while XPEN is set.</summary>
+    public void AttachCan(CanModule module) => can = module;
+
+    CanModule Can => can ?? throw new InvalidOperationException("No CAN module is attached to the bus.");
 
     public Region Decode(uint a)
     {
@@ -83,9 +88,7 @@ public sealed class PhysicalBus
             case Region.Sfr:
             case Region.Esfr: return sfrs.Read16(a);
             case Region.Xram: return Word(Xram, (int)(a - XramBase));
-            case Region.Can:
-                inventory.Note(AccessArea.CanStub, a, kind);
-                return Word(CanStub, (int)(a - CanBase));
+            case Region.Can: return Can.Read16(a);
             case Region.Reserved:
                 inventory.Note(AccessArea.Reserved, a, kind);
                 return 0;   // [assumption] the reserved area reads 0000h
@@ -105,9 +108,7 @@ public sealed class PhysicalBus
             case Region.Sfr:
             case Region.Esfr: return sfrs.Read8(a);
             case Region.Xram: return Xram[a - XramBase];
-            case Region.Can:
-                inventory.Note(AccessArea.CanStub, a, kind);
-                return CanStub[a - CanBase];
+            case Region.Can: return Can.Read8(a);
             case Region.Reserved:
                 inventory.Note(AccessArea.Reserved, a, kind);
                 return 0;
@@ -132,10 +133,7 @@ public sealed class PhysicalBus
             case Region.Sfr:
             case Region.Esfr: sfrs.Write16(a, value); return;
             case Region.Xram: SetWord(Xram, (int)(a - XramBase), value); return;
-            case Region.Can:
-                inventory.Note(AccessArea.CanStub, a, AccessKind.Write);
-                SetWord(CanStub, (int)(a - CanBase), value);
-                return;
+            case Region.Can: Can.Write16(a, value); return;
             case Region.Reserved:
                 inventory.Note(AccessArea.Reserved, a, AccessKind.Write);
                 return;
@@ -160,10 +158,7 @@ public sealed class PhysicalBus
             case Region.Sfr:
             case Region.Esfr: sfrs.Write8(a, value); return;
             case Region.Xram: Xram[a - XramBase] = value; return;
-            case Region.Can:
-                inventory.Note(AccessArea.CanStub, a, AccessKind.Write);
-                CanStub[a - CanBase] = value;
-                return;
+            case Region.Can: Can.Write8(a, value); return;
             case Region.Reserved:
                 inventory.Note(AccessArea.Reserved, a, AccessKind.Write);
                 return;
@@ -186,7 +181,7 @@ public sealed class PhysicalBus
             Region.Iram => Word(Iram, (int)(a - IramBase)),
             Region.Sfr or Region.Esfr => sfrs.Peek(a),
             Region.Xram => Word(Xram, (int)(a - XramBase)),
-            Region.Can => Word(CanStub, (int)(a - CanBase)),
+            Region.Can => Can.Peek16(a),
             Region.Reserved => 0,
             _ => unmodelledReadValue,
         };
@@ -203,7 +198,7 @@ public sealed class PhysicalBus
             case Region.Iram: SetWord(Iram, (int)(a - IramBase), value); break;
             case Region.Sfr or Region.Esfr: sfrs.Poke(a, value); break;
             case Region.Xram: SetWord(Xram, (int)(a - XramBase), value); break;
-            case Region.Can: SetWord(CanStub, (int)(a - CanBase), value); break;
+            case Region.Can: Can.Poke16(a, value); break;
         }
     }
 

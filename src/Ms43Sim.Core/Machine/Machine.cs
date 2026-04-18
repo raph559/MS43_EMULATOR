@@ -37,6 +37,8 @@ public sealed partial class Machine : ICpuHost
         Adc = new Adc(Scheduler, Sfrs, Interrupts, Board.AnalogVolts, Events);
         Pwm = new Pwm(Scheduler, Sfrs, Interrupts, Events);
         Asc0 = new Asc0(Scheduler, Sfrs, Interrupts, Events);
+        Can = new CanModule(Scheduler, Interrupts, Events);
+        Bus.AttachCan(Can);
         Bus.AttachDevice(3, Board.Latch);
         Inventory.Context = () => (Cycles, Cpu.InstructionAddress);
         Events.Context = () => (Cycles, Cpu.InstructionAddress);
@@ -64,6 +66,7 @@ public sealed partial class Machine : ICpuHost
     public Adc Adc { get; }
     public Pwm Pwm { get; }
     public Asc0 Asc0 { get; }
+    public CanModule Can { get; }
 
     public int WatchdogResets { get; private set; }
     public int SoftwareResets { get; private set; }
@@ -82,7 +85,6 @@ public sealed partial class Machine : ICpuHost
         Array.Clear(Bus.Iram);
         Array.Clear(Bus.Xram);
         Array.Clear(Bus.ExternalRam);
-        Array.Clear(Bus.CanStub);
         Sfrs.ResetAll();
         Bus.ChipSelects.Recompute();
         Cpu.Reset();
@@ -95,6 +97,7 @@ public sealed partial class Machine : ICpuHost
         Adc.OnReset();
         Pwm.OnReset();
         Asc0.OnReset();
+        Can.PowerOn();
         Board.PowerOn();
     }
 
@@ -122,6 +125,7 @@ public sealed partial class Machine : ICpuHost
         Adc.OnReset();
         Pwm.OnReset();
         Asc0.OnReset();
+        Can.OnReset();
         Board.OnCpuReset();
     }
 
@@ -201,7 +205,7 @@ public sealed partial class Machine : ICpuHost
         sha.AppendData(Bus.Iram);
         sha.AppendData(Bus.Xram);
         sha.AppendData(Bus.ExternalRam);
-        sha.AppendData(Bus.CanStub);
+        sha.AppendData(Can.MessageRam);
         Span<byte> word = stackalloc byte[2];
         for (uint a = 0xF000; a < 0xF200; a += 2)
             AppendWord(sha, word, Sfrs.Peek(a));

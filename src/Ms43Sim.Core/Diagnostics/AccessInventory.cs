@@ -2,7 +2,7 @@ namespace Ms43Sim.Core;
 
 public enum AccessKind { Read, Write, Fetch }
 
-public enum AccessArea { Sfr, Esfr, ChipSelect1, ChipSelect2, ChipSelect3, ChipSelect4, Reserved, CanStub }
+public enum AccessArea { Sfr, Esfr, ChipSelect1, ChipSelect2, ChipSelect3, ChipSelect4, Reserved }
 
 public sealed record AccessRecord(
     AccessArea Area, uint Address, string Name, AccessKind Kind, long Count, ulong FirstCycle, uint FirstPc);
@@ -44,7 +44,6 @@ public sealed class AccessInventory
         AccessArea.ChipSelect3 => "CS3 window",
         AccessArea.ChipSelect4 => "CS4 window",
         AccessArea.Reserved => "reserved",
-        AccessArea.CanStub => "CAN module (RAM stub)",
         _ => "?",
     };
 
