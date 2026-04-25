@@ -4,15 +4,20 @@ A purpose-built emulator for the Siemens MS43 (Infineon C167CR). It runs an MS43
 power-on the way the ECU does, so a bin can be tested before it is flashed.
 
 - Design: `docs/superpowers/specs/2026-10-20-ms43-emulator-design.md`
-- Plan 1: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md`
+- Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md` and
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`; their records
+  (rulings, review findings, open items) beside them
 - Devices and what is modelled: `HARDWARE.md`
-- Results on the car file: REPORT.md §9.6
+- Results on the car file: REPORT.md §9.6 (boot) and §9.7 (start-up)
 
-**Status:** plan 1 done (2026-10-20): CPU, bus, traps, interrupts, PEC, watchdog, CAPCOM T0/T1,
-timing, boot runner.
+**Status:** plan 2 done (2026-10-20). Plan 1 gave the CPU, bus, traps, interrupts, PEC,
+watchdog, timing and the boot runner. Plan 2 adds the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0
+and CAN, the board (output latch, M93C86 EEPROM, output-driver chips A and B, the monitoring
+module, the key-on inputs), the start-up runner and one key-off.
 
-The car file boots to the program handover. The program's start-up then stops at 0B:D80C,
-waiting for the SSC/EEPROM, which plan 2 models.
+The car file starts up with the key on and the engine stopped: its CRC and monitor-sum tasks
+pass, the monitoring handshake completes, and its scheduler runs. A key-off runs the after-run,
+writes the EEPROM and drops the main relay; the next key-on reads that EEPROM back.
 
 ## Run it
 
@@ -20,6 +25,28 @@ waiting for the SSC/EEPROM, which plan 2 models.
 dotnet build -c Release sim/Ms43Sim.sln
 dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll boot ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --out sim/runs/boot-car
 ```
+
+`ms43sim run BIN` runs a bin with the key on and the engine stopped:
+
+```bash
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --seconds 5 --out sim/runs/run-car
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| (none) | | Runs BIN as the ECU holds it after an MS4X Flasher **full write** |
+| `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` (below) |
+| `--seconds S` | 5 | How long to run, above 0 and at most 600 |
+| `--key-off-at K` | | Turns the key off (AN1 to 0 V) at K seconds, 0 < K < S; the run stops when the main relay drops |
+| `--eeprom FILE` | blank | The EEPROM's contents: 2,048 bytes, word *i* little-endian at byte 2*i*. The file is only read |
+| `--out DIR` | `runs/run-<name>` | Where `run-report.md`, `inventory.csv` and `eeprom.bin` (the chip at the end of the run) go |
+
+The outcome is the first that holds: `Trapped`, `ResetLoop` (any reset), `PoweredOff` (the main
+relay released after the handover), `SchedulerRunning` (the main loop's SRVWDT at 0E:0144 in the
+last 30 ms), `Stalled` (handed over, no scheduler), `StayedInBoot`, `NoProgress`. The report
+gives the milestones, scheduler health, checksum tasks, the monitoring module, the firmware's
+RAM read-outs, CAN transmissions, resets, events, stubs, the unmodelled hardware and the
+assumptions.
 
 `ms43sim boot BIN` takes these options:
 
@@ -33,7 +60,8 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll boot ../../../bins/CA
 | `--stop-at-handover` | | Stops when the boot hands over to the program |
 | `--out DIR` | `runs/boot-<name>` | Where `boot-report.md` and `inventory.csv` go |
 
-Exit codes: 0 the run completed, 2 usage error, 3 unreadable or wrong-size image.
+Exit codes, both commands: 0 the run completed (any outcome), 2 usage error, 3 unreadable or
+wrong-size image or EEPROM file.
 
 `ms43sim decode --listing BIN` prints the decoder's linear sweep. Compare it with
 `python -I sim/tools/decode_listing.py BIN`, which uses `tools/c167dis.py`.
@@ -47,17 +75,39 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 185 tests: instruction semantics from the manuals, the memory
-map, interrupts, PEC, the watchdog, the timers, timing, and the boot of the real bins.
+Run it from the repository root. 371 tests: instruction semantics from the manuals, the memory
+map, interrupts, PEC, every peripheral and board device, the boot of the real bins, the car's
+5 s start-up and a 40 s key-off (about 15 s in all).
 
-**Speed:** 166 M emulated cycles per second on this PC (Release, a 240 M-cycle run), 6.9× real
-time.
+**Speed:** 138.7 M emulated cycles per second on this PC (Release, a 60 s run of the car's
+start-up), 5.8× real time. Plan 1's boot-only figure was 166 M.
 
-## Assumptions and simplifications in plan 1
+## Assumptions and simplifications in plan 2
 
-Every boot report lists these (`BootRun.Assumptions`), plus the ones that apply to that run only:
-an unrecognised boot block, or a handover target inside the boot block (00:0000-00:7FFF), which
-is not watched because the boot's own code runs there.
+Every run report lists them (`MachineAssumptions.For`), with the run's own lines (a key-off,
+unrecognised program checkpoints). Beyond plan 1's (below):
+
+- **Inputs:** the key-on set (12.6 V, 20 °C, pedal released, throttle at limp-home, lambda
+  sensors unplugged); VAREF 5.0 V and an ideal converter; unlisted digital inputs read high;
+  P8.6 stays low; a key-off drops only AN1.
+- **Board:** the CS3 latch is write-only on D0-D7 and powers up as 78h; MRST has a pull-up; the
+  EEPROM starts blank (owner), its write cycle is 5 ms and DO shows ready/busy; chip A answers
+  the complement of its previous command and chip B answers "no fault" once the module has sent
+  its first ADh frame; the monitoring module's timing (20 µs, 250 kbit/s, 4 µs gaps) and unused
+  bytes (00h) are assumptions, and its shut-off reaction is reported, not modelled.
+- **Peripherals:** the GPT and CAPCOM prescalers run from power-on; SSC transfers start without
+  latency and raise no phase or baud-rate errors; ADC fixed-channel single conversion only; PWM
+  mode 0 only; ASC0 asynchronous modes only, clean reception; CAN frames last 44 + 8·DLC + 3 bit
+  times and every frame is acknowledged. Each unmodelled mode raises an UnsupportedEvent.
+- **Stubs** (design §7): CAN partners silent; chips A/B always "no fault"; the monitoring module's
+  shut-off path; the throttle body static at limp-home; knock and coil feedback 0 V; no K-line
+  tester. The report's Stubs section says which sit between the CPU and a checked output.
+
+## Assumptions and simplifications from plan 1
+
+Every boot and run report lists these too (`MachineAssumptions.For`). A boot report adds the
+lines that apply to that run only: an unrecognised boot block, or a handover target inside the
+boot block (00:0000-00:7FFF), which is not watched because the boot's own code runs there.
 
 **Clock and chip**
 - **fCPU = 24 MHz** [inf]. The boot counts 375 T1 ticks (fCPU/64) per ms, and ASC0 S0BG = 4Dh
@@ -69,8 +119,7 @@ is not watched because the boot's own code runs there.
 - A chip-select window with no device reads FFFFh. The reserved area 00'F200-00'F5FF reads
   0000h and ignores writes.
 - Flash writes are recorded and ignored: the AM29F400 command set is not modelled.
-- The CAN module is plain RAM. ADC, ASC0, SSC, GPT1/2, CAPCOM compare/capture, PWM and the ports
-  are plain SFR storage.
+- The second CAN controller on CS4 (16 KiB development units) is not modelled.
 - No NMI source and no ILLBUS trap.
 
 **Reset state**

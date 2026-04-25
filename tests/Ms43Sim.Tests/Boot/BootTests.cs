@@ -116,6 +116,9 @@ public class BootTests
         Assert.Empty(phrases.Where(p => !all.Contains(p)));
     }
 
+    [Fact] public void Assumptions_HaveNoPeripheralLeftAsNotModelledYet() =>
+        Assert.DoesNotContain(MachineAssumptions.For(new MachineOptions()), a => a.Contains("not modelled yet"));
+
     [Fact] public void SameImage_SameResult()
     {
         var o = new BootRunOptions(MaxCycles: 2_000_000, StopAtFirstHandover: true);
