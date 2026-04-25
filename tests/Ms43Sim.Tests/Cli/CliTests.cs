@@ -61,6 +61,20 @@ public class CliTests
         Assert.Equal(2, Program.Run(new[] { "run", CarPath }.Concat(options.Split(' ').Select(o => o == "CAR" ? CarPath : o)).ToArray(),
             TextWriter.Null, TextWriter.Null));
 
+    [Fact] public void Run_KeyOffAtOrAfterTheEnd_IsAUsageError()
+    {
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "run", CarPath, "--seconds", "5", "--key-off-at", "5" }, TextWriter.Null, err));
+        Assert.Contains("--key-off-at needs", err.ToString());
+    }
+
+    [Fact] public void Run_KeyOffBeforeTheEnd_IsAccepted()
+    {
+        using var dir = new TempDirectory();
+        Assert.Equal(0, Program.Run(new[] { "run", CarPath, "--seconds", "0.2", "--key-off-at", "0.1", "--out", dir.Path }, TextWriter.Null, TextWriter.Null));
+        Assert.Contains("| key off | — | 2,400,000 |", File.ReadAllText(dir.File("run-report.md")));
+    }
+
     [Fact] public void Boot_EcuBootWithPartialOnto_IsAUsageError()
     {
         var bin = Path.Combine(TestBins.Root, "bins", "CAR_current_43X001_SP95_STAGE1.bin");

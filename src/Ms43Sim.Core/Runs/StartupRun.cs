@@ -76,7 +76,8 @@ public sealed record StartupResult(
 /// watches the program checkpoints the car, release, E85CAMPORT and stock files share:
 /// 00:2EFC the boot's last SRVWDT, 0E:366A the handover, 0E:36BC BSET PSW.11, 0E:3700 the EEPROM
 /// block loads returned, 0E:0094 the main-loop head, 0E:0144 the main loop's SRVWDT. The run ends
-/// at the time limit or at power-off (the main relay released after the handover).
+/// at the time limit or at power-off (the main relay released after the handover). A key-off, if
+/// asked for, drops AN1 (KL15) to 0 V at that time.
 /// Outcome, the first that holds: a trap → Trapped; a watchdog or software reset → ResetLoop; the
 /// relay released after the handover → PoweredOff; the main loop's SRVWDT in the last 30 ms →
 /// SchedulerRunning; a handover → Stalled; any SRVWDT → StayedInBoot; else NoProgress.
@@ -149,6 +150,15 @@ public static class StartupRun
             if (handover != null && powerOff == null && (before & 0x20) != 0 && (after & 0x20) == 0)
                 powerOff = machine.Cycles;
         };
+        ulong? keyOff = null;
+        if (options.KeyOffAtSeconds is { } keyOffSeconds)
+        {
+            machine.Scheduler.Schedule((ulong)Math.Round(keyOffSeconds * machineOptions.CpuHz), "key off", () =>
+            {
+                keyOff = machine.Cycles;
+                machine.Board.SetInputs(machine.Board.Inputs.WithIgnition(false));
+            });
+        }
 
         var limit = (ulong)Math.Round(options.Seconds * machineOptions.CpuHz);
         machine.Run(limit, _ => powerOff != null);
@@ -163,6 +173,8 @@ public static class StartupRun
             : StartupOutcome.NoProgress;
 
         var assumptions = MachineAssumptions.For(machineOptions).ToList();
+        if (options.KeyOffAtSeconds is { } k)
+            assumptions.Add($"key off at {k.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} s: only AN1 (KL15 sense) drops to 0 V, every other input stays; the run stops when the main relay drops (latch bit 5 cleared after the handover) [assumption]");
         if (!recognised)
             assumptions.Add("program checkpoints not recognised: milestones and the scheduler check are skipped (the checkpoint bytes are not at 00:2EFC, 0E:366A, 0E:36BC, 0E:3700, 0E:3812, 0E:0094 and 0E:0144)");
 
@@ -173,7 +185,7 @@ public static class StartupRun
         var monitor = machine.Board.Monitor;
         return new StartupResult(
             image, outcome,
-            new StartupMilestones(bootServiced, handover, interrupts, eepromLoaded, mainLoop, null, powerOff),
+            new StartupMilestones(bootServiced, handover, interrupts, eepromLoaded, mainLoop, keyOff, powerOff),
             new SchedulerHealth(services, longestGap, XramWord(machine, 0xE2A6)),
             ReadFirmwareState(machine),
             new MonitorSummary(monitor.Exchanges, monitor.WrongAnswers, monitor.UnexpectedAnswers, monitor.ErrorCounter),
