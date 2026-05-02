@@ -39,7 +39,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--seconds S` | 5 | How long to run, above 0 and at most 600 |
 | `--key-off-at K` | | Turns the key off (AN1 to 0 V) at K seconds, 0 < K < S; the run stops when the main relay drops |
 | `--eeprom FILE` | blank | The EEPROM's contents: 2,048 bytes, word *i* little-endian at byte 2*i*. The file is only read |
-| `--out DIR` | `runs/run-<name>` | Where `run-report.md`, `inventory.csv` and `eeprom.bin` (the chip at the end of the run) go |
+| `--out DIR` | `runs/run-<name>` | Where `run-report.md`, `inventory.csv` and `eeprom.bin` (the chip at the end of the run) go. An output that is also an input (an `--eeprom` file in that folder) is a usage error |
 
 The outcome is the first that holds: `Trapped`, `ResetLoop` (any reset), `PoweredOff` (the main
 relay released after the handover), `SchedulerRunning` (the main loop's SRVWDT at 0E:0144 in the
@@ -75,7 +75,7 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 371 tests: instruction semantics from the manuals, the memory
+Run it from the repository root. 378 tests: instruction semantics from the manuals, the memory
 map, interrupts, PEC, every peripheral and board device, the boot of the real bins, the car's
 5 s start-up and a 40 s key-off (about 15 s in all).
 
