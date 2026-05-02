@@ -94,6 +94,8 @@ public static class Program
             return null;
         }
 
+        public IEnumerable<string?> Inputs => new[] { Bin, PartialOnto, EcuBoot };
+
         public FlashedImage Build()
         {
             var file = FirmwareImage.Load(Bin!);
@@ -128,12 +130,15 @@ public static class Program
         if (image.Problem("boot") is { } problem)
             return UsageError(error, problem);
 
+        outDir ??= Path.Combine("runs", "boot-" + Path.GetFileNameWithoutExtension(image.Bin));
+        if (Overwritten(image.Inputs, outDir, "boot-report.md", "inventory.csv") is { } clash)
+            return UsageError(error, $"the run would write over its input {clash}: choose another --out");
+
         var flashed = image.Build();
         var clock = Stopwatch.StartNew();
         var result = BootRun.Run(flashed, new BootRunOptions(maxCycles, stopAtHandover));
         clock.Stop();
 
-        outDir ??= Path.Combine("runs", "boot-" + Path.GetFileNameWithoutExtension(image.Bin));
         BootReportWriter.Write(result, outDir);
 
         output.WriteLine($"outcome: {result.Outcome}");
@@ -177,6 +182,10 @@ public static class Program
         if (keyOffAt is { } off && !(off > 0 && off < seconds))
             return UsageError(error, "--key-off-at needs a time above 0 and before the end of the run (--seconds)");
 
+        outDir ??= Path.Combine("runs", "run-" + Path.GetFileNameWithoutExtension(image.Bin));
+        if (Overwritten(image.Inputs.Append(eepromFile), outDir, "run-report.md", "inventory.csv", "eeprom.bin") is { } clash)
+            return UsageError(error, $"the run would write over its input {clash}: choose another --out");
+
         var flashed = image.Build();
         var eeprom = eepromFile != null ? File.ReadAllBytes(eepromFile) : null;
         var options = new StartupRunOptions(seconds, keyOffAt, new MachineOptions { EepromImage = eeprom });
@@ -184,13 +193,23 @@ public static class Program
         var result = StartupRun.Run(flashed, options);
         clock.Stop();
 
-        outDir ??= Path.Combine("runs", "run-" + Path.GetFileNameWithoutExtension(image.Bin));
         RunReportWriter.Write(result, outDir);
 
         output.WriteLine($"outcome: {result.Outcome}");
         output.WriteLine($"report: {Path.Combine(outDir, "run-report.md")}");
         Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
         return 0;
+    }
+
+    /// <summary>
+    /// The first output file that is also an input (an EEPROM image passed back in from an earlier
+    /// run's folder, say), or null. Inputs are only ever read.
+    /// </summary>
+    static string? Overwritten(IEnumerable<string?> inputs, string outDir, params string[] outputs)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var read = inputs.OfType<string>().Select(Path.GetFullPath).ToHashSet(comparer);
+        return outputs.Select(name => Path.Combine(outDir, name)).FirstOrDefault(o => read.Contains(Path.GetFullPath(o)));
     }
 
     /// <summary>The host speed: the only wall-clock reading, and it stays on the console.</summary>

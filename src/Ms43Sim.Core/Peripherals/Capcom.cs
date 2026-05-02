@@ -16,7 +16,9 @@ namespace Ms43Sim.Core;
 /// earliest overflow or compare match.
 /// [assumption] The prescalers run from power-on, so steps fall on multiples of the prescale; a
 /// software write of a timer or of CCx is not a match. Not modelled, and reported: the
-/// double-register compare mode, and the reserved counter inputs TxI = 1xx (the timer stops).
+/// double-register compare mode, and the reserved counter inputs TxI = 1xx (the timer stops),
+/// each once per machine. In mode 3 a CCx equal to the reload value raises its interrupts but
+/// leaves the pin (UM p. 15-18).
 /// </summary>
 public sealed class Capcom
 {
@@ -32,6 +34,7 @@ public sealed class Capcom
     readonly ushort[] cc = new ushort[32];
     readonly ushort[] ccm = new ushort[8];
     readonly bool[] matchedThisPeriod = new bool[32];
+    readonly HashSet<string> reported = new();
 
     public Capcom(Scheduler scheduler, SfrFile sfrs, InterruptController interrupts, Ports ports, Gpt gpt, EventLog log)
     {
@@ -132,16 +135,18 @@ public sealed class Capcom
         for (var x = unit + 8; x < unit + 16; x++)
         {
             if (Mode(x) == 4 && Mode(x - 8) == 5)
-            {
-                var low = x - 8;
-                var high = x;
-                log.Add((c, pc) => new UnsupportedEvent(c, pc,
-                    $"double-register compare mode on CC{low}/CC{high} is not modelled: each channel runs alone"));
-            }
+                ReportOnce($"double-register compare mode on CC{x - 8}/CC{x} is not modelled: each channel runs alone");
         }
         var first = unit == 0 ? 0 : 2;
         timers[first].Reschedule();
         timers[first + 1].Reschedule();
+    }
+
+    /// <summary>Each unmodelled mode is reported once per machine.</summary>
+    void ReportOnce(string what)
+    {
+        if (reported.Add(what))
+            log.Add((c, pc) => new UnsupportedEvent(c, pc, what));
     }
 
     void OnT6OverOrUnderflow()
@@ -190,13 +195,17 @@ public sealed class Capcom
             {
                 if (mode == 5)
                     ports.ToggleLatchBit(pin.Port, pin.Bit);
-                else if (mode == 7)
+                else if (mode == 7 && cc[x] != timer.Reload)
                     ports.SetLatchBit(pin.Port, pin.Bit, true);
             }
         }
     }
 
-    /// <summary>A new period of <paramref name="timer"/>: modes 2 and 3 may match again; mode 3 resets its latch.</summary>
+    /// <summary>
+    /// A new period of <paramref name="timer"/>: modes 2 and 3 may match again; mode 3 resets its
+    /// latch, unless CCx equals the reload value (UM p. 15-18: set and clear would coincide, so
+    /// the output does not change).
+    /// </summary>
     void Overflowed(CapTimer timer)
     {
         for (var x = timer.FirstChannel; x < timer.FirstChannel + 16; x++)
@@ -204,7 +213,7 @@ public sealed class Capcom
             if (TimerOf(x) != timer)
                 continue;
             matchedThisPeriod[x] = false;
-            if (Mode(x) == 7 && PinOf(x) is { } pin)
+            if (Mode(x) == 7 && cc[x] != timer.Reload && PinOf(x) is { } pin)
                 ports.SetLatchBit(pin.Port, pin.Bit, false);
         }
     }
@@ -290,8 +299,7 @@ public sealed class Capcom
             counting = run && counterMode;
             if (counting && countInput >= 4)
             {
-                var name = Name;
-                owner.log.Add((c, pc) => new UnsupportedEvent(c, pc, $"{name}: the reserved counter input TxI = 1xx; {name} stops"));
+                owner.ReportOnce($"{Name}: the reserved counter input TxI = 1xx; {Name} stops");
                 counting = false;
             }
             else if (counting && countInput != 0 && edgeInput == null)
@@ -317,7 +325,7 @@ public sealed class Capcom
         {
             if (!counting || edgeInput is not { } pin || pin.Port != port || pin.Bit != bit)
                 return;
-            if (countInput == 3 || (countInput == 1) == rising)
+            if (countInput == 3 || (countInput == 1 && rising) || (countInput == 2 && !rising))
                 Step();
         }
 

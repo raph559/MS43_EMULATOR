@@ -11,7 +11,7 @@ namespace Ms43Sim.Core;
 /// is set, and clocks the CAPCOM timers. A selected CAPIN edge captures T5 into CAPREL (T5SC),
 /// clears T5 (T5CLR) and sets CRIR.
 /// [assumption] The prescalers run from power-on, so steps fall on multiples of the prescale.
-/// Not modelled, each reported with the timer's name: T3 incremental interface mode, T2/T4
+/// Not modelled, each reported once with the timer's name: T3 incremental interface mode, T2/T4
 /// reload, capture and incremental interface modes, T2/T4 counting T3OTL (concatenation), the
 /// reserved mode codes (the timer then stops), and CT3 = 1 (no capture then). T3OUT and T6OUT do
 /// not drive their pins.
@@ -29,6 +29,7 @@ public sealed class Gpt
     readonly EventLog log;
     readonly GptTimer[] timers;
     readonly InterruptSource captureRequest = InterruptSources.ByName("CR");
+    readonly HashSet<string> reported = new();
     ushort caprel;
 
     public Gpt(Scheduler scheduler, SfrFile sfrs, InterruptController interrupts, Ports ports, EventLog log)
@@ -285,10 +286,12 @@ public sealed class Gpt
             wrapEvent = -1;
         }
 
+        /// <summary>Each unmodelled mode is reported once per machine.</summary>
         void Report(string what)
         {
-            var name = Number;
-            gpt.log.Add((c, pc) => new UnsupportedEvent(c, pc, $"T{name}: {what}"));
+            var text = $"T{Number}: {what}";
+            if (gpt.reported.Add(text))
+                gpt.log.Add((c, pc) => new UnsupportedEvent(c, pc, text));
         }
     }
 }

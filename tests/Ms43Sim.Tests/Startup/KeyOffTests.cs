@@ -24,6 +24,12 @@ public class KeyOffTests : IClassFixture<CarKeyOff>
         Assert.Equal(0x38C3, BitConverter.ToUInt16(r.Eeprom.FinalImage, 0x3A));
     }
 
+    [Fact] public void AfterRun_ShutdownFrames_AreNotCountedAsUnexpected()
+    {
+        Assert.Equal((0, 0x3B), (r.Monitor.UnexpectedAnswers, (int)r.Firmware.MonitorState));
+        Assert.Contains("3Bh after-run shutdown", RunReportWriter.Report(r));
+    }
+
     [Fact] public void KeyOff_IsRecorded_AtTheRequestedTime() =>
         Assert.Equal(3UL * 24_000_000, r.Milestones.KeyOff);
 

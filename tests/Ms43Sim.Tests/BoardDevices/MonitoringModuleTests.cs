@@ -74,6 +74,8 @@ public class MonitoringModuleTests
 
     static byte[] CpuAdh(ushort answer) => WithXor(0xAD, answer >> 8, answer & 0xFF, 0, 0, 0, 0, 0);
 
+    static byte[] Cpu3Bh() => WithXor(0x3B, 0, 0, 0, 0, 0, 0, 0);
+
     /// <summary>Selects, advances 10,000 cycles, deselects; returns the 9 bytes the module clocked.</summary>
     static byte[] Exchange(H h, byte[] cpuFrame)
     {
@@ -155,6 +157,17 @@ public class MonitoringModuleTests
         Exchange(h, Cpu12h());                                            // exchange 2 wants CFh
         Assert.Equal(2, h.Module.UnexpectedAnswers);
         Assert.Equal(2, h.Log.All.OfType<MonitoringEvent>().Count());
+    }
+
+    [Fact] public void CpuShutdownFrames3Bh_AreAccepted_AndReportedOnce()
+    {
+        // The after-run (0E:1156 from 0D:836C) sets E027 = 3Bh and sends 3Bh frames until F8F8
+        // allows the EEPROM write: a handshake, not an error.
+        var h = new H();
+        AdhFrames(h, 2);
+        Exchange(h, Cpu3Bh()); Exchange(h, Cpu3Bh()); Exchange(h, Cpu3Bh());
+        Assert.Equal(0, h.Module.UnexpectedAnswers);
+        Assert.Contains("3Bh", Assert.Single(h.Log.All.OfType<MonitoringEvent>()).What);
     }
 
     [Fact] public void Timing_TheFirstByteEnds1248Cycles_AndTheLast8160_AfterTheFall()

@@ -49,6 +49,12 @@ public class GptTests
         Assert.Equal((50, 0, 0x80), (t.M.Gpt.Caprel, t.M.Gpt.Timer(5), t.Sfr(0xFF6A) & 0x80));
     }
 
+    [Fact] public void UnmodelledMode_IsReportedOnce()
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFF42, 0x0070).WriteSfr(0xFF42, 0x0070).WriteSfr(0xFF42, 0x0071);
+        Assert.Single(t.M.Events.All.OfType<UnsupportedEvent>());
+    }
+
     [Fact] public void IncrementalInterfaceMode_IsReported()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFF42, 0x0070);

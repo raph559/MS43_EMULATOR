@@ -7,7 +7,8 @@ namespace Ms43Sim.Core;
 /// bytes 0-7. Exchange 1 after a CPU reset is 12h, exchange 2 is CFh, every later one is an ADh
 /// question: q = (k − 2) mod 28h, a toggle byte whose bits 1-5 invert at every 8th ADh frame,
 /// its error counter C, and its own reading of ADC channel 6 (code >> 2). After byte 9 it checks
-/// the CPU's XOR and frame type and, in an ADh exchange, the answer to the question it asked one
+/// the CPU's XOR and frame type (3Bh frames, the CPU's after-run shutdown or degraded state, are
+/// noted once) and, in an ADh exchange, the answer to the question it asked one
 /// exchange earlier (the CFh frame counts as question 0): C rises by 1 for a wrong answer and
 /// falls by 1 otherwise, never below 0. A wrong answer that is not the question's seed (the
 /// CPU's deliberate wrong answer), a bad XOR and an unexpected type are reported. The module's
@@ -20,7 +21,7 @@ public sealed class MonitoringModule
 {
     const ulong FirstByteEnd = 480 + 768, ByteSpacing = 768 + 96;
     const int FrameBytes = 9, Questions = 0x28;
-    const byte Hello = 0x12, Confirm = 0xCF, Question = 0xAD, ToggleBits = 0x3E;
+    const byte Hello = 0x12, Confirm = 0xCF, Question = 0xAD, Shutdown = 0x3B, ToggleBits = 0x3E;
 
     /// <summary>The seed of question q is entry q >> 2 (0E:E4D2).</summary>
     static readonly ushort[] Seeds =
@@ -50,6 +51,7 @@ public sealed class MonitoringModule
     readonly byte[] received = new byte[FrameBytes];
 
     bool selected;
+    bool shutdownSeen;
     int byteIndex;
     long byteEvent = -1;
 
@@ -111,6 +113,7 @@ public sealed class MonitoringModule
         Cancel();
         ExchangesSinceReset = 0;
         ErrorCounter = 0;
+        shutdownSeen = false;
         selected = chipSelect();
     }
 
@@ -164,7 +167,9 @@ public sealed class MonitoringModule
         var xorOk = Xor(received) == received[8];
         if (!xorOk)
             Report($"CPU frame {received[0]:X2}h with XOR {received[8]:X2}h; its bytes give {Xor(received):X2}h");
-        if (received[0] != expectedType)
+        if (received[0] == Shutdown && expectedType == Question)
+            NoteShutdown();
+        else if (received[0] != expectedType)
             Report($"unexpected CPU frame type {received[0]:X2}h in exchange {k} (expected {expectedType:X2}h)");
         else if (expectedType == Question && xorOk)
             CheckAnswer((k - 3) % Questions, (ushort)(received[1] << 8 | received[2]));
@@ -185,6 +190,19 @@ public sealed class MonitoringModule
         var seed = Seed(question);
         if (answer != seed)
             Report($"unexpected answer {answer:X4} to question {question:X2} (expected {expected:X4}, seed {seed:X4})");
+    }
+
+    /// <summary>
+    /// The CPU's 3Bh frames in the question phase: its after-run shutdown handshake (0E:1156 sets
+    /// E027 = 3Bh; F8F8 lets the EEPROM write go once enough have been sent) or its degraded state.
+    /// Not an error: noted once, not counted, and no answer is checked.
+    /// </summary>
+    void NoteShutdown()
+    {
+        if (shutdownSeen)
+            return;
+        shutdownSeen = true;
+        log.Add((c, pc) => new MonitoringEvent(c, pc, "the CPU sends 3Bh frames: its after-run shutdown or its degraded state"));
     }
 
     void Report(string what)

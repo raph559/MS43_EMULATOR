@@ -53,6 +53,17 @@ public class CliTests
         Assert.Equal(input, File.ReadAllBytes(dir.File("in.bin")));
     }
 
+    [Fact] public void Run_EepromThatTheRunWouldOverwrite_IsAUsageError_AndTheFileSurvives()
+    {
+        using var dir = new TempDirectory();
+        var input = Enumerable.Range(0, 2048).Select(i => (byte)i).ToArray();
+        File.WriteAllBytes(dir.File("eeprom.bin"), input);
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "run", CarPath, "--seconds", "0.3", "--eeprom", dir.File("eeprom.bin"), "--out", dir.Path }, TextWriter.Null, err));
+        Assert.Equal(input, File.ReadAllBytes(dir.File("eeprom.bin")));
+        Assert.Contains("eeprom.bin", err.ToString());
+    }
+
     [Theory]
     [InlineData("--seconds 0")]
     [InlineData("--seconds 601")]

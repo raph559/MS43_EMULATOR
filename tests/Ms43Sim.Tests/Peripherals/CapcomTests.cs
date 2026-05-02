@@ -64,6 +64,31 @@ public class CapcomTests
         Assert.Equal(5, t.M.Capcom.T0);
     }
 
+    [Fact] public void CounterModeOnT6_IgnoresT0inEdges()
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFF50, 0x0048);        // T0: counter, TxI = 000 (T6), run; T6 stopped
+        foreach (var level in new[] { false, true, false, true, false })
+            t.M.Board.SetInputs(t.M.Board.Inputs.WithInput(3, 0, level));
+        Assert.Equal(0, t.M.Capcom.T0);
+    }
+
+    [Fact] public void CompareMode3_WithCcxEqualToTheReload_RaisesItsInterrupt_ButLeavesThePin()
+    {
+        // UM p. 15-18: set and clear would coincide, so the output does not change
+        var t = Cc12(0x000F).WriteSfr(0xFE98, 0xFFE0);                      // CC12 = T1REL
+        t.M.Scheduler.Advance(8 * 32);                                       // overflow: T1 reloads FFE0h
+        Assert.Equal((0, 0x80), (t.M.Ports.Latch(2) & 0x1000, t.Sfr(0xFF90) & 0x80));
+        t.M.Ports.SetLatchBit(2, 12, true);
+        t.M.Scheduler.Advance(8 * 64);                                       // the next overflow does not clear it either
+        Assert.Equal(0x1000, t.M.Ports.Latch(2) & 0x1000);
+    }
+
+    [Fact] public void DoubleRegisterMode_IsReportedOncePerPair()
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFF52, 0x0005).WriteSfr(0xFF56, 0x0004).WriteSfr(0xFF56, 0x0004).WriteSfr(0xFF52, 0x0005);
+        Assert.Single(t.M.Events.All.OfType<UnsupportedEvent>());
+    }
+
     [Fact] public void DoubleRegisterMode_IsReported()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFF52, 0x0005).WriteSfr(0xFF56, 0x0004);   // CC0 mode 1, CC8 mode 0

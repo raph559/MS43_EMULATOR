@@ -140,7 +140,7 @@ public static class RunReportWriter
         s.AppendLine($"| FD7E | {f.Fd7e:X4}h | monitor sums and monitoring flags{(f.MonitorSumMismatch ? "; monitor-sum mismatch" : "")} |");
         s.AppendLine($"| FD0C | {f.Fd0c:X4}h | throttle limp (bit 10): {(f.ThrottleLimp ? "yes" : "no")} |");
         s.AppendLine($"| FD46 | {f.Fd46:X4}h | EEPROM defaults loaded (bit 5): {(f.EepromDefaultsLoaded ? "yes" : "no")} |");
-        s.AppendLine($"| E027 | {f.MonitorState:X2}h | monitoring state (00, 12h, CFh, ADh; 3Bh degraded) |");
+        s.AppendLine($"| E027 | {f.MonitorState:X2}h | monitoring state (00, 12h, CFh, ADh; 3Bh after-run shutdown or degraded) |");
         s.AppendLine($"| E7E9 | {f.LastError:X2}h | last error code |");
         s.AppendLine($"| E7EA | {f.ErrorCount:X2}h | error count |");
         s.AppendLine($"| E7FC | {f.ResetReason:X4}h | reset reason (0020h SRST after an error, 0010h forced watchdog reset) |");
