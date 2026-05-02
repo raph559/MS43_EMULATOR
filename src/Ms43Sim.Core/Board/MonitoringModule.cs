@@ -5,12 +5,14 @@ namespace Ms43Sim.Core;
 /// firmware implements [obs; answers ver]. The module is the SPI master: when its chip select
 /// falls it builds a 9-byte frame and clocks it through the CPU's SSC, byte 8 being the XOR of
 /// bytes 0-7. Exchange 1 after a CPU reset is 12h, exchange 2 is CFh, every later one is an ADh
-/// question: q = (k − 2) mod 28h, a toggle byte whose bits 1-5 invert at every 8th ADh frame,
-/// its error counter C, and its own reading of ADC channel 6 (code >> 2). After byte 9 it checks
-/// the CPU's XOR and frame type (3Bh frames, the CPU's after-run shutdown or degraded state, are
-/// noted once) and, in an ADh exchange, the answer to the question it asked one
-/// exchange earlier (the CFh frame counts as question 0): C rises by 1 for a wrong answer and
-/// falls by 1 otherwise, never below 0. A wrong answer that is not the question's seed (the
+/// question, a toggle byte whose bits 1-5 invert at every 8th ADh frame, its error counter C, and
+/// its own reading of ADC channel 6 (code >> 2). An ADh frame with C = 0 asks the next question
+/// (mod 28h; the CFh frame counts as question 0); one with C > 0 asks the previous frame's
+/// question again [inf: with C ≠ 0 the firmware skips its sequence check and its test-record
+/// change, 0E:0C66-0E:0DD4; plan 3, Reference facts]. After byte 9 it checks the CPU's XOR and
+/// frame type (3Bh frames, the CPU's after-run shutdown or degraded state, are noted once) and,
+/// in an ADh exchange, the answer to the question it sent in the previous exchange: C rises by 1
+/// for a wrong answer and falls by 1 otherwise, never below 0. A wrong answer that is not the question's seed (the
 /// CPU's deliberate wrong answer), a bad XOR and an unexpected type are reported. The module's
 /// own reaction (cutting the throttle power stage) is not modelled.
 /// [assumption] The "xx" bytes are 00h. Timing: first clock edge 20 µs (480 cycles) after the
@@ -52,6 +54,8 @@ public sealed class MonitoringModule
 
     bool selected;
     bool shutdownSeen;
+    int asked;          // the question in the frame being exchanged
+    int previous;       // the question of the last completed exchange
     int byteIndex;
     long byteEvent = -1;
 
@@ -114,6 +118,7 @@ public sealed class MonitoringModule
         ExchangesSinceReset = 0;
         ErrorCounter = 0;
         shutdownSeen = false;
+        asked = previous = 0;
         selected = chipSelect();
     }
 
@@ -137,12 +142,14 @@ public sealed class MonitoringModule
         {
             sending[0] = Confirm;
             sending[4] = m;
+            asked = 0;
         }
         else
         {
             var adhFrame = k - 2;
+            asked = ErrorCounter > 0 ? previous : (previous + 1) % Questions;
             sending[0] = Question;
-            sending[1] = (byte)((k - 2) % Questions);
+            sending[1] = (byte)asked;
             sending[2] = (adhFrame / 8 & 1) != 0 ? ToggleBits : (byte)0;
             sending[3] = (byte)Math.Min(ErrorCounter, 0xFF);
             sending[4] = m;
@@ -172,7 +179,9 @@ public sealed class MonitoringModule
         else if (received[0] != expectedType)
             Report($"unexpected CPU frame type {received[0]:X2}h in exchange {k} (expected {expectedType:X2}h)");
         else if (expectedType == Question && xorOk)
-            CheckAnswer((k - 3) % Questions, (ushort)(received[1] << 8 | received[2]));
+            CheckAnswer(previous, (ushort)(received[1] << 8 | received[2]));
+        if (k >= 2)
+            previous = asked;
         ExchangesSinceReset++;
         Exchanges++;
     }

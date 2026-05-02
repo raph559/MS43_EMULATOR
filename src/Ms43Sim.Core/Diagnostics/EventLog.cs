@@ -2,18 +2,20 @@ namespace Ms43Sim.Core;
 
 /// <summary>
 /// The run's events, in order. Capped so a runaway loop cannot exhaust memory: it keeps the first
-/// <see cref="TrapAndResetCapacity"/> traps and resets and, separately, the first
-/// <see cref="OtherCapacity"/> other events, so a flood of flash writes cannot push out a trap.
-/// Every event is counted, kept or not.
+/// <see cref="TrapAndResetCapacity"/> traps and resets, the first <see cref="FlashWriteCapacity"/>
+/// flash writes and, separately, the first <see cref="OtherCapacity"/> other events, so neither a
+/// flood of flash writes (the car writes every 10 ms) nor anything else can push out a trap or a
+/// later unsupported event. Every event is counted, kept or not.
 /// </summary>
 public sealed class EventLog
 {
     public const int TrapAndResetCapacity = 1_000;
     public const int OtherCapacity = 10_000;
+    public const int FlashWriteCapacity = 1_000;
 
     readonly List<SimEvent> events = new();
     readonly Dictionary<Type, long> counts = new();
-    int trapsAndResetsKept, otherKept;
+    int trapsAndResetsKept, flashWritesKept, otherKept;
 
     public Func<(ulong Cycle, uint Pc)> Context { get; set; } = () => (0, 0);
 
@@ -41,6 +43,15 @@ public sealed class EventLog
                 return;
             }
             trapsAndResetsKept++;
+        }
+        else if (e is FlashWriteEvent)
+        {
+            if (flashWritesKept == FlashWriteCapacity)
+            {
+                Dropped++;
+                return;
+            }
+            flashWritesKept++;
         }
         else
         {

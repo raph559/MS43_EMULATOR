@@ -78,6 +78,16 @@ public class SscTests
         Assert.Equal((0x0200, 0x80), (t.Sfr(Sscc) & 0x0200, t.Sfr(Eic) & 0x80));
     }
 
+    [Fact] public void ReprogrammingWhileDisabled_ForgetsAnUnreadReceiveBuffer()
+    {
+        var (t, _) = Master(0xC23F);
+        t.WriteSfr(Tb, 0x1111); t.M.Scheduler.Advance(768);             // received; SSCRB never read
+        t.WriteSfr(Sscc, 0x4000);                                        // SSCEN = 0, as job 0 does (0E:B09A)
+        t.WriteSfr(Sscc, 0xC23F);                                        // a programming-mode write: initialise, enable
+        t.WriteSfr(Tb, 0x2222); t.M.Scheduler.Advance(1536);
+        Assert.Equal((0, 0), (t.Sfr(Sscc) & 0x0200, t.Sfr(Eic) & 0x80));
+    }
+
     [Fact] public void ClearingSscen_AbortsTheTransfer()
     {
         var (t, _) = Master(0xC23F);

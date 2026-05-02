@@ -53,6 +53,9 @@ public class CarStartupTests : IClassFixture<CarKeyOn>
         Assert.True(r.Firmware.ThrottleLimp);
     }
 
+    [Fact] public void ChipA_PassesItsChecks_SoTheEcuFaultMaskStaysClear() =>
+        Assert.Equal(0, r.Firmware.EcuFaults);      // bit 10 (0400h) was plan 2's SSC artefact: P0604 at every key-on
+
     [Fact] public void BlankEeprom_LoadsDefaults_AndIsNotWrittenWhileTheKeyIsOn()
     {
         Assert.True(r.Firmware.EepromDefaultsLoaded);

@@ -48,7 +48,7 @@ public static class MachineAssumptions
         "the output latch on CS3 is a write-only latch on D0-D7: a byte write to the odd address does not load it, and a read gives FFFFh and is reported; it powers up as 78h (every chip select inactive) and a CPU reset leaves it [assumption]",
         // SSC and its devices
         "MRST has a pull-up: it reads 1 while no selected device drives it [assumption]",
-        "SSC: no start latency; phase and baud-rate errors are never raised; clearing SSCEN aborts a transfer without SSCRIR; a write to SSCTB while disabled is only stored; SSCBR reads give the reload value; the shift register powers up as FFFFh; the clock edges of a master transfer reach the slaves at its end [assumption]",
+        "SSC: no start latency; phase and baud-rate errors are never raised; clearing SSCEN aborts a transfer without SSCRIR; a write to SSCTB while disabled is only stored; a write in programming mode initialises the SSC and forgets an unread SSCRB (UM p. 12-4: it \"will initialize the SSC\"); SSCBR reads give the reload value; the shift register powers up as FFFFh; the clock edges of a master transfer reach the slaves at its end [assumption]",
         options.EepromImage == null
             ? "EEPROM M93C86: starts blank, every word FFFFh [owner]"
             : "EEPROM M93C86: loaded from a 2,048-byte image",
@@ -62,7 +62,7 @@ public static class MachineAssumptions
         "PWM: mode 0 (edge aligned) only; PIRx is set when PTx restarts at 0000h, not when the timer starts; a counter started above its period runs to FFFFh first; not modelled, each reported once: mode 1, burst and single shot; the outputs do not drive the P7 pins [assumption]",
         "ASC0: asynchronous modes only; transmission starts without the divide-by-16 latency; received frames are clean (no framing or parity errors); a loopback frame arrives at the end of its stop bits; not modelled, each reported once: synchronous mode and the reserved modes [assumption]",
         "CAN: every transmitted frame is acknowledged and no other node sends [stub: CAN partners]; a frame lasts (44 + 8·DLC + 3) bit times, no stuff bits, extended frames alike; object 15 matches under the global mask only; not modelled: remote frames (each request reported), error counters, bus-off and the last-message mask [assumption]",
-        "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
+        "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); a frame whose error counter is not zero asks the previous question again [inf]; its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
     };
 
     static string Inputs(BoardInputs inputs)

@@ -11,7 +11,9 @@ namespace Ms43Sim.Core;
 /// no gap. Slave: an external master clocks one character at a time through
 /// <see cref="ExternalTransfer"/>.
 /// [assumption] No start latency; phase and baud-rate errors are never raised; clearing SSCEN
-/// aborts a transfer without SSCRIR; a write to SSCTB while disabled is only stored.
+/// aborts a transfer without SSCRIR; a write to SSCTB while disabled is only stored; a write in
+/// programming mode initialises the SSC, so an unread SSCRB is forgotten (UM p. 12-4: such a
+/// write "will initialize the SSC"; without it job 0 fails after every job 3, plan 3).
 /// </summary>
 public sealed class Ssc : ISscPort
 {
@@ -113,9 +115,14 @@ public sealed class Ssc : ISscPort
     void WriteCon(ushort value)
     {
         if (enabled)
+        {
             flags = (ushort)(value & FlagBits);     // software clears the error flags
+        }
         else
+        {
             control = (ushort)(value & ControlBits);
+            rbUnread = false;                       // [assumption] UM p. 12-4: a programming-mode write "will initialize the SSC"
+        }
         master = (value & Ms) != 0;
         var enable = (value & En) != 0;
         if (enabled && !enable)

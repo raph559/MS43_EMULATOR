@@ -140,6 +140,19 @@ public class MonitoringModuleTests
         Assert.Equal((1, 0), (h.Module.WrongAnswers, h.Module.UnexpectedAnswers));
     }
 
+    [Fact] public void ACounterAboveZero_RepeatsTheQuestion_AndTheNextFrameMovesOn()
+    {
+        var h = new H();
+        Exchange(h, Cpu12h()); Exchange(h, CpuCf());
+        var q1 = Exchange(h, CpuAdh(MonitoringModule.ExpectedAnswer(0)));      // asks 1
+        var q2 = Exchange(h, CpuAdh(MonitoringModule.Seed(1)));                // asks 2; the CPU answers 1 with its seed
+        var repeat = Exchange(h, CpuAdh(MonitoringModule.ExpectedAnswer(2)));  // C = 1: asks 2 again
+        var next = Exchange(h, CpuAdh(MonitoringModule.ExpectedAnswer(2)));    // C = 0: asks 3
+        Assert.Equal((1, 2, 2, 3), ((int)q1[1], (int)q2[1], (int)repeat[1], (int)next[1]));
+        Assert.Equal((1, 0), ((int)repeat[3], (int)next[3]));
+        Assert.Equal((1, 0), (h.Module.WrongAnswers, h.Module.UnexpectedAnswers));
+    }
+
     [Fact] public void AnswerThatIsNeitherExpectedNorTheSeed_IsReported()
     {
         var h = new H();

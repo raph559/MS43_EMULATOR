@@ -18,7 +18,8 @@ public sealed record SchedulerHealth(int MainLoopServices, ulong LongestGapCycle
 /// <summary>RAM read-outs at the end of the run (plan 2, Reference facts).</summary>
 public sealed record FirmwareState(
     ushort F8F4, ushort Fd26, ushort Fd7e, ushort Fd0c, ushort Fd46,
-    byte MonitorState, byte LastError, byte ErrorCount, ushort ResetReason, byte EngineState)
+    byte MonitorState, byte LastError, byte ErrorCount, ushort ResetReason, byte EngineState,
+    ushort EcuFaults)
 {
     /// <summary>The CRC task finished and passed (F8F4) and FD26 shows all three CRCs finished, none failed.</summary>
     public bool CrcChecksPassed =>
@@ -203,10 +204,15 @@ public static class StartupRun
         ushort Iram(uint a) => m.Bus.Peek16(a);
         return new FirmwareState(
             Iram(0xF8F4), Iram(0xFD26), Iram(0xFD7E), Iram(0xFD0C), Iram(0xFD46),
-            Xram(m, 0xE027), Xram(m, 0xE7E9), Xram(m, 0xE7EA), XramWord(m, 0xE7FC), (byte)Iram(0xF900));
+            Xram(m, 0xE027), Xram(m, 0xE7E9), Xram(m, 0xE7EA), XramWord(m, 0xE7FC), (byte)Iram(0xF900),
+            ExternalWord(m, 0x883C));
     }
 
     static byte Xram(Machine m, uint a) => m.Bus.Xram[a - 0xE000];
 
     static ushort XramWord(Machine m, uint a) => (ushort)(Xram(m, a) | (Xram(m, a + 1) << 8));
+
+    /// <summary>A word of the external RAM, 8000h-9FFFh through DPP2.</summary>
+    static ushort ExternalWord(Machine m, uint a) =>
+        (ushort)(m.Bus.ExternalRam[a - 0x8000] | (m.Bus.ExternalRam[a - 0x8000 + 1] << 8));
 }
