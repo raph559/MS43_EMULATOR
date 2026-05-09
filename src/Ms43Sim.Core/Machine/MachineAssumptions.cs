@@ -43,6 +43,7 @@ public static class MachineAssumptions
         // board inputs and pins
         Inputs(options.Inputs),
         "ADC codes: VAREF = 5.0 V and an ideal converter, code = floor(V / 5.0 × 1024 + 0.5), clamped to 0…1023 [assumption]",
+        "the battery and KL15 dividers are ÷ 5.2 [inf: 26/255 V per count of FBD5/FBD6]",
         "every digital input not listed reads high (pull-ups); a P5 pin reads 1 above 2.5 V; P5DIDIS and PICON are only stored [assumption]",
         "P8.6 (the throttle shut-off feedback) reads low for the whole run, with no edges [call]",
         "the output latch on CS3 is a write-only latch on D0-D7: a byte write to the odd address does not load it, and a read gives FFFFh and is reported; it powers up as 78h (every chip select inactive) and a CPU reset leaves it [assumption]",
@@ -54,7 +55,7 @@ public static class MachineAssumptions
             : "EEPROM M93C86: loaded from a 2,048-byte image",
         "EEPROM M93C86: write cycle tW = 5 ms (120,000 cycles); ready (1) or busy (0) on DO while its chip select is high and no instruction is clocked; the write enable is cleared at power-on; a READ continues into the next word; instructions clocked during a write cycle are ignored; a power-on during a write cycle abandons it [assumption]",
         "output-driver chip A: a 16-bit shift register (SPI mode 1) whose \"no fault\" answer is the complement of the command it latched at its previous transfer [obs]",
-        "output-driver chip B: a 32-bit shift register answering FFFF FFFFh (no fault); it releases MISO until the monitoring module has sent its first ADh frame [inf]",
+        $"output-driver chip B: a 32-bit shift register answering the board's status word {options.Inputs.ChipBStatus:X8}h, D0 first (11 = healthy per channel; FFFFFAFAh: the car's four lambda heaters are unplugged and read open, a = 0, b = 1 [inf]); it releases MISO until the monitoring module has sent its first ADh frame [inf]",
         // on-chip peripherals
         "GPT1/2: the prescalers run from power-on, so timer steps fall on multiples of 8 × 2^TxI (GPT1) or 4 × 2^TxI (GPT2) cycles; not modelled, each reported: T3 incremental interface mode, T2/T4 reload, capture and incremental interface modes, T2/T4 counting T3OTL, the reserved mode codes, and CT3 = 1; T3OUT and T6OUT do not drive their pins [assumption]",
         "CAPCOM: the prescalers run from power-on (steps fall on multiples of 2^(TxI + 3) cycles); a match is the timer stepping, reloading or being written by software to CCx [UM p. 15-15], never a software write of CCx [assumption]; a change of a channel's CCM field clears its once-per-period lock [inf: the coil and knock channels depend on it]; not modelled, each reported: the double-register compare mode and the reserved counter inputs TxI = 1xx [assumption]",
@@ -75,7 +76,9 @@ public static class MachineAssumptions
             .Select(p => $"P{p.Port}.{p.Bit}");
         var name = ReferenceEquals(inputs, BoardInputs.KeyOnEngineStopped)
             ? "key on, engine stopped (12.6 V, 20 °C, pedal released, throttle at limp-home, lambda sensors unplugged) [call]"
-            : "as given";
+            : ReferenceEquals(inputs, BoardInputs.WarmIdle)
+                ? "warm idle (coolant and oil 90 °C, intake air 33 °C, 101.3 kPa, 12.6 V with the key on, pedal released, lambda sensors and heaters unplugged; plan 3, Reference facts) [call]"
+                : "as given";
         return $"inputs: {name}: AN0-AN15 = {Volts(inputs.AnalogVolts)} V; mux A (AN13) = {Volts(inputs.MuxAVolts)} V; " +
                $"mux B (AN4) = {Volts(inputs.MuxBVolts)} V; low: {string.Join(", ", low)}" +
                (high.Any() ? $"; high: {string.Join(", ", high)}" : "");

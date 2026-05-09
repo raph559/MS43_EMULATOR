@@ -64,13 +64,13 @@ public class ShiftRegisterChipTests
 
     [Fact] public void ChipB_HeldOffByTheModule_AnswersOnlyFf()
     {
-        var (t, cs, _) = Harness(c => ShiftRegisterChip.ChipB(c, () => false));
+        var (t, cs, _) = Harness(c => ShiftRegisterChip.ChipB(c, () => false, () => 0xFFFF_FFFFu));
         Assert.Equal(new[] { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }, Job(t, cs, 0x96, 0xFF, 0xFF, 0xFF, 0xFF));
     }
 
     [Fact] public void ChipB_Released_AnswersNoFault_Then96()
     {
-        var (t, cs, _) = Harness(c => ShiftRegisterChip.ChipB(c, () => true));
+        var (t, cs, _) = Harness(c => ShiftRegisterChip.ChipB(c, () => true, () => 0xFFFF_FFFFu));
         Assert.Equal(new[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x96 }, Job(t, cs, 0x96, 0xFF, 0xFF, 0xFF, 0xFF));
     }
 
@@ -88,5 +88,11 @@ public class ShiftRegisterChipTests
         chip.PowerOn();
         Assert.Equal(0UL, chip.Latched);
         Assert.Equal(new[] { 0xFF, 0xFF, 0xA6 }, Job(t, cs, 0xA6, 0x56, 0x78));
+    }
+
+    [Fact] public void ChipB_ShiftsOutItsStatusWord_D0First()
+    {
+        var (t, cs, _) = Harness(c => ShiftRegisterChip.ChipB(c, () => true, () => BoardInputs.HeatersOpen));
+        Assert.Equal(new[] { 0xFF, 0xFF, 0xFA, 0xFA, 0x96 }, Job(t, cs, 0x96, 0xFF, 0xFF, 0xFF, 0xFF));
     }
 }

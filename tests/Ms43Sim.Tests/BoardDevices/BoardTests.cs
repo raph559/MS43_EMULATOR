@@ -69,4 +69,29 @@ public class BoardTests
         t.M.PowerOn();
         Assert.Equal(0x78, t.M.Board.Latch.Value);
     }
+
+    [Fact] public void Drive_OverridesTheInputSet_AndReportsOnlyRealChanges()
+    {
+        var board = new Board(BoardInputs.KeyOnEngineStopped, new EventLog());
+        var changes = new List<(int, int)>();
+        board.DigitalInputChanged += (p, b) => changes.Add((p, b));
+        board.Drive(2, 15, true);                       // an unlisted pin already reads high: no change
+        board.Drive(2, 15, false);
+        board.Drive(2, 15, false);
+        Assert.Equal(new[] { (2, 15) }, changes);
+        Assert.False(board.InputLevel(2, 15));
+        board.Release(2, 15);
+        Assert.True(board.InputLevel(2, 15));
+    }
+
+    [Fact] public void AttachedAnalogSource_IsWhatTheAdcConverts()
+    {
+        var t = TestMachine.Create("0DFF");
+        t.M.Board.AttachAnalog(12, () => 1.25);
+        t.WriteSfr(0xFFA0, 0x008C); t.M.Scheduler.Advance(200);             // fixed channel 12, 194 cycles
+        Assert.Equal(0xC000 | 256, t.Sfr(0xFEA0));                          // CHNR 12, floor(1.25 / 5 × 1024 + 0.5)
+    }
+
+    [Fact] public void MultiplexedChannels_TakeNoSource() =>
+        Assert.Throws<ArgumentException>(() => new Board(BoardInputs.KeyOnEngineStopped, new EventLog()).AttachAnalog(13, () => 1.0));
 }

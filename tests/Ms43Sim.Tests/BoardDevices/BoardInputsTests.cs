@@ -44,4 +44,24 @@ public class BoardInputsTests
         Assert.Equal(new[] { (3, 1, true) }, seen);
         Assert.True(t.M.Ports.Pin(3, 1));
     }
+
+    [Fact] public void BothCarInputSets_ReportTheLambdaHeatersOpen() =>
+        Assert.Equal((0xFFFF_FAFAu, 0xFFFF_FAFAu), (BoardInputs.KeyOnEngineStopped.ChipBStatus, BoardInputs.WarmIdle.ChipBStatus));
+
+    [Fact] public void WarmIdle_ReadsAsTheResearchedCodes()
+    {
+        var w = BoardInputs.WarmIdle;
+        Assert.Equal((205, 604, 205, 836, 496, 496),
+            (BoardInputs.AdcCode(w.MuxAVolts[3]), BoardInputs.AdcCode(w.MuxAVolts[1]), BoardInputs.AdcCode(w.MuxAVolts[2]),
+             BoardInputs.AdcCode(w.MuxBVolts[3]), BoardInputs.AdcCode(w.AnalogVolts[1]), BoardInputs.AdcCode(w.AnalogVolts[5])));
+    }
+
+    [Fact] public void WithBattery_DividesBy5Point2_AndLeavesKl15OffWhenTheKeyIsOff()
+    {
+        var on = BoardInputs.WarmIdle.WithBattery(14.0);
+        var off = BoardInputs.WarmIdle.WithIgnition(false).WithBattery(14.0);
+        Assert.Equal((551, 551, 0, 551),
+            (BoardInputs.AdcCode(on.AnalogVolts[1]), BoardInputs.AdcCode(on.AnalogVolts[5]),
+             BoardInputs.AdcCode(off.AnalogVolts[1]), BoardInputs.AdcCode(off.AnalogVolts[5])));
+    }
 }

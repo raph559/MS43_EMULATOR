@@ -36,12 +36,13 @@ public sealed class ShiftRegisterChip : ISscSlave
         new("output driver A", 16, chipSelect, () => true, latched => ~latched & 0xFFFF);
 
     /// <summary>
-    /// Chip B (latch bit 3 low): 32 bits, 16 channels × 2 diagnostic bits, 11 = OK [obs]. It answers
-    /// only once <paramref name="released"/> [inf: the monitoring module holds it off until its
-    /// first ADh frame].
+    /// Chip B (latch bit 3 low): 32 bits, 16 channels × 2 diagnostic bits, 11 = OK whatever the
+    /// output's state [obs]. It answers <paramref name="status"/>, the loads on its outputs, D0
+    /// (bits 31-24) shifted out first, and only once <paramref name="released"/> [inf: the monitoring
+    /// module holds it off until its first ADh frame].
     /// </summary>
-    public static ShiftRegisterChip ChipB(Func<bool> chipSelect, Func<bool> released) =>
-        new("output driver B", 32, chipSelect, released, _ => 0xFFFF_FFFF);
+    public static ShiftRegisterChip ChipB(Func<bool> chipSelect, Func<bool> released, Func<uint> status) =>
+        new("output driver B", 32, chipSelect, released, _ => status());
 
     public string Name { get; }
 
