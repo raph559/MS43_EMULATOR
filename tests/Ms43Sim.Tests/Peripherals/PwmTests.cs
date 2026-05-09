@@ -63,4 +63,39 @@ public class PwmTests
         t.M.Scheduler.Advance(500);
         Assert.Equal((60, false), ((int)t.M.Pwm.Counter(3), t.M.Pwm.Output(3)));
     }
+
+    // PWM2 at fCPU: PP2 = EA5Fh (60,000 counts), PW2 = 3A98h (15,000), PEN2 and PTR2 set.
+    static TestMachine Pwm2() => TestMachine.Create("0DFF")
+        .WriteSfr(0xF03C, 0xEA5F).WriteSfr(0xFE34, 0x3A98).WriteSfr(0xFF32, 0x0004).WriteSfr(0xFF30, 0x0004);
+
+    [Fact] public void PinHighFraction_IsTheComparatorShare_XoredWithTheLatch()
+    {
+        var t = Pwm2();
+        Assert.Equal(0.75, t.M.Pwm.PinHighFraction(2, latch: false), 6);   // PT2 ≥ PW2 for 45,000 of 60,000 counts
+        Assert.Equal(0.25, t.M.Pwm.PinHighFraction(2, latch: true), 6);    // the throttle's set-up: high while PT2 < PW2
+    }
+
+    [Fact] public void PinHighFraction_WithTheOutputDisabled_IsTheLatch()
+    {
+        var t = Pwm2().WriteSfr(0xFF32, 0x0000);
+        Assert.Equal((0.0, 1.0), (t.M.Pwm.PinHighFraction(2, false), t.M.Pwm.PinHighFraction(2, true)));
+    }
+
+    [Fact] public void PinHighFraction_KeepsTheShadow_UntilTheNextRestart()
+    {
+        var t = Pwm2();
+        t.WriteSfr(0xFE34, 0x7530);                                         // PW2 = 30,000 while running
+        Assert.Equal(0.75, t.M.Pwm.PinHighFraction(2, false), 6);
+        t.M.Scheduler.Advance(60_000);
+        Assert.Equal(0.5, t.M.Pwm.PinHighFraction(2, false), 6);
+    }
+
+    [Fact] public void SettingsChanged_FiresForPeriodWidthAndControlWrites()
+    {
+        var t = TestMachine.Create("0DFF");
+        var seen = new List<int>();
+        t.M.Pwm.SettingsChanged += seen.Add;
+        t.WriteSfr(0xF03A, 0x0752).WriteSfr(0xFE32, 0x0100).WriteSfr(0xFF32, 0x0002);
+        Assert.Equal(new[] { 1, 1, 0, 1, 2, 3 }, seen);
+    }
 }

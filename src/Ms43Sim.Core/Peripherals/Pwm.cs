@@ -11,7 +11,10 @@ namespace Ms43Sim.Core;
 /// [assumption] PIRx is set when PTx restarts at 0000h, not when the timer starts; a counter
 /// started above its period shadow runs to FFFFh and restarts at the wrap.
 /// Not modelled, each reported once: mode 1 (center aligned), burst mode (PB01) and single shot
-/// (PS2/PS3). The outputs do not drive the P7 pins.
+/// (PS2/PS3). <see cref="PinHighFraction"/> is the P7.x pin's share of time high in the current
+/// period (UM §16: the comparator XORed with the latch while PENx = 1, the latch otherwise); a port
+/// read still returns the latch. <see cref="SettingsChanged"/> follows every write that can change
+/// an output; a PWx or PPx write takes effect at the next restart (the shadow).
 /// </summary>
 public sealed class Pwm
 {
@@ -39,15 +42,37 @@ public sealed class Pwm
             var c = channel;
             var offset = 2u * (uint)c.Number;
             sfrs.Register(0xF030 + offset, "pwm", () => c.Counter, c.WriteCounter, () => c.Counter);
-            sfrs.Register(0xF038 + offset, "pwm", () => c.Period, c.WritePeriod, () => c.Period);
-            sfrs.Register(0xFE30 + offset, "pwm", () => c.Width, c.WriteWidth, () => c.Width);
+            sfrs.Register(0xF038 + offset, "pwm", () => c.Period, v => { c.WritePeriod(v); Changed(c.Number); }, () => c.Period);
+            sfrs.Register(0xFE30 + offset, "pwm", () => c.Width, v => { c.WriteWidth(v); Changed(c.Number); }, () => c.Width);
         }
-        sfrs.Register(Pwmcon0Address, "pwm", ReadPwmcon0, WritePwmcon0, ReadPwmcon0);
-        sfrs.Register(Pwmcon1Address, "pwm", () => pwmcon1, WritePwmcon1, () => pwmcon1);
+        sfrs.Register(Pwmcon0Address, "pwm", ReadPwmcon0, v => { WritePwmcon0(v); ChangedAll(); }, ReadPwmcon0);
+        sfrs.Register(Pwmcon1Address, "pwm", () => pwmcon1, v => { WritePwmcon1(v); ChangedAll(); }, () => pwmcon1);
         OnReset();
     }
 
+    /// <summary>Raised with the channel after every write to its PPx or PWx, and for channels 0-3 after a PWMCON0/1 write.</summary>
+    public event Action<int>? SettingsChanged;
+
     public ushort Counter(int channel) => channels[channel].Counter;
+
+    /// <summary>PENx: the channel's output reaches its P7 pin.</summary>
+    public bool OutputEnabled(int channel) => (pwmcon1 & (1 << channel)) != 0;
+
+    /// <summary>
+    /// The P7.x pin's share of time high in the current period (UM §16): the latch while PENx = 0;
+    /// the frozen comparator XOR the latch while the timer is stopped; otherwise the share of the
+    /// period with PTx ≥ PWx shadow, complemented when the latch is 1.
+    /// </summary>
+    public double PinHighFraction(int channel, bool latch) =>
+        OutputEnabled(channel) ? channels[channel].HighFraction(latch) : latch ? 1.0 : 0.0;
+
+    void Changed(int channel) => SettingsChanged?.Invoke(channel);
+
+    void ChangedAll()
+    {
+        for (var x = 0; x < 4; x++)
+            Changed(x);
+    }
 
     /// <summary>The comparator output PTx ≥ PWx shadow (before the XOR with the P7 latch).</summary>
     public bool Output(int channel) => channels[channel].Output;
@@ -135,6 +160,15 @@ public sealed class Pwm
         }
 
         public bool Output => Counter >= widthShadow;
+
+        public double HighFraction(bool latch)
+        {
+            Settle();                       // the shadows of the current period
+            if (!running)
+                return Output ^ latch ? 1.0 : 0.0;
+            var share = widthShadow > periodShadow ? 0.0 : (periodShadow + 1.0 - widthShadow) / (periodShadow + 1.0);
+            return latch ? 1.0 - share : share;
+        }
 
         public long Periods
         {
