@@ -14,11 +14,15 @@ namespace Ms43Sim.Core;
 /// resets it at the timer's overflow. Pins: CC0-15 P2.0-15, CC16-23 P8.0-7, CC28-31 P7.4-7;
 /// CC24-27 have none. Timer values are computed from the clock; each timer schedules only its
 /// earliest overflow or compare match.
+/// A software write of a timer is compared with the channels like a step (UM p. 15-15: compare
+/// events are re-enabled when the timer is "written to by software"; the firmware's gap teeth
+/// advance T7 with SUB T7, ONES and rely on it). A change of a channel's CCM field clears its
+/// once-per-period lock [inf: the coil and knock channels switch off and back to mode 2 within a
+/// period and rely on it; plan 3, Reference facts].
 /// [assumption] The prescalers run from power-on, so steps fall on multiples of the prescale; a
-/// software write of a timer or of CCx is not a match. Not modelled, and reported: the
-/// double-register compare mode, and the reserved counter inputs TxI = 1xx (the timer stops),
-/// each once per machine. In mode 3 a CCx equal to the reload value raises its interrupts but
-/// leaves the pin (UM p. 15-18).
+/// software write of CCx is not a match. Not modelled, and reported: the double-register compare
+/// mode, and the reserved counter inputs TxI = 1xx (the timer stops), each once per machine. In
+/// mode 3 a CCx equal to the reload value raises its interrupts but leaves the pin (UM p. 15-18).
 /// </summary>
 public sealed class Capcom
 {
@@ -130,6 +134,12 @@ public sealed class Capcom
 
     void WriteCcm(int index, ushort value)
     {
+        var changed = ccm[index] ^ value;
+        for (var k = 0; k < 4; k++)
+        {
+            if ((changed >> (4 * k) & 0xF) != 0)
+                matchedThisPeriod[4 * index + k] = false;      // a rewritten mode re-arms the channel [inf]
+        }
         ccm[index] = value;
         var unit = index < 4 ? 0 : 16;
         for (var x = unit + 8; x < unit + 16; x++)
@@ -279,11 +289,13 @@ public sealed class Capcom
             prescale = 8;
         }
 
+        /// <summary>A software write is compared like a step (UM p. 15-15), before the next step is scheduled.</summary>
         public void Write(ushort v)
         {
             Cancel();
             value = v;
             baseCycle = Clock.Now;
+            owner.Matches(this, value);
             Schedule();
         }
 

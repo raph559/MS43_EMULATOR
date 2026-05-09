@@ -32,6 +32,23 @@ public class CapcomTests
         t.M.Scheduler.Advance(8 * 56); Assert.Equal(0x80, t.Sfr(0xFF90) & 0x80);             // FFF8h in the next period
     }
 
+    [Fact] public void SoftwareWriteOfTheTimer_OntoTheCompareValue_IsAMatch()
+    {
+        var t = Cc12(0x000D);                                               // mode 1 on T1
+        t.WriteSfr(0xFE52, 0xFFF0);                                         // T1 := CC12 by software (UM p. 15-15)
+        Assert.Equal((0x1000, 0x80), (t.M.Ports.Latch(2) & 0x1000, t.Sfr(0xFF90) & 0x80));
+    }
+
+    [Fact] public void CompareMode2_RewritingTheModeRearmsTheChannel()
+    {
+        var t = Cc12(0x000E);                                               // mode 2 on T1
+        t.M.Scheduler.Advance(8 * 16);                                      // matched at FFF0h
+        t.WriteSfr(0xFF90, 0x0000).WriteSfr(0xFE98, 0xFFF8);                // a later value, same period
+        t.WriteSfr(0xFF58, 0x0000).WriteSfr(0xFF58, 0x000E);                // off, then mode 2 again (as 0E:83CE, 0E:84BC)
+        t.M.Scheduler.Advance(8 * 24);
+        Assert.Equal(0x80, t.Sfr(0xFF90) & 0x80);                           // FFF8h matched in the same period
+    }
+
     [Fact] public void CompareMode3_SetsOnTheMatch_AndResetsAtTheOverflow()
     {
         var t = Cc12(0x000F);
