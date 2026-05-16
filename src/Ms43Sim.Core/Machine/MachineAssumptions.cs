@@ -46,6 +46,7 @@ public static class MachineAssumptions
         "the battery and KL15 dividers are ÷ 5.2 [inf: 26/255 V per count of FBD5/FBD6]",
         "every digital input not listed reads high (pull-ups); a P5 pin reads 1 above 2.5 V; P5DIDIS and PICON are only stored [assumption]",
         "P8.6 (the throttle shut-off feedback) reads low for the whole run, with no edges [call]",
+        "throttle body: velocity model, Gain 400 °/s, friction 0.03, spring preload 0.10 and the two spring rates (0.0025 per degree above limp-home, 0.01 below), limp-home 4.90°, stops 0° and 88°, tracks V1 = 0.5078 + θ/20.914, V2 = 4.5117 − θ/20.914; the drive is P7.2's share of time high minus P6.5, while P6.7 enables; it steps every 0.5 ms [assumption, constants from the research sweeps]",
         "the output latch on CS3 is a write-only latch on D0-D7: a byte write to the odd address does not load it, and a read gives FFFFh and is reported; it powers up as 78h (every chip select inactive) and a CPU reset leaves it [assumption]",
         // SSC and its devices
         "MRST has a pull-up: it reads 1 while no selected device drives it [assumption]",

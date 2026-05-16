@@ -38,6 +38,7 @@ public class KeyOffTests : IClassFixture<CarKeyOff>
         var next = StartupRun.Run(TestImages.Car, new(Seconds: 3, Machine: new MachineOptions { EepromImage = r.Eeprom.FinalImage }));
         Assert.Equal(StartupOutcome.SchedulerRunning, next.Outcome);
         Assert.False(next.Firmware.EepromDefaultsLoaded);
+        Assert.Equal(7, next.Firmware.ThrottleCheckState);                 // the short check, from the record the after-run saved
         Assert.True(next.Eeprom.WordsRead >= 480, $"{next.Eeprom.WordsRead} words read");
         // The loaders under 0B:0418 request 37 blocks with the engine stopped; none asks for
         // bytes 0x384-0x3AF or 0x3D6, which the after-run writes (the plan's 521 counted all 40 blocks).

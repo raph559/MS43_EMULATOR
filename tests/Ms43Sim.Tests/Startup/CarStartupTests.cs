@@ -47,10 +47,11 @@ public class CarStartupTests : IClassFixture<CarKeyOn>
         Assert.InRange(r.Monitor.WrongAnswers, 10, 20);                    // one per 31 ADh frames
     }
 
-    [Fact] public void Engine_IsKeyOnAndStopped_AndTheThrottleIsInLimpAsDeclared()
+    [Fact] public void Engine_IsKeyOnAndStopped_AndTheThrottleStartCheckPasses()
     {
         Assert.Equal(0, r.Firmware.EngineState);
-        Assert.True(r.Firmware.ThrottleLimp);
+        Assert.False(r.Firmware.ThrottleLimp);
+        Assert.Equal((7, 0x0040), ((int)r.Firmware.ThrottleCheckState, (int)r.Firmware.Fd14));   // the full adaptation passed
     }
 
     [Fact] public void ChipA_PassesItsChecks_SoTheEcuFaultMaskStaysClear() =>

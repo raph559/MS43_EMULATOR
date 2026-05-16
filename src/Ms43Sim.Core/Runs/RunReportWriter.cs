@@ -145,6 +145,8 @@ public static class RunReportWriter
         s.AppendLine($"| E7EA | {f.ErrorCount:X2}h | error count |");
         s.AppendLine($"| E7FC | {f.ResetReason:X4}h | reset reason (0020h SRST after an error, 0010h forced watchdog reset) |");
         s.AppendLine($"| 883C | {f.EcuFaults:X4}h | ECU sub-fault mask (path 74, P0604): bit 10 chip A, bit 11 chip B, bits 7-9 a CRC failed |");
+        s.AppendLine($"| E17A | {f.ThrottleCheckState:X2}h | the throttle's start check (07h = done) |");
+        s.AppendLine($"| FD14 | {f.Fd14:X4}h | the throttle's adaptation (0040h = passed; bit 0: a full adaptation is due) |");
         s.AppendLine();
     }
 

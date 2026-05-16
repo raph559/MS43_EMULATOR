@@ -45,6 +45,6 @@ public class StartupRunTests
         Assert.True(m.BootServiced < m.Handover && m.Handover < m.InterruptsEnabled
                     && m.InterruptsEnabled < m.EepromLoaded && m.EepromLoaded < m.MainLoop, $"{m}");
         Assert.Equal(("blank", 2048), (r.Eeprom.Source, r.Eeprom.FinalImage.Length));
-        Assert.Equal(7, r.Stubs.Count);
+        Assert.Equal(6, r.Stubs.Count);                                   // the throttle body is modelled since plan 3
     }
 }

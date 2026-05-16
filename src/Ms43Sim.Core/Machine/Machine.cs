@@ -36,6 +36,9 @@ public sealed partial class Machine : ICpuHost
         Capcom = new Capcom(Scheduler, Sfrs, Interrupts, Ports, Gpt, Events);
         Adc = new Adc(Scheduler, Sfrs, Interrupts, Board.AnalogVolts, Events);
         Pwm = new Pwm(Scheduler, Sfrs, Interrupts, Events);
+        Throttle = new ThrottleBody(Scheduler, () => ThrottleBody.Drive(Ports, Pwm));
+        Board.AttachAnalog(12, () => ThrottleBody.Track1Volts(Throttle.Angle));
+        Board.AttachAnalog(11, () => ThrottleBody.Track2Volts(Throttle.Angle));
         Asc0 = new Asc0(Scheduler, Sfrs, Interrupts, Events);
         Can = new CanModule(Scheduler, Interrupts, Events);
         Bus.AttachCan(Can);
@@ -65,6 +68,7 @@ public sealed partial class Machine : ICpuHost
     public Gpt Gpt { get; }
     public Adc Adc { get; }
     public Pwm Pwm { get; }
+    public ThrottleBody Throttle { get; }
     public Asc0 Asc0 { get; }
     public CanModule Can { get; }
 
@@ -82,7 +86,7 @@ public sealed partial class Machine : ICpuHost
     /// <summary>Trap and interrupt entries and PEC transfers: CPU steps that executed no instruction.</summary>
     public ulong Entries { get; private set; }
 
-    /// <summary>Power-on: RAM powers up as 00h (for determinism), every SFR takes its reset value.</summary>
+    /// <summary>Power-on: RAM powers up as 00h (for determinism), every SFR takes its reset value, the throttle rests at limp-home.</summary>
     public void PowerOn()
     {
         Array.Clear(Bus.Iram);
@@ -102,6 +106,7 @@ public sealed partial class Machine : ICpuHost
         Asc0.OnReset();
         Can.PowerOn();
         Board.PowerOn();
+        Throttle.PowerOn();
     }
 
     /// <summary>
@@ -227,6 +232,7 @@ public sealed partial class Machine : ICpuHost
         var monitor = Board.Monitor;
         foreach (var counter in new[] { monitor.Exchanges, monitor.ExchangesSinceReset, monitor.ErrorCounter, monitor.WrongAnswers, monitor.UnexpectedAnswers })
             sha.AppendData(BitConverter.GetBytes(counter));
+        sha.AppendData(BitConverter.GetBytes(Throttle.Angle));
         return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
     }
 
