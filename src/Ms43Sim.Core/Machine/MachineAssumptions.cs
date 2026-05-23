@@ -67,6 +67,15 @@ public static class MachineAssumptions
         "monitoring module: modelled from the firmware's protocol (12h, CFh, ADh frames; expected answers from the firmware's own routines); a frame whose error counter is not zero asks the previous question again [inf]; its own reaction to wrong answers is reported, not modelled; the bytes it leaves unused are 00h; first clock edge 20 µs after its chip select falls, 250 kbit/s, 4 µs between bytes; an early chip-select rise aborts the exchange [assumption]",
     };
 
+    /// <summary>
+    /// The engine's plants, which exist only while an engine is attached: a run adds these lines
+    /// then. Tasks that model an engine plant add their own line here.
+    /// </summary>
+    public static IReadOnlyList<string> ForEngine() => new List<string>
+    {
+        "VANOS: x' = 400 °CRK/s × (drive − hold) above 500 rpm, −200 °CRK/s below (no oil pressure); ranges 40.1 and 25.1 °CRK; hold duties from the scenario; a PWM width written while the channel runs counts from the first 0.5 ms step after the restart that loads it [assumption]",
+    };
+
     static string Inputs(BoardInputs inputs)
     {
         static string Volts(IEnumerable<double> volts) =>
