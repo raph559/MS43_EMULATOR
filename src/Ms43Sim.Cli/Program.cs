@@ -13,12 +13,14 @@ public static class Program
         "      runs BIN from power-on as the ECU holds it after an MS4X Flasher full write\n" +
         "      (checksums corrected, boot block kept); writes boot-report.md and inventory.csv\n" +
         "  ms43sim run BIN [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
-        "                  [--seconds S] [--key-off-at K] [--eeprom FILE] [--out DIR]\n" +
-        "      runs BIN with the key on and the engine stopped for S seconds (default 5, at most\n" +
-        "      600); --key-off-at turns the key off at K seconds (0 < K < S), and the run stops\n" +
-        "      when the main relay drops; --eeprom loads a 2,048-byte EEPROM image (default:\n" +
-        "      blank) and is only read; writes run-report.md, inventory.csv and eeprom.bin (the\n" +
-        "      chip at the end of the run)\n" +
+        "                  [--seconds S] [--key-off-at K] [--eeprom FILE] [--engine NAME] [--out DIR]\n" +
+        "      runs BIN with the key on for S seconds (default 5, or 60 with --engine; at most\n" +
+        "      600), the engine stopped unless --engine names a scenario (warm-idle: the starter\n" +
+        "      at 3.0 s, running from 4.0 s); --key-off-at turns the key off at K seconds\n" +
+        "      (0 < K < S), and the run stops when the main relay drops; --eeprom loads a\n" +
+        "      2,048-byte EEPROM image (default: blank) and is only read; writes run-report.md,\n" +
+        "      inventory.csv, eeprom.bin (the chip at the end of the run), events.csv (the\n" +
+        "      outputs) and trace.csv (the variables every 100 ms)\n" +
         "  ms43sim decode --listing BIN\n" +
         "      linear-sweep listing of the code regions (offset size mnemonic)";
 
@@ -153,8 +155,8 @@ public static class Program
     {
         var image = new ImageArgs();
         string? outDir = null, eepromFile = null;
-        var seconds = 5.0;
-        double? keyOffAt = null;
+        double? seconds = null, keyOffAt = null;
+        EngineScenario? engine = null;
         for (var i = 0; i < args.Length; i++)
         {
             switch (args[i])
@@ -162,9 +164,15 @@ public static class Program
                 case "--out" when i + 1 < args.Length: outDir = args[++i]; break;
                 case "--eeprom" when i + 1 < args.Length: eepromFile = args[++i]; break;
                 case "--seconds" when i + 1 < args.Length:
-                    if (!double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out seconds)
-                        || !(seconds > 0) || seconds > 600)
+                    if (!double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out var s)
+                        || !(s > 0) || s > 600)
                         return UsageError(error, "--seconds needs a number above 0 and at most 600");
+                    seconds = s;
+                    break;
+                case "--engine" when i + 1 < args.Length:
+                    engine = EngineScenario.Named(args[++i]);
+                    if (engine == null)
+                        return UsageError(error, $"unknown engine '{args[i]}'; known: {string.Join(", ", EngineScenario.All.Select(e => e.Name))}");
                     break;
                 case "--key-off-at" when i + 1 < args.Length:
                     if (!double.TryParse(args[++i], NumberStyles.Float, CultureInfo.InvariantCulture, out var keyOff))
@@ -179,16 +187,17 @@ public static class Program
         }
         if (image.Problem("run") is { } problem)
             return UsageError(error, problem);
-        if (keyOffAt is { } off && !(off > 0 && off < seconds))
+        var runSeconds = seconds ?? (engine != null ? 60 : 5);
+        if (keyOffAt is { } off && !(off > 0 && off < runSeconds))
             return UsageError(error, "--key-off-at needs a time above 0 and before the end of the run (--seconds)");
 
         outDir ??= Path.Combine("runs", "run-" + Path.GetFileNameWithoutExtension(image.Bin));
-        if (Overwritten(image.Inputs.Append(eepromFile), outDir, "run-report.md", "inventory.csv", "eeprom.bin") is { } clash)
+        if (Overwritten(image.Inputs.Append(eepromFile), outDir, "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv") is { } clash)
             return UsageError(error, $"the run would write over its input {clash}: choose another --out");
 
         var flashed = image.Build();
         var eeprom = eepromFile != null ? File.ReadAllBytes(eepromFile) : null;
-        var options = new StartupRunOptions(seconds, keyOffAt, new MachineOptions { EepromImage = eeprom });
+        var options = new StartupRunOptions(runSeconds, keyOffAt, new MachineOptions { EepromImage = eeprom }, Engine: engine);
         var clock = Stopwatch.StartNew();
         var result = StartupRun.Run(flashed, options);
         clock.Stop();
@@ -196,6 +205,8 @@ public static class Program
         RunReportWriter.Write(result, outDir);
 
         output.WriteLine($"outcome: {result.Outcome}");
+        if (result.Engine is { } e)
+            output.WriteLine($"engine: {e.Phases[^1].Phase} at {e.FinalRpm.ToString("0", CultureInfo.InvariantCulture)} rpm");
         output.WriteLine($"report: {Path.Combine(outDir, "run-report.md")}");
         Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
         return 0;

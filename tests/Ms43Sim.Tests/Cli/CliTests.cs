@@ -86,6 +86,22 @@ public class CliTests
         Assert.Contains("| key off | — | 2,400,000 |", File.ReadAllText(dir.File("run-report.md")));
     }
 
+    [Fact] public void Run_WithTheWarmIdleEngine_WritesFiveFiles()
+    {
+        using var dir = new TempDirectory();
+        var code = Program.Run(new[] { "run", TestImages.CarPath, "--engine", "warm-idle", "--seconds", "8", "--out", dir.Path }, TextWriter.Null, TextWriter.Null);
+        Assert.Equal(0, code);
+        foreach (var f in new[] { "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv" })
+            Assert.True(File.Exists(Path.Combine(dir.Path, f)), f);
+    }
+
+    [Fact] public void Run_WithAnUnknownEngine_IsAUsageError()
+    {
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "run", TestImages.CarPath, "--engine", "cold-start" }, TextWriter.Null, err));
+        Assert.Contains("warm-idle", err.ToString());
+    }
+
     [Fact] public void Boot_EcuBootWithPartialOnto_IsAUsageError()
     {
         var bin = Path.Combine(TestBins.Root, "bins", "CAR_current_43X001_SP95_STAGE1.bin");

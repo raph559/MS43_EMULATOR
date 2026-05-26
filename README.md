@@ -26,7 +26,7 @@ dotnet build -c Release sim/Ms43Sim.sln
 dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll boot ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --out sim/runs/boot-car
 ```
 
-`ms43sim run BIN` runs a bin with the key on and the engine stopped:
+`ms43sim run BIN` runs a bin with the key on, the engine stopped unless `--engine` names a scenario:
 
 ```bash
 dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --seconds 5 --out sim/runs/run-car
@@ -36,17 +36,26 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 |---|---|---|
 | (none) | | Runs BIN as the ECU holds it after an MS4X Flasher **full write** |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` (below) |
-| `--seconds S` | 5 | How long to run, above 0 and at most 600 |
+| `--seconds S` | 5 (60 with `--engine`) | How long to run, above 0 and at most 600 |
 | `--key-off-at K` | | Turns the key off (AN1 to 0 V) at K seconds, 0 < K < S; the run stops when the main relay drops |
 | `--eeprom FILE` | blank | The EEPROM's contents: 2,048 bytes, word *i* little-endian at byte 2*i*. The file is only read |
-| `--out DIR` | `runs/run-<name>` | Where `run-report.md`, `inventory.csv` and `eeprom.bin` (the chip at the end of the run) go. An output that is also an input (an `--eeprom` file in that folder) is a usage error |
+| `--engine NAME` | | Puts an engine around the ECU: `warm-idle` (warm engine, the car's ASC partners on CAN). The starter turns it at 3.0 s and it should run on its own from 4.0 s. Without it the engine stays stopped |
+| `--out DIR` | `runs/run-<name>` | Where the five output files go: `run-report.md`, `inventory.csv`, `eeprom.bin` (the chip at the end of the run), `events.csv` (every output change, with the crank angle in an engine run) and `trace.csv` (the firmware's variables every 100 ms). An output that is also an input (an `--eeprom` file in that folder) is a usage error |
 
 The outcome is the first that holds: `Trapped`, `ResetLoop` (any reset), `PoweredOff` (the main
 relay released after the handover), `SchedulerRunning` (the main loop's SRVWDT at 0E:0144 in the
 last 30 ms), `Stalled` (handed over, no scheduler), `StayedInBoot`, `NoProgress`. The report
-gives the milestones, scheduler health, checksum tasks, the monitoring module, the firmware's
-RAM read-outs, CAN transmissions, resets, events, stubs, the unmodelled hardware and the
-assumptions.
+gives the milestones; with an engine, the engine's phases and the inputs fed beside what the
+ECU reads; the outputs (with an engine, per cylinder: injections, sparks and the ECU's own
+decisions); the plants (throttle, VANOS, idle); the fault memory, with each detected path's
+explanation or UNEXPLAINED; the CAN partners; scheduler health, checksum tasks, the monitoring
+module, the firmware's RAM read-outs, CAN transmissions, resets, events, stubs, the unmodelled
+hardware and the assumptions. An engine run starts the engine at 3.0 s and expects it to run from
+4.0 s:
+
+```bash
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --engine warm-idle --out sim/runs/run-car-idle
+```
 
 `ms43sim boot BIN` takes these options:
 

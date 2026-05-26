@@ -7,6 +7,38 @@ public class StartupRunTests
 {
     static FlashedImage Car => TestImages.Car;
 
+    static StartupResult EngineRun(double seconds = 8) => StartupRun.Run(TestImages.Car, new(Seconds: seconds, Engine: EngineScenario.WarmIdle));
+
+    [Fact] public void EngineRun_ReportsTheEngine_AndWritesTheCsvFiles()
+    {
+        using var dir = new TempDirectory();
+        var r = EngineRun();
+        RunReportWriter.Write(r, dir.Path);
+        var report = File.ReadAllText(Path.Combine(dir.Path, "run-report.md"));
+        foreach (var section in new[] { "## Engine", "## Inputs fed and seen", "## Outputs", "## Plants", "## Fault memory", "## CAN partners" })
+            Assert.Contains(section, report);
+        Assert.Equal(82, File.ReadAllLines(Path.Combine(dir.Path, "trace.csv")).Length);     // header + 0.0 … 8.0 s
+        Assert.Contains(File.ReadLines(Path.Combine(dir.Path, "events.csv")), l => l.Contains(",Pin,P2.6,"));
+        Assert.Equal(EnginePhase.Running, r.Engine!.Phases[^1].Phase);
+    }
+
+    [Fact] public void EqualEngineRuns_GiveIdenticalFiles()
+    {
+        using var a = new TempDirectory(); using var b = new TempDirectory();
+        var ra = EngineRun(); var rb = EngineRun();
+        RunReportWriter.Write(ra, a.Path); RunReportWriter.Write(rb, b.Path);
+        Assert.Equal(ra.StateHash, rb.StateHash);
+        foreach (var f in new[] { "run-report.md", "events.csv", "trace.csv", "inventory.csv", "eeprom.bin" })
+            Assert.Equal(File.ReadAllBytes(Path.Combine(a.Path, f)), File.ReadAllBytes(Path.Combine(b.Path, f)));
+    }
+
+    [Fact] public void Instrument_IsCalledOnce_BeforeTheRun()
+    {
+        var calls = new List<ulong>();
+        StartupRun.Run(TestImages.Car, new(Seconds: 0.1, Instrument: m => calls.Add(m.Cycles)));
+        Assert.Equal(new[] { 0UL }, calls);
+    }
+
     [Fact] public void Checkpoints_AreRecognisedInTheCarReleaseAndStockFiles()
     {
         Assert.True(StartupRun.Recognises(FirmwareImage.FromBytes(TestBins.CarBytes)));

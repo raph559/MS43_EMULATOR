@@ -1,15 +1,18 @@
+using System.Globalization;
 using System.Text;
 
 namespace Ms43Sim.Core;
 
 /// <summary>
-/// Writes run-report.md, inventory.csv (the boot runner's format) and eeprom.bin (the chip at the
-/// end of the run) for a start-up run. Nothing time- or host-dependent goes in, so equal runs give
-/// equal files.
+/// Writes run-report.md, inventory.csv (the boot runner's format), eeprom.bin (the chip at the
+/// end of the run), events.csv (every kept output event) and trace.csv (the variable trace) for a
+/// start-up run. Nothing time- or host-dependent goes in, so equal runs give equal files.
 /// </summary>
 public static class RunReportWriter
 {
     const double CyclesPerMs = 24_000;
+    const double TicksToMs = 128 / CyclesPerMs;             // T1 ticks of 5.333 µs
+    static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
     public static void Write(StartupResult r, string directory)
     {
@@ -17,6 +20,8 @@ public static class RunReportWriter
         File.WriteAllText(Path.Combine(directory, "run-report.md"), Report(r));
         File.WriteAllText(Path.Combine(directory, "inventory.csv"), Inventory(r));
         File.WriteAllBytes(Path.Combine(directory, "eeprom.bin"), r.Eeprom.FinalImage);
+        File.WriteAllText(Path.Combine(directory, "events.csv"), EventsCsv(r));
+        File.WriteAllText(Path.Combine(directory, "trace.csv"), TraceCsv(r));
     }
 
     /// <summary>The text of run-report.md.</summary>
@@ -28,6 +33,12 @@ public static class RunReportWriter
         Eeprom(s, r);
         Outcome(s, r);
         Milestones(s, r);
+        EngineSection(s, r);
+        InputsFedAndSeen(s, r);
+        Outputs(s, r);
+        Plants(s, r);
+        FaultMemorySection(s, r);
+        CanPartnersSection(s, r);
         Scheduler(s, r);
         ChecksumTasks(s, r);
         Monitoring(s, r);
@@ -152,14 +163,253 @@ public static class RunReportWriter
         s.AppendLine();
     }
 
+    /// <summary>F900 (0E:184E, plan 3 Reference facts): 1–3 are not all "running".</summary>
     static string EngineState(byte value) => value switch
     {
-        0 => "key on, engine stopped",
-        1 or 2 or 3 => "running",
+        0 => "key on, crank armed",
+        1 => "12 or more plausible crank periods, not synced",
+        2 => "synced: cranking or running",
+        3 => "key off while still turning",
         4 => "after-run",
-        5 => "init",
+        5 => "init or inhibited",
         _ => "unknown",
     };
+
+    static void EngineSection(StringBuilder s, StartupResult r)
+    {
+        if (r.Engine is not { } e)
+            return;
+        s.AppendLine("## Engine").AppendLine();
+        s.AppendLine($"Scenario: {e.Scenario}.").AppendLine();
+        s.AppendLine("| From (s) | Phase |");
+        s.AppendLine("|---|---|");
+        foreach (var p in e.Phases)
+            s.AppendLine($"| {F(p.Cycle / CyclesPerMs / 1000, "0.000")} | {p.Phase} |");
+        s.AppendLine();
+        s.AppendLine($"- At the end: {F(e.FinalRpm, "0")} rpm, airflow {F(e.AirflowKgPerHour, "0.00")} kg/h");
+        s.AppendLine($"- Cam offsets from rest: intake advanced {F(e.IntakeAdvance, "0.0")} °CRK, exhaust retarded {F(e.ExhaustRetard, "0.0")} °CRK");
+        s.AppendLine();
+    }
+
+    static void InputsFedAndSeen(StringBuilder s, StartupResult r)
+    {
+        if (r.Engine is not { } e || EngineScenario.Named(e.Scenario) is not { } scenario)
+            return;
+        s.AppendLine("## Inputs fed and seen").AppendLine();
+        if (LastKeyOnRow(r) is not { } row)
+        {
+            s.AppendLine("No trace row with the key on.").AppendLine();
+            return;
+        }
+        double? V(string column) => Value(row, column);
+        var inputs = scenario.Inputs;
+        var battery = PhaseAt(e, row.Seconds) switch
+        {
+            EnginePhase.Starter => scenario.BatteryStarter,
+            EnginePhase.Running => scenario.BatteryRunning,
+            _ => scenario.BatteryOff,
+        };
+        s.AppendLine($"At {F(row.Seconds, "0.0")} s, the last trace row with the key on.").AppendLine();
+        s.AppendLine("| Input | Fed | Seen by the ECU |");
+        s.AppendLine("|---|---|---|");
+        s.AppendLine($"| speed | {F(V("rpm_fed"), "0")} rpm | E0E4: {F(V("rpm_ecu"), "0")} rpm |");
+        s.AppendLine($"| coolant | {F(inputs.MuxAVolts[3], "0.00")} V | 8433: {F(V("coolant_c"), "0.0")} °C |");
+        s.AppendLine($"| intake air | {F(inputs.MuxAVolts[1], "0.00")} V | 8432: {F(V("intake_c"), "0.0")} °C |");
+        s.AppendLine($"| oil | {F(inputs.MuxAVolts[2], "0.00")} V | 842F: {F(V("oil_c"), "0.0")} °C |");
+        s.AppendLine($"| pedal | {F(inputs.AnalogVolts[10], "0.000")} V and {F(inputs.AnalogVolts[6], "0.000")} V | E0FE: {F(V("pedal_pct"), "0.0")} % |");
+        s.AppendLine($"| battery | {F(battery, "0.0")} V | FBD5: {F(V("battery_v"), "0.00")} V |");
+        s.AppendLine($"| intake cam | advanced {F(V("cam_in_fed"), "0.0")} °CRK | 8973 = {F(V("cam_in_raw"), "0")}: advanced {F(CamSeen(160, V("cam_in_raw")), "0.0")} °CRK |");
+        s.AppendLine($"| exhaust cam | retarded {F(V("cam_ex_fed"), "0.0")} °CRK | 8AE1 = {F(V("cam_ex_raw"), "0")}: retarded {F(CamSeen(120, V("cam_ex_raw")), "0.0")} °CRK |");
+        s.AppendLine();
+    }
+
+    /// <summary>A raw cam reading as °CRK from rest: 8973 = 160 − a / 0.375, 8AE1 = 120 − r / 0.375.</summary>
+    static double? CamSeen(int rest, double? raw) => raw is { } x ? (rest - x) * 0.375 : null;
+
+    static void Outputs(StringBuilder s, StartupResult r)
+    {
+        s.AppendLine("## Outputs").AppendLine();
+        if (r.OutputCounts.Count == 0)
+            s.AppendLine("No output changed.").AppendLine();
+        else
+        {
+            var last = new Dictionary<string, OutputEvent>();
+            foreach (var e in r.OutputEvents)
+                last[e.Source] = e;
+            s.AppendLine("| Source | Changes | Last value kept |");
+            s.AppendLine("|---|---|---|");
+            foreach (var (source, count) in r.OutputCounts.OrderBy(c => SourceOrder(c.Key)).ThenBy(c => c.Key, StringComparer.Ordinal))
+                s.AppendLine($"| {source} | {count:N0} | {(last.TryGetValue(source, out var e) ? Shown(e) : "—")} |");
+            s.AppendLine();
+        }
+        s.AppendLine($"Dropped beyond the capture's {OutputCapture.Capacity:N0} events: {r.OutputEventsDropped:N0}. Every kept event is in events.csv.");
+        s.AppendLine();
+        if (r.Engine is null)
+            return;
+        s.AppendLine("Per cylinder, over the whole run (the start included); widths and dwells in ms, advances in °BTDC; the ECU's decisions read as each event began.").AppendLine();
+        s.AppendLine("| Cylinder | Injections | Mean width | Mean ECU width | Main sparks | Mean advance | Mean ECU advance | Multi-sparks per main | Mean main dwell |");
+        s.AppendLine("|---|---|---|---|---|---|---|---|---|");
+        for (var c = 1; c <= 6; c++)
+        {
+            var injections = r.Injections.Where(i => i.Cylinder == c).ToList();
+            var main = r.Sparks.Where(p => p.Cylinder == c && p.Main).ToList();
+            var multi = r.Sparks.Count(p => p.Cylinder == c && !p.Main);
+            s.AppendLine($"| {c} | {injections.Count:N0} | {Mean(injections.Select(i => i.Ticks * TicksToMs), "0.000")} | " +
+                         $"{Mean(injections.Select(i => i.ExpectedTicks * TicksToMs), "0.000")} | {main.Count:N0} | " +
+                         $"{Mean(main.Select(p => p.Advance), "0.0")} | {Mean(main.Select(p => p.DecidedAdvance), "0.0")} | " +
+                         $"{(main.Count > 0 ? F((double)multi / main.Count, "0.0") : "—")} | {Mean(main.Select(p => p.DwellMs), "0.00")} |");
+        }
+        s.AppendLine();
+    }
+
+    /// <summary>Pins by port and bit (P2.2 before P2.10), then the other sources by name.</summary>
+    static (int, int, int) SourceOrder(string source)
+    {
+        var dot = source.IndexOf('.');
+        return source.StartsWith('P') && dot > 1
+               && int.TryParse(source.AsSpan(1, dot - 1), NumberStyles.None, Inv, out var port)
+               && int.TryParse(source.AsSpan(dot + 1), NumberStyles.None, Inv, out var bit)
+            ? (0, port, bit)
+            : (1, 0, 0);
+    }
+
+    static string Shown(OutputEvent e) => e.Kind switch
+    {
+        OutputKind.Pwm => $"{e.Value} ‰ high",
+        OutputKind.ChipA => $"{e.Value:X4}h",
+        OutputKind.Latch => $"{e.Value:X2}h",
+        OutputKind.Heaters => $"{e.Value:X1}h",
+        _ => e.Value.ToString(Inv),
+    };
+
+    static void Plants(StringBuilder s, StartupResult r)
+    {
+        s.AppendLine("## Plants").AppendLine();
+        s.AppendLine($"- Throttle: {F(r.ThrottleAngle, "0.00")}° above the lower stop at the end (limp-home {F(ThrottleBody.LimpHome, "0.00")}°); " +
+                     $"start check E17A = {r.Firmware.ThrottleCheckState:X2}h (07h = done); limp FD0C.10 = {(r.Firmware.ThrottleLimp ? 1 : 0)}");
+        if (r.Engine is not null && LastKeyOnRow(r) is { } row)
+        {
+            double? V(string column) => Value(row, column);
+            s.AppendLine($"- VANOS at {F(row.Seconds, "0.0")} s: intake 8972 = {F(V("cam_in_deg"), "0.0")} °CRK for the setpoint 8971 = {F(V("cam_in_sp_deg"), "0.0")} °CRK " +
+                         $"(the plant advanced {F(V("cam_in_fed"), "0.0")}); exhaust 8AE0 = {F(V("cam_ex_deg"), "0.0")} °CRK for 8ADF = {F(V("cam_ex_sp_deg"), "0.0")} °CRK " +
+                         $"(the plant retarded {F(V("cam_ex_fed"), "0.0")})");
+            s.AppendLine($"- Idle: the target 8878 = {F(V("idle_target_rpm"), "0")} rpm; the speed {F(V("rpm_fed"), "0")} rpm (E0E4 {F(V("rpm_ecu"), "0")}); the valve 8862 = {F(V("idle_valve_pct"), "0.0")} %");
+        }
+        s.AppendLine();
+    }
+
+    static void FaultMemorySection(StringBuilder s, StartupResult r)
+    {
+        s.AppendLine("## Fault memory").AppendLine();
+        if (!r.Faults.Recognised)
+        {
+            s.AppendLine("Not recognised: the 162 DS2 codes are not at file 0x6D08E, so nothing is decoded.").AppendLine();
+            return;
+        }
+        Entries("Stored (list A)", r.Faults.Stored, explain: false);
+        Entries("Detected (list B)", r.Faults.Detected, explain: true);
+        Entries("The EEPROM's after-run record", r.SavedFaults, explain: false);
+
+        void Entries(string title, IReadOnlyList<FaultEntry> list, bool explain)
+        {
+            s.AppendLine(list.Count == 0 ? $"{title}: none." : $"{title}:").AppendLine();
+            if (list.Count == 0)
+                return;
+            s.AppendLine(explain ? "| Path | Name | DS2 | P-code | Type | Status | Why |" : "| Path | Name | DS2 | P-code | Type | Status |");
+            s.AppendLine(explain ? "|---|---|---|---|---|---|---|" : "|---|---|---|---|---|---|");
+            foreach (var e in list)
+            {
+                var row = $"| {e.Path} | {e.Label} | {e.Ds2Code:X2}h | {e.PCode} | {e.Type} | {e.Status:X2}h |";
+                s.AppendLine(explain ? $"{row} {FaultMemory.Explanation(e) ?? "**UNEXPLAINED**"} |" : row);
+            }
+            s.AppendLine();
+        }
+    }
+
+    static void CanPartnersSection(StringBuilder s, StartupResult r)
+    {
+        s.AppendLine("## CAN partners").AppendLine();
+        if (r.CanPartnersSent is not { } sent)
+            s.AppendLine("Off: no other node sends.");
+        else if (sent.Count == 0)
+            s.AppendLine("On, but no frame was delivered (the key was never on).");
+        else
+            s.AppendLine("Frames delivered: " + string.Join(", ", sent.OrderBy(k => k.Key).Select(k => $"{k.Key:X3}h {k.Value:N0}")) + ".");
+        var f = r.Firmware.Fd9c;
+        s.AppendLine($"Learned (FD9C = {f:X4}h): gearbox {Yes(f, 0)}, cluster {Yes(f, 1)}, ASC/DSC {Yes(f, 2)}, A/C {Yes(f, 4)}.");
+        s.AppendLine();
+
+        static string Yes(ushort word, int bit) => (word & (1 << bit)) != 0 ? "yes" : "no";
+    }
+
+    /// <summary>The last trace row before the key-off, or the last row when the key stayed on.</summary>
+    static TraceRow? LastKeyOnRow(StartupResult r) =>
+        r.Trace.LastOrDefault(t => r.Milestones.KeyOff is not { } off || t.Seconds * 1000 * CyclesPerMs < off);
+
+    static double? Value(TraceRow row, string column)
+    {
+        var i = IndexOf(column);
+        return i < 0 ? null : row.Values[i];
+    }
+
+    static int IndexOf(string column)
+    {
+        var columns = VariableTrace.Columns;
+        for (var i = 0; i < columns.Count; i++)
+        {
+            if (columns[i] == column)
+                return i;
+        }
+        return -1;
+    }
+
+    static EnginePhase PhaseAt(EngineSummary e, double seconds) =>
+        e.Phases.LastOrDefault(p => p.Cycle <= seconds * 1000 * CyclesPerMs)?.Phase ?? EnginePhase.Stopped;
+
+    static string Mean(IEnumerable<double> values, string format)
+    {
+        var list = values.ToList();
+        return list.Count == 0 ? "—" : F(list.Average(), format);
+    }
+
+    static string F(double? value, string format) => value is { } v ? v.ToString(format, Inv) : "—";
+
+    /// <summary>cycle,time_ms,kind,source,value,crank_deg: one row per kept output event; no angle, an empty cell.</summary>
+    static string EventsCsv(StartupResult r)
+    {
+        var s = new StringBuilder();
+        s.AppendLine("cycle,time_ms,kind,source,value,crank_deg");
+        foreach (var e in r.OutputEvents)
+        {
+            s.Append(e.Cycle.ToString(Inv)).Append(',')
+             .Append((e.Cycle / CyclesPerMs).ToString("0.000", Inv)).Append(',')
+             .Append(e.Kind).Append(',')
+             .Append(e.Source).Append(',')
+             .Append(e.Value.ToString(Inv)).Append(',')
+             .Append(e.Angle is { } a ? a.ToString("0.###", Inv) : "")
+             .AppendLine();
+        }
+        return s.ToString();
+    }
+
+    /// <summary>time_s and the trace's columns: one row per sample; empty cells for null; bit fields in hex.</summary>
+    static string TraceCsv(StartupResult r)
+    {
+        var s = new StringBuilder();
+        s.Append("time_s,").AppendLine(string.Join(",", VariableTrace.Columns));
+        foreach (var row in r.Trace)
+        {
+            s.Append(row.Seconds.ToString("0.###", Inv));
+            for (var i = 0; i < row.Values.Length; i++)
+            {
+                s.Append(',');
+                if (row.Values[i] is { } v)
+                    s.Append(VariableTrace.HexColumns.Contains(VariableTrace.Columns[i]) ? $"0x{(int)v:X4}" : v.ToString("0.####", Inv));
+            }
+            s.AppendLine();
+        }
+        return s.ToString();
+    }
 
     static void Can(StringBuilder s, StartupResult r)
     {

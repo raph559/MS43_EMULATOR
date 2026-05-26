@@ -15,6 +15,9 @@ public sealed record EngineScenario(string Name, BoardInputs Inputs, double Cran
     public static EngineScenario WarmIdle { get; } =
         new("warm-idle", BoardInputs.WarmIdle, 3.0, 1.0, 200, 100, 12.6, 10.5, 14.0, 0.377, 0.365);
 
+    /// <summary>Every scenario a run can name.</summary>
+    public static IReadOnlyList<EngineScenario> All { get; } = new[] { WarmIdle };
+
     /// <summary>The scenario called <paramref name="name"/> ("warm-idle"), else null.</summary>
-    public static EngineScenario? Named(string name) => name == WarmIdle.Name ? WarmIdle : null;
+    public static EngineScenario? Named(string name) => All.FirstOrDefault(s => s.Name == name);
 }

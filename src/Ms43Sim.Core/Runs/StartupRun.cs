@@ -2,7 +2,17 @@ using System.Security.Cryptography;
 
 namespace Ms43Sim.Core;
 
-public sealed record StartupRunOptions(double Seconds = 5.0, double? KeyOffAtSeconds = null, MachineOptions? Machine = null, bool CanPartners = true);
+/// <summary>
+/// How a start-up run goes. With an engine the machine's inputs are the scenario's. Instrument is
+/// called once, after the engine is attached and before the run (a test adds OnInstruction hooks
+/// there); it must not change the machine's state, and it is not part of the report.
+/// </summary>
+public sealed record StartupRunOptions(double Seconds = 5.0, double? KeyOffAtSeconds = null, MachineOptions? Machine = null,
+    bool CanPartners = true, EngineScenario? Engine = null, Action<Machine>? Instrument = null);
+
+/// <summary>The engine at the end of the run: its phases, speed, airflow and cam offsets from rest (°CRK).</summary>
+public sealed record EngineSummary(string Scenario, IReadOnlyList<EnginePhaseChange> Phases,
+    double FinalRpm, double AirflowKgPerHour, double IntakeAdvance, double ExhaustRetard);
 
 /// <summary>In order of precedence; see <see cref="StartupRun"/>.</summary>
 public enum StartupOutcome { SchedulerRunning, PoweredOff, ResetLoop, Trapped, Stalled, StayedInBoot, NoProgress }
@@ -39,8 +49,8 @@ public sealed record FirmwareState(
 
 public sealed record MonitorSummary(int Exchanges, int WrongAnswers, int UnexpectedAnswers, int ErrorCounter);
 
-/// <summary>Source is "blank" or the SHA-256 of the loaded image; FinalImage is the chip at the end.</summary>
-public sealed record EepromSummary(string Source, int WordsRead, int WordsWritten, byte[] FinalImage);
+/// <summary>Source is "blank" or the SHA-256 of the loaded image; FinalImage is the chip at the end; AddressesRead in order.</summary>
+public sealed record EepromSummary(string Source, int WordsRead, int WordsWritten, byte[] FinalImage, IReadOnlyCollection<int> AddressesRead);
 
 /// <summary>A stubbed device and its side of design §7's line.</summary>
 public sealed record StubInfo(string Device, string Behaviour, bool BetweenCpuAndCheckedOutput);
@@ -68,7 +78,16 @@ public sealed record StartupResult(
     string StateHash,
     IReadOnlyList<string> Assumptions,
     FaultMemoryState Faults,
-    IReadOnlyList<FaultEntry> SavedFaults)
+    IReadOnlyList<FaultEntry> SavedFaults,
+    EngineSummary? Engine,
+    IReadOnlyList<OutputEvent> OutputEvents,
+    long OutputEventsDropped,
+    IReadOnlyDictionary<string, long> OutputCounts,
+    IReadOnlyList<Injection> Injections,
+    IReadOnlyList<Spark> Sparks,
+    IReadOnlyList<TraceRow> Trace,
+    double ThrottleAngle,
+    IReadOnlyDictionary<uint, long>? CanPartnersSent)
 {
     /// <summary>Events of type T the run raised, including those the log did not keep.</summary>
     public long CountOf<T>() where T : SimEvent => EventCounts.GetValueOrDefault(typeof(T));
@@ -91,6 +110,7 @@ public static class StartupRun
     const uint EepromLoaded = 0x0E3700, MainLoop = 0x0E0094, MainLoopService = 0x0E0144;
     const ulong SchedulerWindow = 720_000;                 // 30 ms
     const int KeyOnCode = 235;                             // AN1: the firmware's KL15 "on" threshold
+    const ulong TraceInterval = 2_400_000;                 // 100 ms
 
     static readonly (uint Cpu, byte[] Bytes)[] Checkpoints =
     {
@@ -103,17 +123,28 @@ public static class StartupRun
         (MainLoopService, new byte[] { 0xA7, 0x58, 0xA7, 0xA7 }),
     };
 
-    static StubInfo[] Stubs(bool canPartners) => new StubInfo[]
+    static StubInfo[] Stubs(bool canPartners, bool engine)
     {
-        new("EEPROM", "blank or from a file", false),
-        new("output-driver chips A/B", "always \"no fault\"; outputs not captured", true),
-        new("monitoring module", "shut-off path not modelled", true),
-        canPartners
-            ? new("CAN partners", "ASC1 153h and the cluster's 613h and 615h with fixed healthy contents; no gearbox, no DSC [owner: ASC]", false)
-            : new("CAN partners", "silent, every frame acknowledged", false),
-        new("knock chip and coil feedback", "0 V", false),
-        new("K-line tester", "none", false),
-    };
+        var stubs = new List<StubInfo>
+        {
+            new("EEPROM", "blank or from a file", false),
+            new("output-driver chips A/B", "A always answers \"no fault\"; B answers the input set's status word (the car's lambda heaters read open); A's commands are captured, B's are not", true),
+            new("monitoring module", "shut-off path not modelled", true),
+            canPartners
+                ? new("CAN partners", "ASC1 153h and the cluster's 613h and 615h with fixed healthy contents; no gearbox, no DSC [owner: ASC]", false)
+                : new("CAN partners", "silent, every frame acknowledged", false),
+        };
+        if (engine)
+        {
+            stubs.Add(new("knock sensor", "the noise law", false));
+            stubs.Add(new("coil feedback", "the 1.2 ms burn pulse and 2.7 V coil current", false));
+            stubs.Add(new("engine", "crude idle-air plant, no torque model, throttle air not modelled", false));
+        }
+        else
+            stubs.Add(new("knock chip and coil feedback", "0 V", false));
+        stubs.Add(new("K-line tester", "none", false));
+        return stubs.ToArray();
+    }
 
     /// <summary>The checkpoint bytes match: the program addresses this runner watches are valid.</summary>
     public static bool Recognises(FirmwareImage image) =>
@@ -123,11 +154,28 @@ public static class StartupRun
     {
         options ??= new StartupRunOptions();
         var machineOptions = options.Machine ?? new MachineOptions();
+        if (options.Engine is { } scenario)
+            machineOptions = machineOptions with { Inputs = scenario.Inputs };
         var machine = Machine.Create(image, machineOptions);
         machine.PowerOn();
+        CanPartners? partners = null;
         if (options.CanPartners)
-            new CanPartners(machine.Scheduler, machine.Can.Deliver,
-                () => BoardInputs.AdcCode(machine.Board.AnalogVolts(1)) >= KeyOnCode).Start();
+        {
+            partners = new CanPartners(machine.Scheduler, machine.Can.Deliver,
+                () => BoardInputs.AdcCode(machine.Board.AnalogVolts(1)) >= KeyOnCode);
+            partners.Start();
+        }
+        var engine = options.Engine is { } engineScenario ? Engine.Attach(machine, engineScenario) : null;
+        Func<double>? crankAngle = engine is null ? null : () => engine.Shaft.Angle;
+        var capture = new OutputCapture(machine, crankAngle);
+        var cylinders = crankAngle is null ? null : new CylinderEvents(machine, crankAngle);
+        var trace = new List<TraceRow>();
+        void Sample(ulong at) => machine.Scheduler.Schedule(at, "trace", () =>
+        {
+            trace.Add(new TraceRow(machine.Cycles / machineOptions.CpuHz, VariableTrace.Sample(machine, engine)));
+            Sample(at + TraceInterval);
+        });
+        Sample(machine.Cycles);
 
         var recognised = Recognises(image.Image);
         ulong? bootServiced = null, handover = null, interrupts = null, eepromLoaded = null, mainLoop = null, powerOff = null;
@@ -168,6 +216,7 @@ public static class StartupRun
             });
         }
 
+        options.Instrument?.Invoke(machine);
         var limit = (ulong)Math.Round(options.Seconds * machineOptions.CpuHz);
         machine.Run(limit, _ => powerOff != null);
 
@@ -181,6 +230,8 @@ public static class StartupRun
             : StartupOutcome.NoProgress;
 
         var assumptions = MachineAssumptions.For(machineOptions).ToList();
+        if (options.Engine is { } engineRun)
+            assumptions.AddRange(MachineAssumptions.ForEngine(engineRun));
         if (options.CanPartners)
             assumptions.Add("CAN partners: 153h every 10 ms, 613h and 615h every 200 ms, the first 100, 105 and 110 ms after power-on; a frame is delivered only while the key is on (AN1 code ≥ 235) [assumption]");
         if (options.KeyOffAtSeconds is { } k)
@@ -200,12 +251,17 @@ public static class StartupRun
             ReadFirmwareState(machine),
             new MonitorSummary(monitor.Exchanges, monitor.WrongAnswers, monitor.UnexpectedAnswers, monitor.ErrorCounter),
             machine.Can.Transmitted,
-            new EepromSummary(source, eeprom.WordsRead, eeprom.WordsWritten, eeprom.ToImage()),
+            new EepromSummary(source, eeprom.WordsRead, eeprom.WordsWritten, eeprom.ToImage(), eeprom.AddressesRead.Order().ToArray()),
             machine.WatchdogResets, machine.SoftwareResets,
             machine.Events.All.ToList(), new Dictionary<Type, long>(machine.Events.Counts), machine.Events.Dropped,
-            machine.Inventory.Records, machine.Branches.Last(), Stubs(options.CanPartners),
+            machine.Inventory.Records, machine.Branches.Last(), Stubs(options.CanPartners, engine != null),
             end, machine.Instructions, machine.Entries, machine.StateHash(), assumptions,
-            FaultMemory.Read(machine), FaultMemory.SavedInEeprom(image.Image, eeprom.ToImage()));
+            FaultMemory.Read(machine), FaultMemory.SavedInEeprom(image.Image, eeprom.ToImage()),
+            engine is null ? null : new EngineSummary(engine.Scenario.Name, engine.Phases.ToArray(), engine.Rpm,
+                engine.AirflowKgPerHour, engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard),
+            capture.Events, capture.Dropped, capture.Counts,
+            cylinders?.Injections ?? Array.Empty<Injection>(), cylinders?.Sparks ?? Array.Empty<Spark>(),
+            trace, machine.Throttle.Angle, partners?.Sent);
     }
 
     /// <summary>IRAM through the bus; XRAM straight from its array, so the values are real even while XPEN is clear.</summary>

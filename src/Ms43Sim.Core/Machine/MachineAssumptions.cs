@@ -68,13 +68,22 @@ public static class MachineAssumptions
     };
 
     /// <summary>
-    /// The engine's plants, which exist only while an engine is attached: a run adds these lines
-    /// then. Tasks that model an engine plant add their own line here.
+    /// The engine's laws, which exist only while an engine is attached: a run adds these lines
+    /// then (plan 3, Reference facts; the constants are in the classes' summaries).
     /// </summary>
-    public static IReadOnlyList<string> ForEngine() => new List<string>
+    public static IReadOnlyList<string> ForEngine(EngineScenario scenario)
     {
-        "VANOS: x' = 400 °CRK/s × (drive − hold) above 500 rpm, −200 °CRK/s below (no oil pressure); ranges 40.1 and 25.1 °CRK; hold duties from the scenario; a PWM width written while the channel runs counts from the first 0.5 ms step after the restart that loads it [assumption]",
-    };
+        static string N(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+        return new List<string>
+        {
+            $"engine scenario {scenario.Name}: the starter turns the engine at {N(scenario.StarterRpm)} rpm (reached in 0.2 s) for {N(scenario.StarterSeconds)} s from {N(scenario.CrankAtSeconds)} s; the shaft starts at {N(scenario.StartAngle)}° [call]",
+            "combustion: a falling edge of an output coil pin P2.6–P2.11 and a rising edge (a closing) of an output injector pin P2.0–P2.5, each within the last 0.25 s; the engine runs on when the starter releases while combusting; without combustion it coasts down (a 0.5 s lag) and stops below 30 rpm; combustion at 300 rpm or more makes it run again [assumption]",
+            "idle-air plant, every 0.5 ms: the valve opening d is the share of time P2.12 is low; Qcmd = min(50 kg/h × d, 480 mg/stroke at the speed); Q follows Qcmd with a 50 ms lag; running, the speed follows Q × 5555.6 / 105 mg/stroke with a 0.3 s lag; no torque model, throttle air not modelled [assumption, constants from the research's verified plant]",
+            $"battery: {N(scenario.BatteryOff)} V with the engine stopped, {N(scenario.BatteryStarter)} V while the starter turns, {N(scenario.BatteryRunning)} V running (the alternator); AN5, and AN1 while the key is on, read it ÷ 5.2 [assumption]",
+            "MAF (AN0): the car's id_maf_tab__v_maf (0x70EC6) frozen as the sensor's law, linear between its points [obs; assumption below 0.10 V]; knock envelope (AN15): (c(n) + 0.5) × 5 / 256 V, c(n) from the car's ip_nl_sp__n (0x77CBB), 0 V below 50 rpm [obs, ver]; coil current (AN14): 2.7 V while the shaft turns (≥ 50 rpm), 0 V stopped [assumption]; burn feedback (P3.6): high for 1.2 ms after each spark, retriggered by a later one [assumption]",
+            $"VANOS: x' = 400 °CRK/s × (drive − hold) above 500 rpm, −200 °CRK/s below (no oil pressure); ranges 40.1 and 25.1 °CRK; hold duties {N(scenario.HoldIntake)} (intake) and {N(scenario.HoldExhaust)} (exhaust) from the scenario; a PWM width written while the channel runs counts from the first 0.5 ms step after the restart that loads it [assumption]",
+        };
+    }
 
     static string Inputs(BoardInputs inputs)
     {
