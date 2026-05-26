@@ -56,6 +56,9 @@ public sealed class ShiftRegisterChip : ISscSlave
     /// <summary>Completed transfers (deselects while enabled).</summary>
     public int Transfers { get; private set; }
 
+    /// <summary>The latched word, at every deselect while enabled.</summary>
+    public event Action<ulong>? CommandLatched;
+
     public void PowerOn()
     {
         Latched = 0;
@@ -81,6 +84,7 @@ public sealed class ShiftRegisterChip : ISscSlave
         {
             Latched = register;
             Transfers++;
+            CommandLatched?.Invoke(Latched);
         }
     }
 

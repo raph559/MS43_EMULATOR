@@ -52,6 +52,9 @@ public sealed class MonitoringModule
     readonly byte[] sending = new byte[FrameBytes];
     readonly byte[] received = new byte[FrameBytes];
 
+    /// <summary>The CPU's nine bytes, after every completed exchange.</summary>
+    public event Action<byte[]>? CpuFrameReceived;
+
     bool selected;
     bool shutdownSeen;
     int asked;          // the question in the frame being exchanged
@@ -184,6 +187,7 @@ public sealed class MonitoringModule
             previous = asked;
         ExchangesSinceReset++;
         Exchanges++;
+        CpuFrameReceived?.Invoke(received.ToArray());
     }
 
     void CheckAnswer(int question, ushort answer)
