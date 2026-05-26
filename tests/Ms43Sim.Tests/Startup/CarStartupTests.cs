@@ -63,6 +63,12 @@ public class CarStartupTests : IClassFixture<CarKeyOn>
         Assert.Equal(0, r.Eeprom.WordsWritten);
     }
 
+    [Fact] public void CanPartners_AreLearned_AsClusterAndAsc_WithoutAGearbox()
+    {
+        Assert.Equal(0x0006, r.Firmware.Fd9c & 0x0007);                    // FD9C.1 cluster, .2 ASC, not .0 gearbox
+        Assert.Equal(20, r.Firmware.Ambient);                               // 615h byte 3
+    }
+
     [Fact] public void Can_Transmits316h_329h_545h() =>
         Assert.Equal(new uint[] { 0x316, 0x329, 0x545 }, r.CanTransmitted.Select(c => c.Id).OrderBy(i => i));
 

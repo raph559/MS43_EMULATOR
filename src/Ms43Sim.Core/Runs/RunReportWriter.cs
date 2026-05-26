@@ -147,6 +147,8 @@ public static class RunReportWriter
         s.AppendLine($"| 883C | {f.EcuFaults:X4}h | ECU sub-fault mask (path 74, P0604): bit 10 chip A, bit 11 chip B, bits 7-9 a CRC failed |");
         s.AppendLine($"| E17A | {f.ThrottleCheckState:X2}h | the throttle's start check (07h = done) |");
         s.AppendLine($"| FD14 | {f.Fd14:X4}h | the throttle's adaptation (0040h = passed; bit 0: a full adaptation is due) |");
+        s.AppendLine($"| FD9C | {f.Fd9c:X4}h | CAN partners learned: bit 0 gearbox, bit 1 cluster, bit 2 ASC/DSC, bit 4 A/C |");
+        s.AppendLine($"| 8101 | {f.Ambient} °C | ambient temperature (615h byte 3) |");
         s.AppendLine();
     }
 
