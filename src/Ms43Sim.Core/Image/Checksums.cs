@@ -117,7 +117,7 @@ public static class Checksums
     }
 
     /// <summary>CRC-16, reflected polynomial 0xA001, byte-wise, no final XOR.</summary>
-    static uint Crc16(ReadOnlySpan<byte> data, uint crc)
+    internal static uint Crc16(ReadOnlySpan<byte> data, uint crc)
     {
         foreach (var b in data)
         {

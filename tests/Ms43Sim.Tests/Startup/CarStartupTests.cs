@@ -69,6 +69,13 @@ public class CarStartupTests : IClassFixture<CarKeyOn>
         Assert.Equal(20, r.Firmware.Ambient);                               // 615h byte 3
     }
 
+    [Fact] public void FaultMemory_StoresNothing_AndDetectsOnlyExplainedPaths()
+    {
+        Assert.True(r.Faults.Recognised);
+        Assert.Empty(r.Faults.Stored);
+        Assert.All(r.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e)));
+    }
+
     [Fact] public void Can_Transmits316h_329h_545h() =>
         Assert.Equal(new uint[] { 0x316, 0x329, 0x545 }, r.CanTransmitted.Select(c => c.Id).OrderBy(i => i));
 

@@ -66,7 +66,9 @@ public sealed record StartupResult(
     ulong Instructions,
     ulong Entries,
     string StateHash,
-    IReadOnlyList<string> Assumptions)
+    IReadOnlyList<string> Assumptions,
+    FaultMemoryState Faults,
+    IReadOnlyList<FaultEntry> SavedFaults)
 {
     /// <summary>Events of type T the run raised, including those the log did not keep.</summary>
     public long CountOf<T>() where T : SimEvent => EventCounts.GetValueOrDefault(typeof(T));
@@ -202,7 +204,8 @@ public static class StartupRun
             machine.WatchdogResets, machine.SoftwareResets,
             machine.Events.All.ToList(), new Dictionary<Type, long>(machine.Events.Counts), machine.Events.Dropped,
             machine.Inventory.Records, machine.Branches.Last(), Stubs(options.CanPartners),
-            end, machine.Instructions, machine.Entries, machine.StateHash(), assumptions);
+            end, machine.Instructions, machine.Entries, machine.StateHash(), assumptions,
+            FaultMemory.Read(machine), FaultMemory.SavedInEeprom(image.Image, eeprom.ToImage()));
     }
 
     /// <summary>IRAM through the bus; XRAM straight from its array, so the values are real even while XPEN is clear.</summary>
