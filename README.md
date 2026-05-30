@@ -4,20 +4,39 @@ A purpose-built emulator for the Siemens MS43 (Infineon C167CR). It runs an MS43
 power-on the way the ECU does, so a bin can be tested before it is flashed.
 
 - Design: `docs/superpowers/specs/2026-10-20-ms43-emulator-design.md`
-- Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md` and
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`; their records
+- Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md`,
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md` and
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md`; their records
   (rulings, review findings, open items) beside them
 - Devices and what is modelled: `HARDWARE.md`
-- Results on the car file: REPORT.md §9.6 (boot) and §9.7 (start-up)
+- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up) and §9.8 (warm idle)
 
-**Status:** plan 2 done (2026-10-20). Plan 1 gave the CPU, bus, traps, interrupts, PEC,
-watchdog, timing and the boot runner. Plan 2 adds the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0
-and CAN, the board (output latch, M93C86 EEPROM, output-driver chips A and B, the monitoring
-module, the key-on inputs), the start-up runner and one key-off.
+**Status:** plan 3 done (2026-10-20).
+- Plan 1 gave the CPU, bus, traps, interrupts, PEC, watchdog, timing and the boot runner.
+- Plan 2 added:
+  - the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0 and CAN;
+  - the board: output latch, M93C86 EEPROM, output-driver chips A and B, the monitoring module,
+    the key-on inputs;
+  - the start-up runner and one key-off.
+- Plan 3 adds:
+  - the engine: crank and cams, starter, combustion, an idle-air plant, VANOS and the engine's
+    sensors;
+  - the throttle body;
+  - the CAN partners of an ASC car;
+  - output capture with the ECU's decisions beside each injection and spark;
+  - the fault-memory reader;
+  - a 10 Hz variable trace;
+  - `--engine warm-idle`.
 
 The car file starts up with the key on and the engine stopped: its CRC and monitor-sum tasks
 pass, the monitoring handshake completes, and its scheduler runs. A key-off runs the after-run,
 writes the EEPROM and drops the main relay; the next key-on reads that EEPROM back.
+
+With `--engine warm-idle` the car file starts warm and idles on its 900 rpm target:
+- the ECU sees what it is fed;
+- its sparks, dwells and injections carry out its own decisions;
+- its VANOS and throttle plants track;
+- every detected fault code is explained, and none is stored.
 
 ## Run it
 
@@ -84,12 +103,40 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 378 tests: instruction semantics from the manuals, the memory
-map, interrupts, PEC, every peripheral and board device, the boot of the real bins, the car's
-5 s start-up and a 40 s key-off (about 15 s in all).
+Run it from the repository root. 470 tests (about 1.5 minutes in all):
+- instruction semantics from the manuals, the memory map, interrupts and PEC;
+- every peripheral, board device and engine plant;
+- the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
+- a 100 s warm idle with a key-off at 75 s, then a 30 s second key-on.
 
-**Speed:** 138.7 M emulated cycles per second on this PC (Release, a 60 s run of the car's
-start-up), 5.8× real time. Plan 1's boot-only figure was 166 M.
+**Speed:** 132.2 M emulated cycles per second on this PC (Release, a 60 s warm-idle run), 5.5×
+real time. A start-up with the engine stopped ran at 138.7 M, and plan 1's boot-only figure was
+166 M.
+
+## Assumptions and simplifications in plan 3
+
+An engine run lists the engine's laws too (`MachineAssumptions.ForEngine`), with the CAN
+partners' timing:
+- the starter (200 rpm for 1 s from 3.0 s);
+- the combustion rule (a spark and an injector closing within 0.25 s);
+- the idle-air plant (50 kg/h per unit valve opening, 105 mg/stroke, 50 ms and 0.3 s lags, a
+  480 mg/stroke cap);
+- the battery in each phase;
+- the frozen MAF and knock laws, the coil current and the burn pulse;
+- the VANOS velocity model and its hold duties;
+- the shaft's start angle.
+
+Every run also lists the throttle body's velocity model. The inputs, chip B and the CAN line
+changed as follows:
+- **Inputs:** the warm-idle set (coolant and oil 90 °C, intake air 33 °C, 101.3 kPa); the
+  engine and the throttle drive AN0, AN11, AN12, AN14, AN15 and P3.6, and the shaft P2.13-P2.15,
+  P3.0 and P3.2.
+- **Chip B:** answers the input set's status word, FFFF FAFAh in both car sets (the lambda
+  heaters read open).
+- **CAN:** the other nodes are the CAN partners stub, which sends from 100 ms after power-on
+  while the key is on.
+
+The rulings behind them are in the plan 3 record.
 
 ## Assumptions and simplifications in plan 2
 
@@ -108,9 +155,11 @@ unrecognised program checkpoints). Beyond plan 1's (below):
   latency and raise no phase or baud-rate errors; ADC fixed-channel single conversion only; PWM
   mode 0 only; ASC0 asynchronous modes only, clean reception; CAN frames last 44 + 8·DLC + 3 bit
   times and every frame is acknowledged. Each unmodelled mode raises an UnsupportedEvent.
-- **Stubs** (design §7): CAN partners silent; chips A/B always "no fault"; the monitoring module's
-  shut-off path; the throttle body static at limp-home; knock and coil feedback 0 V; no K-line
-  tester. The report's Stubs section says which sit between the CPU and a checked output.
+- **Stubs** (design §7), as plan 2 left them: CAN partners silent; chips A/B always "no fault";
+  the monitoring module's shut-off path; the throttle body static at limp-home; knock and coil
+  feedback 0 V; no K-line tester. Plan 3 replaced the throttle stub with the throttle body, and
+  gave the CAN partners and the engine runs their own rows. The report's Stubs section says which
+  sit between the CPU and a checked output.
 
 ## Assumptions and simplifications from plan 1
 
@@ -178,7 +227,7 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 
 | Path | Content |
 |---|---|
-| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, boot runner |
+| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`), capture, fault memory, the boot and start-up runners |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
 | `tests/Ms43Sim.Tests/` | xUnit tests |
 | `tools/` | Python helpers: manual text extraction, SFR table generation, decoder cross-check |
