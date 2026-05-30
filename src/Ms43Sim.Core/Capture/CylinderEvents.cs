@@ -1,7 +1,12 @@
 namespace Ms43Sim.Core;
 
-/// <summary>An injector pulse: low from Open to Close. ExpectedTicks is the ECU's decision, read as it opened.</summary>
-public sealed record Injection(int Cylinder, ulong Open, ulong Close, double OpenAngle, double ExpectedTicks)
+/// <summary>
+/// An injector pulse: low from Open to Close. ExpectedTicks is the ECU's decision as the injector
+/// opened, ExpectedTicksAtClose as it closed: the injection task recomputes the bank time each
+/// segment, about 2–3 ms into a pulse at 900 rpm, and the recomputation moves the pulse's end when it
+/// comes in time.
+/// </summary>
+public sealed record Injection(int Cylinder, ulong Open, ulong Close, double OpenAngle, double ExpectedTicks, double ExpectedTicksAtClose)
 {
     /// <summary>The pulse in T1 ticks of 5.333 µs.</summary>
     public double Ticks => (Close - Open) / 128.0;
@@ -26,7 +31,8 @@ public sealed record Spark(int Cylinder, ulong DwellStart, ulong Fire, double Ad
 /// order 1-5-3-6-2-4.
 /// <list type="bullet">
 /// <item>Pulse width: floor(E46x × E470[i] / 4096) + E47C ticks, E46A for cylinders 1–3 and E46C
-/// for 4–6 (XRAM words), read as the injector opens.</item>
+/// for 4–6 (XRAM words), read as the injector opens and again as it closes: a recomputation during
+/// the pulse moves its end if it comes in time [obs: plan 3's warm-idle run].</item>
 /// <item>Dwell: ((E4B8 × E4CC[i]) >> 16) &lt;&lt; 1 ticks (XRAM words), read as the dwell starts.</item>
 /// <item>Advance: 72 − 0.375 × FBAB[i] °BTDC (IRAM bytes FBAB…FBB0), read as the coil fires.</item>
 /// </list>
@@ -82,7 +88,7 @@ public sealed class CylinderEvents
         if (opened[n] is not { } open)
             return;
         opened[n] = null;
-        Add(injections, new Injection(cylinder, open.Cycle, now, open.Angle, open.Expected));
+        Add(injections, new Injection(cylinder, open.Cycle, now, open.Angle, open.Expected, ExpectedTicks(cylinder)));
     }
 
     void Coil(int n, bool level, ulong now)

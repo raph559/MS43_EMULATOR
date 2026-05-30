@@ -35,6 +35,13 @@ public class FaultMemoryTests
         Assert.NotNull(FaultMemory.Explanation(e));
     }
 
+    [Fact] public void Decode_TheEngineOffTimeOfAFirstStart_IsDetectedButNeverStored_AndExplained()
+    {
+        var e = FaultMemory.Decode(TestImages.Car.Image, 12, Record(0x14));
+        Assert.Equal(("t_es", 2, false), (e.Name, e.Type, e.Stored));
+        Assert.NotNull(FaultMemory.Explanation(e));
+    }
+
     [Fact] public void Read_ListsAInOrder_AndBWithoutRepeats()
     {
         var m = Machine.Create(TestImages.Car);

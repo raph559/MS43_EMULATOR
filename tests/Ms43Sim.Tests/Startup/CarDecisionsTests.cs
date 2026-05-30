@@ -16,7 +16,7 @@ public class CarDecisionsTests : IClassFixture<CarDecisions>
     readonly DecisionLog log;
     public CarDecisionsTests(CarDecisions f) => log = f.Log;
     // 9.5 s, 6.5 s after the crank starts. The idle path (FD36.9) begins once the speed, falling
-    // after the start, reaches the idle target or turns back up (03:1C9E-03:1D38); this engine flares
+    // after the start, reaches the idle target or turns back up (0B:1C9E-0B:1D38); this engine flares
     // to 971 rpm and its idle path begins at 8.97 s, so the calls before it are on the start path.
     const ulong FromCycle = 228_000_000;
 

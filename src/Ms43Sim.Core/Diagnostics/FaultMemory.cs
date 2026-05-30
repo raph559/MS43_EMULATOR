@@ -118,6 +118,7 @@ public static class FaultMemory
     /// <summary>Why a detected path is expected on this car, or null: never for a stored entry.</summary>
     public static string? Explanation(FaultEntry entry) => entry.Stored ? null : entry.Path switch
     {
+        12 => "the engine-off time is unknown on a start from a blank EEPROM: with no engine-stop record (EEPROM 32Eh) the loader sets FD48.4 (0C:3DFC), and the check (0B:F99C) reports \"no signal\" every 100 ms while running; debounce increment 0, never stored; a key-on with the after-run's record does not report it",
         80 => "1F3h is DSC-only and this car has ASC [owner]; debounce increment 0, never stored",
         156 => "reported until the cluster's first 615h is parsed (a start-up transient a real car shows too); debounce increment 0, never stored",
         _ => null,
