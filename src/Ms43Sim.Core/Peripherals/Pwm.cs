@@ -14,7 +14,7 @@ namespace Ms43Sim.Core;
 /// (PS2/PS3). <see cref="PinHighFraction"/> is the P7.x pin's share of time high in the current
 /// period (UM §16: the comparator XORed with the latch while PENx = 1, the latch otherwise); a port
 /// read still returns the latch. <see cref="SettingsChanged"/> follows every write that can change
-/// an output; a PWx or PPx write takes effect at the next restart (the shadow).
+/// an output; a PWx or PPx write takes effect at the next restart (the shadow), which raises it again.
 /// </summary>
 public sealed class Pwm
 {
@@ -50,7 +50,10 @@ public sealed class Pwm
         OnReset();
     }
 
-    /// <summary>Raised with the channel after every write to its PPx or PWx, and for channels 0-3 after a PWMCON0/1 write.</summary>
+    /// <summary>
+    /// Raised with the channel after every write to its PPx or PWx, for channels 0-3 after a
+    /// PWMCON0/1 write, and at the restart that loads a PPx or PWx written while the channel ran.
+    /// </summary>
     public event Action<int>? SettingsChanged;
 
     public ushort Counter(int channel) => channels[channel].Counter;
@@ -239,6 +242,7 @@ public sealed class Pwm
             if (running)
             {
                 shadowPending = true;
+                Schedule();                  // the restart that loads it, so the change is seen there
                 return;
             }
             periodShadow = Period;
@@ -263,6 +267,7 @@ public sealed class Pwm
             baseTime += first * (ulong)Prescale;
             baseCount = 0;
             basePeriods++;
+            var loaded = shadowPending;
             if (shadowPending)
             {
                 periodShadow = Period;
@@ -273,12 +278,15 @@ public sealed class Pwm
             var more = (Now - baseTime) / (ulong)Prescale / length;
             baseTime += more * length * (ulong)Prescale;
             basePeriods += (long)more;
+            if (loaded)
+                owner.Changed(Number);       // the new settings reach the pin at this restart
         }
 
+        /// <summary>A restart event while the channel runs and either interrupts or a pending shadow need it.</summary>
         void Schedule()
         {
             Cancel();
-            if (!running || !interruptEnabled)
+            if (!running || !(interruptEnabled || shadowPending))
                 return;
             var at = baseTime + CountsToRestart() * (ulong)Prescale;
             restartEvent = owner.scheduler.Schedule(at, $"PWM{Number} restart", Restart);
@@ -288,7 +296,7 @@ public sealed class Pwm
         {
             restartEvent = -1;
             Settle();
-            if ((owner.sfrs.Peek(PwmicAddress) & Pwmie) != 0)
+            if (interruptEnabled && (owner.sfrs.Peek(PwmicAddress) & Pwmie) != 0)
                 owner.interrupts.Request(owner.request);
             Schedule();
         }

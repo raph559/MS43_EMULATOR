@@ -34,7 +34,7 @@ public class PinDriveTests
         Assert.Equal(0.5, d.TakeLowShare(), 9);
     }
 
-    [Fact] public void PwmWidthWrittenWhileRunning_CountsFromTheFirstCallAfterItsRestart()
+    [Fact] public void PwmWidthWrittenWhileRunning_CountsFromTheRestartThatLoadsIt()
     {
         var t = TestMachine.Create("0DFF")                                   // PWM0 at fCPU: a period of 1,875 cycles
             .WriteSfr(0xF038, 0x0752).WriteSfr(0xFE30, 0x02C4).WriteSfr(0xFF32, 0x0001).WriteSfr(0xFF30, 0x0001)
@@ -42,7 +42,7 @@ public class PinDriveTests
         var d = new PinDrive(t.M.Scheduler, t.M.Ports, 7, 0, t.M.Pwm, 0);
         t.M.Scheduler.Schedule(937, "width", () => t.WriteSfr(0xFE30, 0x03E8));      // mid-period: the shadow loads at 1,875
         t.M.Scheduler.Advance(3_750);
-        Assert.Equal(708 / 1875.0, d.TakeLowShare(), 9);                    // the restart raises no event: counted from the next call
+        Assert.Equal((708 + 1000) / 2 / 1875.0, d.TakeLowShare(), 9);       // one period of each
         t.M.Scheduler.Advance(7_500);
         Assert.Equal(1000 / 1875.0, d.TakeLowShare(), 9);
     }

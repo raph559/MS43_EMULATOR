@@ -30,6 +30,17 @@ public class OutputCaptureTests
         Assert.Equal(750, c.Events.Last(e => e.Source == "PWM2").Value);       // latch 0: 75 % high
     }
 
+    [Fact] public void PwmWidthWrittenWhileRunning_IsRecordedAtTheRestartThatLoadsIt()
+    {
+        var t = TestMachine.Create("0DFF")                                   // PWM2 at fCPU: a period of 1,875 cycles
+            .WriteSfr(0xF03C, 0x0752).WriteSfr(0xFE34, 0x02C4).WriteSfr(0xFF32, 0x0004).WriteSfr(0xFF30, 0x0004);
+        var c = new OutputCapture(t.M);
+        t.M.Scheduler.Schedule(937, "width", () => t.WriteSfr(0xFE34, 0x03E8));
+        t.M.Scheduler.Advance(5_000);
+        var last = c.Events.Last(e => e.Source == "PWM2");
+        Assert.Equal((1875UL, 467), (last.Cycle, last.Value));              // 875 of 1,875 high from the restart
+    }
+
     [Fact] public void EdgesBeyondTheCapacity_AreCountedNotKept()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0001);

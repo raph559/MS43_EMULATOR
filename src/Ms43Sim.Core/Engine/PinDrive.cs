@@ -5,9 +5,8 @@ namespace Ms43Sim.Core;
 /// channel has its output enabled (PENx) the instantaneous low share is 1 − the channel's high
 /// share; otherwise it is 1 while the pin is low. The share is re-read at every change of the pin
 /// (<see cref="Ports.PinChanged"/>) and of the channel's settings (<see cref="Pwm.SettingsChanged"/>),
-/// so latch changes and PWM set-ups are exact. A PWx or PPx write while the channel runs takes
-/// effect at its next restart, which raises no event: that change is counted from the first
-/// <see cref="TakeLowShare"/> after the restart (at most one plant step late).
+/// so latch changes and PWM set-ups are exact; a PWx or PPx written while the channel runs is seen at
+/// the restart that loads it, which raises SettingsChanged too.
 /// </summary>
 public sealed class PinDrive
 {

@@ -90,6 +90,17 @@ public class PwmTests
         Assert.Equal(0.5, t.M.Pwm.PinHighFraction(2, false), 6);
     }
 
+    [Fact] public void SettingsChanged_FiresAgainAtTheRestartThatLoadsAWidthWrittenWhileRunning()
+    {
+        var t = TestMachine.Create("0DFF")                                   // PWM0 at fCPU: a period of 1,875 cycles
+            .WriteSfr(0xF038, 0x0752).WriteSfr(0xFE30, 0x02C4).WriteSfr(0xFF32, 0x0001).WriteSfr(0xFF30, 0x0001);
+        var seen = new List<(ulong Cycle, double High)>();
+        t.M.Pwm.SettingsChanged += x => { if (x == 0) seen.Add((t.M.Cycles, t.M.Pwm.PinHighFraction(0, false))); };
+        t.M.Scheduler.Schedule(937, "width", () => t.WriteSfr(0xFE30, 0x03E8));      // mid-period: the shadow loads at 1,875
+        t.M.Scheduler.Advance(5_000);
+        Assert.Equal(new[] { (937UL, 1167 / 1875.0), (1875UL, 875 / 1875.0) }, seen);
+    }
+
     [Fact] public void SettingsChanged_FiresForPeriodWidthAndControlWrites()
     {
         var t = TestMachine.Create("0DFF");
