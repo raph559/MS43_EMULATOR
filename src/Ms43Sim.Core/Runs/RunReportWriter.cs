@@ -186,6 +186,7 @@ public static class RunReportWriter
         foreach (var p in e.Phases)
             s.AppendLine($"| {F(p.Cycle / CyclesPerMs / 1000, "0.000")} | {p.Phase} |");
         s.AppendLine();
+        s.AppendLine($"- Outcome: {e.Describe()}");
         s.AppendLine($"- At the end: {F(e.FinalRpm, "0")} rpm, airflow {F(e.AirflowKgPerHour, "0.00")} kg/h");
         s.AppendLine($"- Cam offsets from rest: intake advanced {F(e.IntakeAdvance, "0.0")} °CRK, exhaust retarded {F(e.ExhaustRetard, "0.0")} °CRK");
         s.AppendLine();

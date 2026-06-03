@@ -206,7 +206,7 @@ public static class Program
 
         output.WriteLine($"outcome: {result.Outcome}");
         if (result.Engine is { } e)
-            output.WriteLine($"engine: {e.Phases[^1].Phase} at {e.FinalRpm.ToString("0", CultureInfo.InvariantCulture)} rpm");
+            output.WriteLine($"engine: {e.Describe()}");
         output.WriteLine($"report: {Path.Combine(outDir, "run-report.md")}");
         Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
         return 0;

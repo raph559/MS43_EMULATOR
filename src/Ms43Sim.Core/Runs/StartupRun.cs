@@ -10,9 +10,42 @@ namespace Ms43Sim.Core;
 public sealed record StartupRunOptions(double Seconds = 5.0, double? KeyOffAtSeconds = null, MachineOptions? Machine = null,
     bool CanPartners = true, EngineScenario? Engine = null, Action<Machine>? Instrument = null);
 
-/// <summary>The engine at the end of the run: its phases, speed, airflow and cam offsets from rest (°CRK).</summary>
+/// <summary>How an engine run ended.</summary>
+public enum EngineOutcome { NeverStarted, Running, Stalled, StoppedAfterKeyOff }
+
+/// <summary>The engine at the end of the run: its phases, speed, airflow, cam offsets from rest (°CRK) and how it ended.</summary>
 public sealed record EngineSummary(string Scenario, IReadOnlyList<EnginePhaseChange> Phases,
-    double FinalRpm, double AirflowKgPerHour, double IntakeAdvance, double ExhaustRetard);
+    double FinalRpm, double AirflowKgPerHour, double IntakeAdvance, double ExhaustRetard, EngineOutcome Outcome)
+{
+    /// <summary>
+    /// Never started: it never ran on its own. Running: it runs at the end. Otherwise it stopped
+    /// after the key-off when its last run-down began at or after the key-off, and stalled when it
+    /// began with the key still on.
+    /// </summary>
+    public static EngineOutcome OutcomeOf(IReadOnlyList<EnginePhaseChange> phases, ulong? keyOffCycle)
+    {
+        if (!phases.Any(p => p.Phase == EnginePhase.Running))
+            return EngineOutcome.NeverStarted;
+        if (phases[^1].Phase == EnginePhase.Running)
+            return EngineOutcome.Running;
+        var runDown = phases.Last(p => p.Phase == EnginePhase.Stopping).Cycle;
+        return keyOffCycle is { } k && runDown >= k ? EngineOutcome.StoppedAfterKeyOff : EngineOutcome.Stalled;
+    }
+
+    /// <summary>The outcome in words, for the report and the console.</summary>
+    public string Describe()
+    {
+        static string S(ulong cycle) => (cycle / 24e6).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+        var runDown = Phases.LastOrDefault(p => p.Phase == EnginePhase.Stopping);
+        return Outcome switch
+        {
+            EngineOutcome.NeverStarted => "never started: it was not running on its own when the starter released",
+            EngineOutcome.Running => $"running at {FinalRpm.ToString("0", System.Globalization.CultureInfo.InvariantCulture)} rpm at the end",
+            EngineOutcome.Stalled => $"stalled at {S(runDown!.Cycle)} s with the key on",
+            _ => $"stopped after the key-off (coasting down from {S(runDown!.Cycle)} s)",
+        };
+    }
+}
 
 /// <summary>In order of precedence; see <see cref="StartupRun"/>.</summary>
 public enum StartupOutcome { SchedulerRunning, PoweredOff, ResetLoop, Trapped, Stalled, StayedInBoot, NoProgress }
@@ -259,7 +292,8 @@ public static class StartupRun
             end, machine.Instructions, machine.Entries, machine.StateHash(), assumptions,
             FaultMemory.Read(machine), FaultMemory.SavedInEeprom(image.Image, eeprom.ToImage()),
             engine is null ? null : new EngineSummary(engine.Scenario.Name, engine.Phases.ToArray(), engine.Rpm,
-                engine.AirflowKgPerHour, engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard),
+                engine.AirflowKgPerHour, engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard,
+                EngineSummary.OutcomeOf(engine.Phases, keyOff)),
             capture.Events, capture.Dropped, capture.Counts,
             cylinders?.Injections ?? Array.Empty<Injection>(), cylinders?.Sparks ?? Array.Empty<Spark>(),
             trace, machine.Throttle.Angle, partners?.Sent,

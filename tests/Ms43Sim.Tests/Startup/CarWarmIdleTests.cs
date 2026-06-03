@@ -159,6 +159,7 @@ public class CarWarmIdleTests : IClassFixture<CarWarmIdle>
         Assert.Equal(StartupOutcome.PoweredOff, r.Outcome);
         var after = r.Engine!.Phases.Where(p => p.Cycle >= KeyOff).Select(p => p.Phase).ToArray();
         Assert.Equal(new[] { EnginePhase.Stopping, EnginePhase.Stopped }, after);
+        Assert.Equal(EngineOutcome.StoppedAfterKeyOff, r.Engine.Outcome);
         var states = Between(r, 75, 100).Select(t => (int)V(t, "f900")).Distinct().ToArray();
         Assert.Contains(3, states); Assert.Contains(4, states);
         Assert.InRange(r.Milestones.PowerOff!.Value / 24e6, 76, 100);
@@ -168,6 +169,7 @@ public class CarWarmIdleTests : IClassFixture<CarWarmIdle>
     [Fact] public void NextKeyOn_TakesTheShortCheck_AndStoresNothing()
     {
         Assert.Equal(7, next.Firmware.ThrottleCheckState);
+        Assert.Equal(EngineOutcome.Running, next.Engine!.Outcome);
         Assert.Empty(next.Faults.Stored);
         Assert.All(next.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e, next.FaultContext)));
         Assert.DoesNotContain(next.Faults.Detected, e => e.Path == 12);        // t_es: the after-run left an engine-stop record

@@ -20,6 +20,15 @@ public class StartupRunTests
         Assert.Equal(82, File.ReadAllLines(Path.Combine(dir.Path, "trace.csv")).Length);     // header + 0.0 … 8.0 s
         Assert.Contains(File.ReadLines(Path.Combine(dir.Path, "events.csv")), l => l.Contains(",Pin,P2.6,"));
         Assert.Equal(EnginePhase.Running, r.Engine!.Phases[^1].Phase);
+        Assert.Contains("- Outcome: running at ", report);
+    }
+
+    [Fact] public void EngineRun_OfABinThatNeverFires_SaysItNeverStarted()
+    {
+        // the stock 430069 file never fires in this scenario: the starter turns it, then it coasts to a stop
+        var r = StartupRun.Run(TestImages.AsFlashed(TestBins.StockBytes), new(Seconds: 6, Engine: EngineScenario.WarmIdle));
+        Assert.Equal(EngineOutcome.NeverStarted, r.Engine!.Outcome);
+        Assert.Contains("- Outcome: never started", RunReportWriter.Report(r));
     }
 
     [Fact] public void EqualEngineRuns_GiveIdenticalFiles()

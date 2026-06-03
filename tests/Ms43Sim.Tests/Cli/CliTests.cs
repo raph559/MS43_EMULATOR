@@ -89,8 +89,10 @@ public class CliTests
     [Fact] public void Run_WithTheWarmIdleEngine_WritesFiveFiles()
     {
         using var dir = new TempDirectory();
-        var code = Program.Run(new[] { "run", TestImages.CarPath, "--engine", "warm-idle", "--seconds", "8", "--out", dir.Path }, TextWriter.Null, TextWriter.Null);
+        var output = new StringWriter();
+        var code = Program.Run(new[] { "run", TestImages.CarPath, "--engine", "warm-idle", "--seconds", "8", "--out", dir.Path }, output, TextWriter.Null);
         Assert.Equal(0, code);
+        Assert.Contains("engine: running at ", output.ToString());
         foreach (var f in new[] { "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv" })
             Assert.True(File.Exists(Path.Combine(dir.Path, f)), f);
     }
