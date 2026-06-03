@@ -320,7 +320,7 @@ public static class RunReportWriter
             foreach (var e in list)
             {
                 var row = $"| {e.Path} | {e.Label} | {e.Ds2Code:X2}h | {e.PCode} | {e.Type} | {e.Status:X2}h |";
-                s.AppendLine(explain ? $"{row} {FaultMemory.Explanation(e) ?? "**UNEXPLAINED**"} |" : row);
+                s.AppendLine(explain ? $"{row} {FaultMemory.Explanation(e, r.FaultContext) ?? "**UNEXPLAINED**"} |" : row);
             }
             s.AppendLine();
         }

@@ -111,7 +111,7 @@ public class CarWarmIdleTests : IClassFixture<CarWarmIdle>
         Assert.True(r.Faults.Recognised);
         Assert.Empty(r.Faults.Stored);
         Assert.Empty(r.SavedFaults);
-        Assert.All(r.Faults.Detected, e => Assert.True(FaultMemory.Explanation(e) != null, $"unexplained: {e.Label} {e.PCode} status {e.Status:X2}"));
+        Assert.All(r.Faults.Detected, e => Assert.True(FaultMemory.Explanation(e, r.FaultContext) != null, $"unexplained: {e.Label} {e.PCode} status {e.Status:X2}"));
     }
 
     // plan 2's open item 1
@@ -169,7 +169,7 @@ public class CarWarmIdleTests : IClassFixture<CarWarmIdle>
     {
         Assert.Equal(7, next.Firmware.ThrottleCheckState);
         Assert.Empty(next.Faults.Stored);
-        Assert.All(next.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e)));
+        Assert.All(next.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e, next.FaultContext)));
         Assert.DoesNotContain(next.Faults.Detected, e => e.Path == 12);        // t_es: the after-run left an engine-stop record
         Assert.All(Between(next, 25, 30), t => Assert.InRange(V(t, "rpm_fed") - V(t, "idle_target_rpm"), -25, 25));
     }

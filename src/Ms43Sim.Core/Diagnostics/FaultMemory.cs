@@ -18,6 +18,12 @@ public sealed record FaultEntry(int Path, byte Ds2Code, string? Name, byte Statu
 public sealed record FaultMemoryState(bool Recognised, IReadOnlyList<FaultEntry> Stored, IReadOnlyList<FaultEntry> Detected);
 
 /// <summary>
+/// The run's conditions an explanation rests on: whether the EEPROM started blank (every byte FFh,
+/// so no engine-stop record) and whether the CAN partners sent.
+/// </summary>
+public sealed record FaultContext(bool EepromBlank, bool CanPartners);
+
+/// <summary>
 /// The firmware's fault memory (plan 3, Reference facts) [obs; ver]. Each path has a 12-byte state
 /// record at 91DAh + 12·p in the external RAM and a 22-byte descriptor at file 0x6D08E + 22·p:
 /// its DS2 code, flags, and four pointers to the P-code word of each type at calibration file
@@ -115,12 +121,16 @@ public static class FaultMemory
         return entries;
     }
 
-    /// <summary>Why a detected path is expected on this car, or null: never for a stored entry.</summary>
-    public static string? Explanation(FaultEntry entry) => entry.Stored ? null : entry.Path switch
+    /// <summary>
+    /// Why a detected path is expected on this car in a run under <paramref name="context"/>, or
+    /// null: never for a stored entry, and only for the fault type and the conditions the
+    /// explanation names.
+    /// </summary>
+    public static string? Explanation(FaultEntry entry, FaultContext context) => entry.Stored ? null : entry.Path switch
     {
-        12 => "the engine-off time is unknown on a start from a blank EEPROM: with no engine-stop record (EEPROM 32Eh) the loader sets FD48.4 (0C:3DFC), and the check (0B:F99C) reports \"no signal\" every 100 ms while running; debounce increment 0, never stored; a key-on with the after-run's record does not report it",
-        80 => "1F3h is DSC-only and this car has ASC [owner]; debounce increment 0, never stored",
-        156 => "reported until the cluster's first 615h is parsed (a start-up transient a real car shows too); debounce increment 0, never stored",
+        12 when entry.Type == 2 && context.EepromBlank => "the engine-off time is unknown on a start from a blank EEPROM: with no engine-stop record (EEPROM 32Eh) the loader sets FD48.4 (0C:3DFC), and the check (0B:F99C) reports \"no signal\" every 100 ms while running; debounce increment 0, never stored; a key-on with the after-run's record does not report it",
+        80 when entry.Type == 3 && context.CanPartners => "1F3h is DSC-only and this car has ASC [owner]; debounce increment 0, never stored",
+        156 when entry.Type == 2 && context.CanPartners && !entry.Present => "reported until the cluster's first 615h is parsed (a start-up transient a real car shows too); debounce increment 0, never stored",
         _ => null,
     };
 }

@@ -87,7 +87,8 @@ public sealed record StartupResult(
     IReadOnlyList<Spark> Sparks,
     IReadOnlyList<TraceRow> Trace,
     double ThrottleAngle,
-    IReadOnlyDictionary<uint, long>? CanPartnersSent)
+    IReadOnlyDictionary<uint, long>? CanPartnersSent,
+    FaultContext FaultContext)
 {
     /// <summary>Events of type T the run raised, including those the log did not keep.</summary>
     public long CountOf<T>() where T : SimEvent => EventCounts.GetValueOrDefault(typeof(T));
@@ -261,7 +262,8 @@ public static class StartupRun
                 engine.AirflowKgPerHour, engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard),
             capture.Events, capture.Dropped, capture.Counts,
             cylinders?.Injections ?? Array.Empty<Injection>(), cylinders?.Sparks ?? Array.Empty<Spark>(),
-            trace, machine.Throttle.Angle, partners?.Sent);
+            trace, machine.Throttle.Angle, partners?.Sent,
+            new FaultContext(machineOptions.EepromImage is not { } start || start.All(b => b == 0xFF), options.CanPartners));
     }
 
     /// <summary>IRAM through the bus; XRAM straight from its array, so the values are real even while XPEN is clear.</summary>

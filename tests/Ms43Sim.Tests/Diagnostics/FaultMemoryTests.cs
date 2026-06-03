@@ -32,14 +32,29 @@ public class FaultMemoryTests
     {
         var e = FaultMemory.Decode(TestImages.Car.Image, 80, Record(0x08));
         Assert.Equal(("tout_asr_3", 3, "P1613", false, false), (e.Name, e.Type, e.PCode, e.Stored, e.Present));
-        Assert.NotNull(FaultMemory.Explanation(e));
+        Assert.NotNull(FaultMemory.Explanation(e, new FaultContext(EepromBlank: true, CanPartners: true)));
     }
 
     [Fact] public void Decode_TheEngineOffTimeOfAFirstStart_IsDetectedButNeverStored_AndExplained()
     {
         var e = FaultMemory.Decode(TestImages.Car.Image, 12, Record(0x14));
         Assert.Equal(("t_es", 2, false), (e.Name, e.Type, e.Stored));
-        Assert.NotNull(FaultMemory.Explanation(e));
+        Assert.NotNull(FaultMemory.Explanation(e, new FaultContext(EepromBlank: true, CanPartners: true)));
+    }
+
+    [Fact] public void Explanations_HoldOnlyUnderTheirRunsConditions()
+    {
+        var car = TestImages.Car.Image;
+        var tes = FaultMemory.Decode(car, 12, Record(0x14));
+        var asr = FaultMemory.Decode(car, 80, Record(0x08));
+        var tam = FaultMemory.Decode(car, 156, Record(0x14));
+        var blankWithPartners = new FaultContext(EepromBlank: true, CanPartners: true);
+        Assert.All(new[] { tes, asr, tam }, e => Assert.NotNull(FaultMemory.Explanation(e, blankWithPartners)));
+        Assert.Null(FaultMemory.Explanation(tes, blankWithPartners with { EepromBlank = false }));     // an engine-stop record was there
+        Assert.Null(FaultMemory.Explanation(FaultMemory.Decode(car, 12, Record(0x18)), blankWithPartners));   // implausible, not "no signal"
+        Assert.Null(FaultMemory.Explanation(asr, blankWithPartners with { CanPartners = false }));
+        Assert.Null(FaultMemory.Explanation(tam, blankWithPartners with { CanPartners = false }));
+        Assert.Null(FaultMemory.Explanation(FaultMemory.Decode(car, 156, Record(0x54)), blankWithPartners));  // still present: 615h never parsed
     }
 
     [Fact] public void Read_ListsAInOrder_AndBWithoutRepeats()

@@ -73,7 +73,7 @@ public class CarStartupTests : IClassFixture<CarKeyOn>
     {
         Assert.True(r.Faults.Recognised);
         Assert.Empty(r.Faults.Stored);
-        Assert.All(r.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e)));
+        Assert.All(r.Faults.Detected, e => Assert.NotNull(FaultMemory.Explanation(e, r.FaultContext)));
     }
 
     [Fact] public void Can_Transmits316h_329h_545h() =>
