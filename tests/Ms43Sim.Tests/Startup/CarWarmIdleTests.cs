@@ -51,6 +51,7 @@ public class CarWarmIdleTests : IClassFixture<CarWarmIdle>
     [Fact] public void Engine_StartsAt4s_AndHoldsTheFirmwaresIdleTarget()
     {
         Assert.Equal(EnginePhase.Running, r.Engine!.Phases.First(p => p.Cycle == 96_000_000).Phase);
+        Assert.DoesNotContain(r.Engine.Phases, p => p.Cycle > 96_000_000 && p.Cycle < KeyOff);   // it runs on until the key-off
         Assert.All(Steady, t => Assert.InRange(V(t, "rpm_fed") - V(t, "idle_target_rpm"), -25, 25));
         Assert.All(Steady, t => Assert.Equal(900, V(t, "idle_target_rpm")));
     }

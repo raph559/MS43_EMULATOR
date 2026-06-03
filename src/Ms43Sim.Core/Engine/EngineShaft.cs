@@ -13,7 +13,9 @@ namespace Ms43Sim.Core;
 /// in the firing order 1-5-3-6-2-4.
 /// The speed is piecewise constant between <see cref="SetSpeed"/> calls. One scheduler event at a
 /// time drives the next edge at the cycle the speed in force gives; the crank edges are walked in
-/// order, so none is ever skipped or repeated, and each edge sets its level from its own type.
+/// order, so none is ever skipped or repeated, and each edge sets its level from its own type. An
+/// edge's cycle is rounded up, so a speed or offset change on the cycle an edge is due, before its
+/// event has run, fires that edge first.
 /// </summary>
 public sealed class EngineShaft
 {
@@ -37,6 +39,7 @@ public sealed class EngineShaft
     bool intake, exhaust;        // the cam levels driven last
     int nextCrank;               // the index of the next crank edge
     long pending = -1;
+    ulong pendingAt;
     double pendingAngle;
     bool pendingCrank, pendingIntake, pendingExhaust;
 
@@ -124,9 +127,18 @@ public sealed class EngineShaft
 
     static bool InWindow(double theta, double start) => Normalize(theta - start) < CamWindow;
 
-    /// <summary>Moves the reference to now, so the speed or the offsets can change.</summary>
+    /// <summary>
+    /// Moves the reference to now, so the speed or the offsets can change. An edge already due (its
+    /// event at this cycle has not run yet) fires first: the shaft is past it by up to one cycle's
+    /// angle, and re-referencing first would put it a whole engine cycle ahead.
+    /// </summary>
     void Freeze()
     {
+        while (pending >= 0 && pendingAt <= scheduler.Now)
+        {
+            scheduler.Cancel(pending);
+            Fire();
+        }
         thetaRef = Angle;
         tRef = scheduler.Now;
     }
@@ -159,7 +171,8 @@ public sealed class EngineShaft
         pendingExhaust = dExhaust - d <= Epsilon;
         pendingAngle = Normalize(thetaRef + d);
         var cycles = (ulong)Math.Max(0, Math.Ceiling(d * CyclesPerDegreeAtOneRpm / Rpm - 1e-6));
-        pending = scheduler.Schedule(tRef + cycles, "engine edge", Fire);
+        pendingAt = tRef + cycles;
+        pending = scheduler.Schedule(pendingAt, "engine edge", Fire);
     }
 
     void Fire()

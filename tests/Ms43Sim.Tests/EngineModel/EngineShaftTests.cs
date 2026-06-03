@@ -82,6 +82,35 @@ public class EngineShaftTests
         Assert.All(crank.Zip(crank.Skip(1)), pair => Assert.NotEqual(pair.First, pair.Second));
     }
 
+    [Fact] public void FractionalSpeed_SetEvery12000Cycles_NeverDropsACycleOfEdges()
+    {
+        // The engine's own pattern: a step every 0.5 ms that sets the speed and the cam offsets,
+        // rescheduling itself after it runs, so an edge that a fire scheduled since the last step
+        // can fall due on the step's cycle and run after it. At a fractional speed an edge's cycle
+        // is rounded up, so the shaft is already past the edge when the step re-references it. The
+        // speed creeps from 2,400.3 to 2,600.3 rpm so the edges sweep across the steps' cycles.
+        var s = new Scheduler();
+        var p = new Pins { S = s };
+        var e = new EngineShaft(s, p, 0.0);
+        double Rpm(ulong at) => 2400.3 + 200.0 * at / 480_000_000;
+        void Step(ulong at) => s.Schedule(at, "step", () =>
+        {
+            e.SetSpeed(Rpm(at));
+            e.SetCamOffsets(0, 0);
+            Step(at + 12_000);
+        });
+        e.SetSpeed(Rpm(0));
+        Step(12_000);
+        s.Advance(480_000_000);                                             // 20 s
+        var tooth = 6 * 4e6 / Rpm(0);                                       // the longest tooth period, in cycles
+        var falls = p.Edges.Where(x => (x.Port, x.Bit) == (2, 15) && !x.Level).Select(x => x.Cycle).ToArray();
+        var longest = falls.Zip(falls.Skip(1), (a, b) => b - a).Max();
+        Assert.True(longest <= 3.5 * tooth, $"a crank gap of {longest / tooth:0.0} teeth");   // the wheel's own gap is 3
+        var cycles = falls.Length / 116.0;                                  // 116 teeth per engine cycle
+        Assert.InRange(p.Edges.Count(x => (x.Port, x.Bit) == (2, 14) && x.Level), cycles - 1, cycles + 1);   // one intake rise per cycle
+        Assert.InRange(p.Edges.Count(x => (x.Port, x.Bit) == (2, 13) && x.Level), cycles - 1, cycles + 1);
+    }
+
     [Fact] public void SpeedChange_KeepsTheAngleContinuous()
     {
         var (s, _, e) = Shaft(500, 0.0);
