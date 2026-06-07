@@ -13,9 +13,11 @@ public sealed record Injection(int Cylinder, ulong Open, ulong Close, double Ope
 }
 
 /// <summary>
-/// A spark: the coil dwells from DwellStart and fires at Fire. Advance is °BTDC of the cylinder's
-/// firing TDC; Main is a dwell of at least 1.5 ms (a multi-spark's re-dwell is shorter). The
-/// decisions are the ECU's: the advance read as it fired, the dwell read as it started.
+/// A spark: the coil dwells from DwellStart and fires at Fire, after at least 0.5 ms of dwell
+/// (<see cref="Engine.MinSparkDwellCycles"/>; a shorter pulse, as in an ignition cut, is no spark).
+/// Advance is °BTDC of the cylinder's firing TDC; Main is a dwell of at least 1.5 ms (a multi-spark's
+/// re-dwell is shorter). The decisions are the ECU's: the advance read as it fired, the dwell read as
+/// it started.
 /// </summary>
 public sealed record Spark(int Cylinder, ulong DwellStart, ulong Fire, double Advance, bool Main, double DecidedAdvance,
     int DecidedDwellTicks)
@@ -56,7 +58,7 @@ public sealed class CylinderEvents
         this.machine = machine;
         this.crankAngle = crankAngle;
         this.capacity = capacity;
-        machine.Ports.PinChanged += OnPinChanged;
+        machine.Ports.OutputEdge += OnOutputEdge;
     }
 
     public IReadOnlyList<Injection> Injections => injections;
@@ -66,9 +68,10 @@ public sealed class CylinderEvents
     /// <summary>Injections and sparks not kept because their list was full.</summary>
     public long Dropped { get; private set; }
 
-    void OnPinChanged(int port, int bit, bool level)
+    /// <summary>An edge of an output pin (<see cref="Ports.OutputEdge"/>): a direction set-up is never an edge.</summary>
+    void OnOutputEdge(int port, int bit, bool level)
     {
-        if (port != 2 || bit > 11 || !machine.Ports.IsOutput(2, bit))
+        if (port != 2 || bit > 11)
             return;
         var now = machine.Cycles;
         if (bit < 6)
@@ -102,6 +105,8 @@ public sealed class CylinderEvents
         if (dwelling[n] is not { } dwell)
             return;
         dwelling[n] = null;
+        if (now - dwell.Cycle < Engine.MinSparkDwellCycles)
+            return;                                 // too short to store energy: an ignition cut's pulse, not a spark (plan 4 R1)
         var advance = BeforeTdc(EngineShaft.FiringTdc(cylinder) - crankAngle());
         Add(sparks, new Spark(cylinder, dwell.Cycle, now, advance, now - dwell.Cycle >= MainDwellCycles,
             DecidedAdvance(cylinder), dwell.Decided));

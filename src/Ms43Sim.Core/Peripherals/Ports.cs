@@ -17,7 +17,11 @@ public interface IPinEnvironment
 /// input-only. P5DIDIS and PICON are only stored.
 /// Reads ask the environment for the live level. <see cref="PinChanged"/> fires on every change of
 /// a pin's level from a latch, direction or open-drain write, or from an input change the
-/// environment reports through <see cref="InputChanged"/>.
+/// environment reports through <see cref="InputChanged"/>: it is the physical level, which the capture
+/// units and the plants need. <see cref="OutputEdge"/> fires only for a pin that is an output before and
+/// after the change, and <see cref="PinDirectionChanged"/> for every change of a pin's direction: a
+/// direction change is a set-up, not a signal edge [obs plan 4 R1: the coil set-up at 0.0603 s takes
+/// P2.6–P2.11 from a pulled-up input to an output at 0].
 /// </summary>
 public sealed class Ports
 {
@@ -57,6 +61,12 @@ public sealed class Ports
     /// <summary>(port, bit, new level) for every pin whose level changes.</summary>
     public event Action<int, int, bool>? PinChanged;
 
+    /// <summary>(port, bit, new level) for a pin that is an output both before and after its level changes: a signal edge.</summary>
+    public event Action<int, int, bool>? OutputEdge;
+
+    /// <summary>(port, bit, is an output now) for every pin whose direction changes, raised before the level events of that write.</summary>
+    public event Action<int, int, bool>? PinDirectionChanged;
+
     public ushort Latch(int port) => latch[port];
 
     public bool IsOutput(int port, int bit) => (direction[port] & (1 << bit)) != 0;
@@ -82,7 +92,7 @@ public sealed class Ports
     public void ToggleLatchBit(int port, int bit) => Set(latch, port, (ushort)(latch[port] ^ (1 << bit)));
 
     /// <summary>The environment changed the level it puts on an input.</summary>
-    public void InputChanged(int port, int bit) => Update(port);
+    public void InputChanged(int port, int bit) => Update(port, direction[port]);
 
     /// <summary>Every latch, direction and open-drain bit to 0 (UM §7). The pins follow without events.</summary>
     public void OnReset()
@@ -110,19 +120,34 @@ public sealed class Ports
 
     void Set(ushort[] register, int port, ushort value)
     {
+        var directionBefore = direction[port];
         register[port] = (ushort)(value & Mask[port]);
-        Update(port);
+        Update(port, directionBefore);
     }
 
-    void Update(int port)
+    /// <summary>
+    /// Reports what a write or an input change did: first each direction change, then each level
+    /// change (<see cref="PinChanged"/>), as an <see cref="OutputEdge"/> too when the pin was an output
+    /// before and is one after.
+    /// </summary>
+    void Update(int port, ushort directionBefore)
     {
+        for (int turned = directionBefore ^ direction[port]; turned != 0; turned &= turned - 1)
+        {
+            var bit = BitOperations.TrailingZeroCount(turned);
+            PinDirectionChanged?.Invoke(port, bit, (direction[port] & (1 << bit)) != 0);
+        }
         var now = Pins(port);
         var changed = notified[port] ^ now;
         notified[port] = now;
+        var outputs = directionBefore & direction[port];
         for (; changed != 0; changed &= changed - 1)
         {
             var bit = BitOperations.TrailingZeroCount(changed);
-            PinChanged?.Invoke(port, bit, (now & (1 << bit)) != 0);
+            var level = (now & (1 << bit)) != 0;
+            PinChanged?.Invoke(port, bit, level);
+            if ((outputs & (1 << bit)) != 0)
+                OutputEdge?.Invoke(port, bit, level);
         }
     }
 

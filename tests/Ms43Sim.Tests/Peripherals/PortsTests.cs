@@ -61,6 +61,32 @@ public class PortsTests
         Assert.Equal(new[] { (7, 0, true), (8, 6, true) }, seen);
     }
 
+    [Fact] public void ADirectionChange_RaisesPinDirectionChanged_NotOutputEdge()
+    {
+        var (p, s, e) = Make();
+        e.High.Add((2, 6)); p.InputChanged(2, 6);            // the input reads high (the board's pull-up)
+        var physical = new List<(int, int, bool)>(); var dirs = new List<(int, int, bool)>(); var edges = new List<(int, int, bool)>();
+        p.PinChanged += (port, bit, level) => physical.Add((port, bit, level));
+        p.PinDirectionChanged += (port, bit, isOutput) => dirs.Add((port, bit, isOutput));
+        p.OutputEdge += (port, bit, level) => edges.Add((port, bit, level));
+        s.Write16(0xFFC2, 0x0040);                           // DP2.6: P2.6 becomes an output at latch 0 (the coil set-up, plan 4 R1)
+        Assert.Equal(new[] { (2, 6, true) }, dirs);
+        Assert.Empty(edges);                                 // a set-up, not a signal edge
+        Assert.Equal(new[] { (2, 6, false) }, physical);     // the pin's level did change: captures and PinDrive still see it
+    }
+
+    [Fact] public void AnOutputLatchWrite_RaisesOutputEdge_AndPinChanged()
+    {
+        var (p, s, _) = Make();
+        s.Write16(0xFFC2, 0x0040);                           // output first
+        var physical = new List<(int, int, bool)>(); var edges = new List<(int, int, bool)>();
+        p.PinChanged += (port, bit, level) => physical.Add((port, bit, level));
+        p.OutputEdge += (port, bit, level) => edges.Add((port, bit, level));
+        s.Write16(0xFFC0, 0x0040);                           // drive it high
+        Assert.Equal(new[] { (2, 6, true) }, edges);
+        Assert.Equal(new[] { (2, 6, true) }, physical);
+    }
+
     [Fact] public void P3Bit14_DoesNotExist()
     {
         var (_, s, e) = Make();

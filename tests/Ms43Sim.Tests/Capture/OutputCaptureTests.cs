@@ -41,6 +41,26 @@ public class OutputCaptureTests
         Assert.Equal((1875UL, 467), (last.Cycle, last.Value));              // 875 of 1,875 high from the restart
     }
 
+    [Fact] public void ARepeatedPwmShare_IsCountedButNotKeptAgain()
+    {
+        var t = TestMachine.Create("0DFF");
+        var c = new OutputCapture(t.M);
+        t.WriteSfr(0xF03C, 0xEA5F).WriteSfr(0xFE34, 0x3A98).WriteSfr(0xFF32, 0x0004).WriteSfr(0xFF30, 0x0004);
+        var kept = c.Events.Count; var counted = c.Counts["PWM2"];
+        t.WriteSfr(0xFF30, 0x0004);                                          // the same setting again: every share repeats
+        Assert.Equal(kept, c.Events.Count);                                  // nothing new is kept
+        Assert.True(c.Counts["PWM2"] > counted);                             // but the repeat is counted
+    }
+
+    [Fact] public void ADirectionChange_IsCapturedAsPinDirection_NotAsAnEdge()
+    {
+        var t = TestMachine.Create("0DFF");                                  // P2.6 is an input, read high (pull-up)
+        var c = new OutputCapture(t.M);
+        t.WriteSfr(0xFFC2, 0x0040);                                          // P2.6 becomes an output at 0
+        Assert.Contains(c.Events, e => e.Kind == OutputKind.PinDirection && e.Source == "P2.6" && e.Value == 1);
+        Assert.DoesNotContain(c.Events, e => e.Kind == OutputKind.Pin && e.Source == "P2.6");
+    }
+
     [Fact] public void EdgesBeyondTheCapacity_AreCountedNotKept()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0001);

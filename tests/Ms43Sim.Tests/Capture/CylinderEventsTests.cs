@@ -29,6 +29,16 @@ public class CylinderEventsTests
         Assert.Equal((618.0, 604.0), (i.ExpectedTicks, i.ExpectedTicksAtClose));
     }
 
+    [Fact] public void ACoilPulseUnderHalfAMillisecond_IsNotASpark()
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0040);        // P2.6 (coil 1) output
+        var ev = new CylinderEvents(t.M, () => EngineShaft.FiringTdc(1));
+        t.WriteSfr(0xFFC0, 0x0040);                                         // dwell start
+        t.M.Scheduler.Advance(6_000);                                       // 0.25 ms: an ignition cut's pulse (plan 4 R1)
+        t.WriteSfr(0xFFC0, 0x0000);                                         // fall
+        Assert.Empty(ev.Sparks);
+    }
+
     [Fact] public void Sparks_AreToldApartByTheirDwell_AndMeasuredFromTheFiringTdc()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0040);

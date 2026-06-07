@@ -10,8 +10,11 @@ public sealed record EnginePhaseChange(ulong Cycle, EnginePhase Phase);
 /// combustion rule and a crude idle-air plant. It reads only what the hardware sees: the pins and
 /// the time.
 /// <list type="bullet">
-/// <item>Combustion [assumption]: a falling edge of an output coil pin P2.6–P2.11 and a rising
-/// edge (a closing) of an output injector pin P2.0–P2.5, each within the last 0.25 s.</item>
+/// <item>Combustion [assumption]: a spark — a falling edge of an output coil pin P2.6–P2.11 after at
+/// least 0.5 ms high (<see cref="MinSparkDwellCycles"/>; an ignition cut's 44–125 µs pulses store no
+/// energy, plan 4 R1) — and a rising edge (a closing) of an output injector pin P2.0–P2.5, each within
+/// the last 0.25 s. Only edges of pins that are outputs before and after count (<see cref="Ports.OutputEdge"/>):
+/// a direction set-up is not an edge.</item>
 /// <item>Phases [assumption]: Stopped until the scenario's crank time; Starter for its starter time
 /// (0 → the starter speed in 0.2 s); then Running if combusting, else Stopping. Running without
 /// combustion becomes Stopping; Stopping with combustion at 300 rpm or more runs again, and below
@@ -29,6 +32,10 @@ public sealed class Engine
     public const double ValveFlow = 50, IdleLoad = 105, FullLoad = 480;
     public const double FlowLag = 0.05, SpeedLag = 0.3, StopLag = 0.5, CombustionWindow = 0.25;
     public const ulong StepCycles = 12_000;
+
+    /// <summary>0.5 ms: a coil's fall is a spark only after this much dwell (plan 4 C7).</summary>
+    public const ulong MinSparkDwellCycles = 12_000;
+
     const double MgPerStroke = 5555.6;                  // mg/stroke = kg/h × 5555.6 / rpm
     const double StarterRamp = 0.2, StallRpm = 30, RestartRpm = 300;
 
@@ -38,6 +45,7 @@ public sealed class Engine
     readonly double cpuHz, stepSeconds;
     readonly ulong crankAt, releaseAt, combustionWindow;
     ulong? lastSpark, lastClosing;
+    readonly ulong?[] coilRise = new ulong?[6];
     long burnEnd = -1;
 
     Engine(Machine machine, EngineScenario scenario)
@@ -60,7 +68,7 @@ public sealed class Engine
         machine.Board.AttachAnalog(14, () => Rpm >= EngineSensors.TurningRpm ? EngineSensors.CoilCurrentVolts : 0);
         machine.Board.AttachAnalog(15, () => EngineSensors.KnockVolts(Rpm));
         machine.Board.Drive(3, 6, false);
-        machine.Ports.PinChanged += OnPinChanged;
+        machine.Ports.OutputEdge += OnOutputEdge;
 
         phases.Add(new EnginePhaseChange(machine.Cycles, EnginePhase.Stopped));
         machine.Scheduler.Schedule(crankAt, "starter", () => Change(EnginePhase.Starter));
@@ -90,12 +98,22 @@ public sealed class Engine
 
     public bool Combusting { get; private set; }
 
-    void OnPinChanged(int port, int bit, bool level)
+    void OnOutputEdge(int port, int bit, bool level)
     {
-        if (port != 2 || !machine.Ports.IsOutput(2, bit))
+        if (port != 2)
             return;
-        if (bit is >= 6 and <= 11 && !level)
-            Spark();
+        if (bit is >= 6 and <= 11)
+        {
+            var coil = bit - 6;
+            if (level)
+                coilRise[coil] = machine.Cycles;
+            else
+            {
+                if (coilRise[coil] is { } rise && machine.Cycles - rise >= MinSparkDwellCycles)
+                    Spark();
+                coilRise[coil] = null;
+            }
+        }
         else if (bit <= 5 && level)
             lastClosing = machine.Cycles;
     }

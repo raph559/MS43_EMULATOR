@@ -33,13 +33,24 @@ public class EngineTests
 
     [Fact] public void BurnPulse_FollowsEverySpark_For1Point2ms_AndRetriggers()
     {
-        var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0040).WriteSfr(0xFFC0, 0x0040);   // P2.6 output, high (dwelling)
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0040);        // P2.6 output, low
         Engine.Attach(t.M, EngineScenario.WarmIdle);
-        t.M.Scheduler.Schedule(10_000, "spark", () => t.WriteSfr(0xFFC0, 0));
-        t.M.Scheduler.Schedule(20_000, "dwell", () => t.WriteSfr(0xFFC0, 0x0040));
-        t.M.Scheduler.Schedule(30_000, "spark", () => t.WriteSfr(0xFFC0, 0));
-        t.M.Scheduler.Advance(30_000 + 28_799); Assert.True(t.M.Board.InputLevel(3, 6));
-        t.M.Scheduler.Advance(30_000 + 28_800); Assert.False(t.M.Board.InputLevel(3, 6));
+        t.WriteSfr(0xFFC0, 0x0040);                                         // dwelling from cycle 0
+        t.M.Scheduler.Schedule(24_000, "spark", () => t.WriteSfr(0xFFC0, 0));          // after 1 ms of dwell: a spark
+        t.M.Scheduler.Schedule(30_000, "dwell", () => t.WriteSfr(0xFFC0, 0x0040));
+        t.M.Scheduler.Schedule(44_000, "spark", () => t.WriteSfr(0xFFC0, 0));          // 0.58 ms: a spark inside the first pulse
+        t.M.Scheduler.Advance(44_000 + 28_799); Assert.True(t.M.Board.InputLevel(3, 6));
+        t.M.Scheduler.Advance(44_000 + 28_800); Assert.False(t.M.Board.InputLevel(3, 6));
+    }
+
+    [Fact] public void AShortCoilPulse_IsNoSpark_AndFiresNoBurnPulse()
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFFC2, 0x0040);        // P2.6 output, low
+        Engine.Attach(t.M, EngineScenario.WarmIdle);
+        t.WriteSfr(0xFFC0, 0x0040);
+        t.M.Scheduler.Schedule(2_400, "cut pulse ends", () => t.WriteSfr(0xFFC0, 0));  // 100 µs: an ignition cut's pulse (plan 4 R1)
+        t.M.Scheduler.Advance(3_000);
+        Assert.False(t.M.Board.InputLevel(3, 6));                           // no burn pulse
     }
 
     [Fact] public void Battery_FollowsThePhases()

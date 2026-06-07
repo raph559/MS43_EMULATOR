@@ -4,11 +4,12 @@ namespace Ms43Sim.Tests.Support;
 public static class FakeEcu
 {
     const ulong ValvePeriod = 240_000;                                   // 10 ms
+    const ulong Dwell = 57_600;                                          // 2.4 ms: a spark needs at least 0.5 ms (plan 4 C7); the car dwells 2.36 ms at 14 V
 
     /// <summary>
-    /// Every <paramref name="every"/> cycles the spark pin goes high then low (a spark) and the
-    /// injector pin low then high (a closing); P2.12 is low for <paramref name="valveLowShare"/> of
-    /// every 10 ms. The pins must already be outputs.
+    /// Every <paramref name="every"/> cycles the spark pin goes high, and 2.4 ms later low (a spark),
+    /// and then the injector pin low then high (a closing); P2.12 is low for
+    /// <paramref name="valveLowShare"/> of every 10 ms. The pins must already be outputs.
     /// </summary>
     public static void Fire(TestMachine t, int sparkPin, int injectorPin, ulong every, double valveLowShare)
     {
@@ -21,12 +22,15 @@ public static class FakeEcu
             t.WriteSfr(0xFFC0, (ushort)(level ? latch | 1 << bit : latch & ~(1 << bit)));
         }
 
-        void Cylinder(ulong at) => scheduler.Schedule(at, "fake spark and injection", () =>
+        void Cylinder(ulong at) => scheduler.Schedule(at, "fake dwell", () =>
         {
             Set(sparkPin, true);
-            Set(sparkPin, false);
-            Set(injectorPin, false);
-            Set(injectorPin, true);
+            scheduler.Schedule(at + Dwell, "fake spark and injection", () =>
+            {
+                Set(sparkPin, false);
+                Set(injectorPin, false);
+                Set(injectorPin, true);
+            });
             Cylinder(at + every);
         });
 
