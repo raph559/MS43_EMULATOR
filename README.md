@@ -64,8 +64,8 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 The outcome is the first that holds: `Trapped`, `ResetLoop` (any reset), `PoweredOff` (the main
 relay released after the handover), `SchedulerRunning` (the main loop's SRVWDT at 0E:0144 in the
 last 30 ms), `Stalled` (handed over, no scheduler), `StayedInBoot`, `NoProgress`. The report
-gives the milestones; with an engine, the engine's phases and the inputs fed beside what the
-ECU reads; the outputs (with an engine, per cylinder: injections, sparks and the ECU's own
+gives the milestones; with an engine, the engine's phases, how it ended (never started,
+running, stalled, or stopped after the key-off) and the inputs fed beside what the ECU reads; the outputs (with an engine, per cylinder: injections, sparks and the ECU's own
 decisions); the plants (throttle, VANOS, idle); the fault memory, with each detected path's
 explanation or UNEXPLAINED; the CAN partners; scheduler health, checksum tasks, the monitoring
 module, the firmware's RAM read-outs, CAN transmissions, resets, events, stubs, the unmodelled
@@ -103,7 +103,7 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 470 tests (about 1.5 minutes in all):
+Run it from the repository root. 479 tests (about 2 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
