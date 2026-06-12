@@ -41,6 +41,7 @@ public class DriveFileTests
     [InlineData("drive x\n3 fly", 2, "unknown mode 'fly'")]
     // what each mode takes, and the order of the modes
     [InlineData("drive x\n1 crank", 2, "crank needs rpm=")]
+    [InlineData("drive x\n1 crank rpm=100..200", 2, "crank's rpm cannot ramp")]
     [InlineData("drive x\n1 crank rpm=200 pedal=10", 2, "pedal must be 0 in crank")]
     [InlineData("drive x\n1 crank rpm=200\n5 idle\n2 drive gear=3 speed=40 pedal=20\n3 idle", 5, "pedal must be 0 in idle")]
     [InlineData("drive x\n3 on rpm=800", 2, "rpm only in crank and drive")]

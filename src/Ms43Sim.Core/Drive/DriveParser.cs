@@ -245,6 +245,8 @@ public static partial class DriveParser
             var keys = segment.Keys;
             if (mode == DriveMode.Crank && !keys.ContainsKey("rpm"))
                 throw Fail(line, "crank needs rpm=, the starter's speed");
+            if (mode == DriveMode.Crank && keys["rpm"].From != keys["rpm"].To)
+                throw Fail(line, "crank's rpm cannot ramp: the starter turns at one speed");
             if (keys.ContainsKey("rpm") && mode is not (DriveMode.Crank or DriveMode.Drive))
                 throw Fail(line, "rpm only in crank and drive");
             if (keys.ContainsKey("speed") && mode != DriveMode.Drive)

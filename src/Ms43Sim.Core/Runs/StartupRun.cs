@@ -140,49 +140,12 @@ public sealed record StartupResult(
 /// </summary>
 public static class StartupRun
 {
-    const uint BootServiced = 0x002EFC, Handover = 0x0E366A, InterruptsEnabled = 0x0E36BC;
-    const uint EepromLoaded = 0x0E3700, MainLoop = 0x0E0094, MainLoopService = 0x0E0144;
     const ulong SchedulerWindow = 720_000;                 // 30 ms
     const int KeyOnCode = 235;                             // AN1: the firmware's KL15 "on" threshold
     const ulong TraceInterval = 2_400_000;                 // 100 ms
 
-    static readonly (uint Cpu, byte[] Bytes)[] Checkpoints =
-    {
-        (BootServiced, new byte[] { 0xA7, 0x58, 0xA7, 0xA7 }),
-        (Handover, new byte[] { 0xDA, 0x0E, 0xBA, 0x2E }),
-        (InterruptsEnabled, new byte[] { 0xBF, 0x88 }),
-        (EepromLoaded, new byte[] { 0xDA, 0x0D, 0x08, 0xEC }),
-        (0x0E3812, new byte[] { 0x9A, 0x42, 0xFE, 0x90 }),
-        (MainLoop, new byte[] { 0x8A, 0x42, 0x02, 0x90 }),
-        (MainLoopService, new byte[] { 0xA7, 0x58, 0xA7, 0xA7 }),
-    };
-
-    static StubInfo[] Stubs(bool canPartners, bool engine)
-    {
-        var stubs = new List<StubInfo>
-        {
-            new("EEPROM", "blank or from a file", false),
-            new("output-driver chips A/B", "A always answers \"no fault\"; B answers the input set's status word (the car's lambda heaters read open); A's commands are captured, B's are not", true),
-            new("monitoring module", "shut-off path not modelled", true),
-            canPartners
-                ? new("CAN partners", "ASC1 153h and the cluster's 613h and 615h with fixed healthy contents; no gearbox, no DSC [owner: ASC]", false)
-                : new("CAN partners", "silent, every frame acknowledged", false),
-        };
-        if (engine)
-        {
-            stubs.Add(new("knock sensor", "the noise law", false));
-            stubs.Add(new("coil feedback", "the 1.2 ms burn pulse and 2.7 V coil current", false));
-            stubs.Add(new("engine", "crude idle-air plant, no torque model, throttle air not modelled", false));
-        }
-        else
-            stubs.Add(new("knock chip and coil feedback", "0 V", false));
-        stubs.Add(new("K-line tester", "none", false));
-        return stubs.ToArray();
-    }
-
     /// <summary>The checkpoint bytes match: the program addresses this runner watches are valid.</summary>
-    public static bool Recognises(FirmwareImage image) =>
-        Checkpoints.All(c => image.Bytes.Slice((int)(c.Cpu & 0x7FFFF), c.Bytes.Length).SequenceEqual(c.Bytes));
+    public static bool Recognises(FirmwareImage image) => RunState.Recognises(image);
 
     public static StartupResult Run(FlashedImage image, StartupRunOptions? options = null)
     {
@@ -211,55 +174,28 @@ public static class StartupRun
         });
         Sample(machine.Cycles);
 
-        var recognised = Recognises(image.Image);
-        ulong? bootServiced = null, handover = null, interrupts = null, eepromLoaded = null, mainLoop = null, powerOff = null;
-        if (recognised)
-        {
-            machine.OnInstruction(BootServiced, m => bootServiced ??= m.Cycles);
-            machine.OnInstruction(Handover, m => handover ??= m.Cycles);
-            machine.OnInstruction(InterruptsEnabled, m => interrupts ??= m.Cycles);
-            machine.OnInstruction(EepromLoaded, m => eepromLoaded ??= m.Cycles);
-            machine.OnInstruction(MainLoop, m => mainLoop ??= m.Cycles);
-        }
-
-        var services = 0;
-        ulong? lastService = null;
-        ulong longestGap = 0;
-        machine.WatchdogServiced += address =>
-        {
-            if (!recognised || address != MainLoopService)
-                return;
-            var now = machine.Cycles;
-            if (lastService is { } previous)
-                longestGap = Math.Max(longestGap, now - previous);
-            lastService = now;
-            services++;
-        };
-        machine.Board.Latch.Changed += (before, after) =>
-        {
-            if (handover != null && powerOff == null && (before & 0x20) != 0 && (after & 0x20) == 0)
-                powerOff = machine.Cycles;
-        };
-        ulong? keyOff = null;
+        var watch = new CycleWatch(machine);
+        var recognised = watch.Recognised;
         if (options.KeyOffAtSeconds is { } keyOffSeconds)
         {
             machine.Scheduler.Schedule((ulong)Math.Round(keyOffSeconds * machineOptions.CpuHz), "key off", () =>
             {
-                keyOff = machine.Cycles;
+                watch.KeyOff = machine.Cycles;
                 machine.Board.SetInputs(machine.Board.Inputs.WithIgnition(false));
             });
         }
 
         options.Instrument?.Invoke(machine);
         var limit = (ulong)Math.Round(options.Seconds * machineOptions.CpuHz);
-        machine.Run(limit, _ => powerOff != null);
+        machine.Run(limit, _ => watch.PowerOff != null);
 
         var end = machine.Cycles;
+        var keyOff = watch.KeyOff;
         var outcome = machine.Events.CountOf<TrapEvent>() > 0 ? StartupOutcome.Trapped
             : machine.WatchdogResets + machine.SoftwareResets > 0 ? StartupOutcome.ResetLoop
-            : powerOff != null ? StartupOutcome.PoweredOff
-            : lastService is { } last && end - last <= SchedulerWindow ? StartupOutcome.SchedulerRunning
-            : handover != null ? StartupOutcome.Stalled
+            : watch.PowerOff != null ? StartupOutcome.PoweredOff
+            : watch.LastService is { } last && end - last <= SchedulerWindow ? StartupOutcome.SchedulerRunning
+            : watch.Handover != null ? StartupOutcome.Stalled
             : machine.Watchdog.ServiceCount > 0 ? StartupOutcome.StayedInBoot
             : StartupOutcome.NoProgress;
 
@@ -280,15 +216,15 @@ public static class StartupRun
         var monitor = machine.Board.Monitor;
         return new StartupResult(
             image, outcome,
-            new StartupMilestones(bootServiced, handover, interrupts, eepromLoaded, mainLoop, keyOff, powerOff),
-            new SchedulerHealth(services, longestGap, XramWord(machine, 0xE2A6)),
-            ReadFirmwareState(machine),
+            watch.Milestones,
+            watch.Health,
+            RunState.ReadFirmwareState(machine),
             new MonitorSummary(monitor.Exchanges, monitor.WrongAnswers, monitor.UnexpectedAnswers, monitor.ErrorCounter),
             machine.Can.Transmitted,
             new EepromSummary(source, eeprom.WordsRead, eeprom.WordsWritten, eeprom.ToImage(), eeprom.AddressesRead.Order().ToArray()),
             machine.WatchdogResets, machine.SoftwareResets,
             machine.Events.All.ToList(), new Dictionary<Type, long>(machine.Events.Counts), machine.Events.Dropped,
-            machine.Inventory.Records, machine.Branches.Last(), Stubs(options.CanPartners, engine != null),
+            machine.Inventory.Records, machine.Branches.Last(), RunState.Stubs(options.CanPartners, engine != null),
             end, machine.Instructions, machine.Entries, machine.StateHash(), assumptions,
             FaultMemory.Read(machine), FaultMemory.SavedInEeprom(image.Image, eeprom.ToImage()),
             engine is null ? null : new EngineSummary(engine.Scenario.Name, engine.Phases.ToArray(), engine.Rpm,
@@ -299,22 +235,4 @@ public static class StartupRun
             trace, machine.Throttle.Angle, partners?.Sent,
             new FaultContext(machineOptions.EepromImage is not { } start || start.All(b => b == 0xFF), options.CanPartners));
     }
-
-    /// <summary>IRAM through the bus; XRAM straight from its array, so the values are real even while XPEN is clear.</summary>
-    static FirmwareState ReadFirmwareState(Machine m)
-    {
-        ushort Iram(uint a) => m.Bus.Peek16(a);
-        return new FirmwareState(
-            Iram(0xF8F4), Iram(0xFD26), Iram(0xFD7E), Iram(0xFD0C), Iram(0xFD46),
-            Xram(m, 0xE027), Xram(m, 0xE7E9), Xram(m, 0xE7EA), XramWord(m, 0xE7FC), (byte)Iram(0xF900),
-            ExternalWord(m, 0x883C), Xram(m, 0xE17A), Iram(0xFD14), Iram(0xFD9C), (sbyte)m.Bus.ExternalRam[0x8101 - 0x8000]);
-    }
-
-    static byte Xram(Machine m, uint a) => m.Bus.Xram[a - 0xE000];
-
-    static ushort XramWord(Machine m, uint a) => (ushort)(Xram(m, a) | (Xram(m, a + 1) << 8));
-
-    /// <summary>A word of the external RAM, 8000h-9FFFh through DPP2.</summary>
-    static ushort ExternalWord(Machine m, uint a) =>
-        (ushort)(m.Bus.ExternalRam[a - 0x8000] | (m.Bus.ExternalRam[a - 0x8000 + 1] << 8));
 }
