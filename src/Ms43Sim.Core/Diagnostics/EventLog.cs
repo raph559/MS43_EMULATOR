@@ -30,11 +30,15 @@ public sealed class EventLog
 
     public long CountOf<T>() where T : SimEvent => counts.GetValueOrDefault(typeof(T));
 
+    /// <summary>Every event as it is added, kept or not: the checks listen here (plan 4 R16).</summary>
+    public event Action<SimEvent>? Added;
+
     public void Add(Func<ulong, uint, SimEvent> make)
     {
         var (cycle, pc) = Context();
         var e = make(cycle, pc);
         counts[e.GetType()] = counts.GetValueOrDefault(e.GetType()) + 1;
+        Added?.Invoke(e);
         if (e is TrapEvent or ResetEvent)
         {
             if (trapsAndResetsKept == TrapAndResetCapacity)

@@ -61,7 +61,10 @@ public sealed partial class CarControls
     public CarState Applied { get; private set; }
 
     /// <summary>The key is on as the firmware sees it: AN1 at code 235 or more.</summary>
-    public bool KeyOn() => BoardInputs.AdcCode(machine.Board.AnalogVolts(1)) >= KeyOnCode;
+    public bool KeyOn() => KeyIsOn(machine.Board);
+
+    /// <summary>The key is on as the firmware sees it on <paramref name="board"/>: AN1 at code 235 or more.</summary>
+    public static bool KeyIsOn(Board board) => BoardInputs.AdcCode(board.AnalogVolts(1)) >= KeyOnCode;
 
     /// <summary>Reads the state and puts what moved on the board.</summary>
     public void Apply()

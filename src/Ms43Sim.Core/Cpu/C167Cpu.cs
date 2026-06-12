@@ -25,6 +25,7 @@ public sealed partial class C167Cpu
     readonly ushort[] dpp = new ushort[4];
     uint instructionAddress;
     readonly bool[] erasedSegmentSeen = new bool[256];
+    bool outsideFlash;
     int dataStates;
     bool branchTaken;
 
@@ -130,8 +131,10 @@ public sealed partial class C167Cpu
         }
 
         var w0 = Fetch(ip);
+        var region = bus.Decode(instructionAddress);
         if (w0 == 0xFFFF)
-            NoteErasedFlash();
+            NoteErasedFlash(region);
+        NoteOutsideFlash(region);
         var op = (byte)w0;
         var b1 = (byte)(w0 >> 8);
         var size = OpcodeTable.Size(op, b1);
@@ -164,7 +167,7 @@ public sealed partial class C167Cpu
             }
         }
 
-        return FinishStep(Timing.MinStates(op, b1, branchTaken) + FetchStates(size) + dataStates);
+        return FinishStep(Timing.MinStates(op, b1, branchTaken) + FetchStates(region, size) + dataStates);
     }
 
     /// <summary>
@@ -183,9 +186,8 @@ public sealed partial class C167Cpu
     }
 
     /// <summary>ISM §7.2: +4/+6 states from internal RAM, else 1 ACT per instruction word.</summary>
-    int FetchStates(int size)
+    int FetchStates(Region region, int size)
     {
-        var region = bus.Decode(instructionAddress);
         if (region is Region.Iram or Region.Sfr or Region.Esfr or Region.Reserved)
             return size == 2 ? 4 : 6;
         return size / 2 * bus.AccessStates(instructionAddress);
@@ -193,12 +195,27 @@ public sealed partial class C167Cpu
 
     ushort Fetch(ushort at) => bus.Read16(((uint)csp << 16) | at, AccessKind.Fetch);
 
-    void NoteErasedFlash()
+    void NoteErasedFlash(Region region)
     {
-        if (erasedSegmentSeen[csp] || bus.Decode(instructionAddress) != Region.Flash)
+        if (erasedSegmentSeen[csp] || region != Region.Flash)
             return;
         erasedSegmentSeen[csp] = true;
         log.Add((c, pc) => new ErasedFlashExecutionEvent(c, pc));
+    }
+
+    /// <summary>One event each time execution enters code outside flash.</summary>
+    void NoteOutsideFlash(Region region)
+    {
+        if (region == Region.Flash)
+        {
+            outsideFlash = false;
+            return;
+        }
+        if (outsideFlash)
+            return;
+        outsideFlash = true;
+        var at = instructionAddress;
+        log.Add((c, _) => new CodeOutsideFlashEvent(c, at));
     }
 
     void Execute(byte op, byte b1, ushort w1)
