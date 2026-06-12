@@ -136,17 +136,19 @@ public sealed partial class CarControls
         return match.Groups[1].Success ? ('A', index) : (match.Groups[2].Value == "A" ? 'a' : 'b', index);
     }
 
+    /// <summary>A channel a force can name: AN0–AN15 but AN4 and AN13 (multiplexed), muxA0–muxA7, muxB0–muxB7.</summary>
+    public static bool CanForce(string channel) => Channel(channel) switch
+    {
+        ('A', var index) => index is >= 0 and <= 15 and not 4 and not 13,
+        ('a' or 'b', var position) => position is >= 0 and <= 7,
+        _ => false,
+    };
+
     static void Check(CarState car)
     {
         foreach (var name in car.Forces.Keys)
         {
-            var valid = Channel(name) switch
-            {
-                ('A', var channel) => channel is >= 0 and <= 15 and not 4 and not 13,
-                ('a' or 'b', var position) => position is >= 0 and <= 7,
-                _ => false,
-            };
-            if (!valid)
+            if (!CanForce(name))
                 throw new ArgumentException($"cannot force \"{name}\": a channel is AN0–AN15 (AN4 and AN13 are multiplexed: force muxB0–7 or muxA0–7)", nameof(car));
         }
     }
