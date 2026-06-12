@@ -19,6 +19,9 @@ public sealed record BoardInputs
     /// <summary>[inf] The battery and KL15 dividers: 26/255 V per count of FBD5/FBD6 means ÷ 5.2.</summary>
     public const double BatteryDivider = 5.2;
 
+    /// <summary>AN1 at or above this reads as the key on (the firmware's KL15 "on" code 235).</summary>
+    public const double KeyOnVolts = 1.15;
+
     /// <summary>Output-driver chip B's 32-bit status word, D0 first: the loads on its outputs. FFFF FFFFh = every channel healthy.</summary>
     public uint ChipBStatus { get; init; } = 0xFFFF_FFFF;
 
@@ -92,7 +95,7 @@ public sealed record BoardInputs
     {
         var volts16 = AnalogVolts.ToArray();
         volts16[5] = volts / BatteryDivider;
-        if (volts16[1] >= 1.15)
+        if (volts16[1] >= KeyOnVolts)
             volts16[1] = volts / BatteryDivider;
         return this with { AnalogVolts = Array.AsReadOnly(volts16) };
     }
@@ -106,6 +109,31 @@ public sealed record BoardInputs
         volts16[channel] = volts;
         return this with { AnalogVolts = Array.AsReadOnly(volts16) };
     }
+
+    /// <summary>Mux A position <paramref name="position"/> (read on AN13) at <paramref name="volts"/>.</summary>
+    public BoardInputs WithMuxA(int position, double volts)
+    {
+        var volts8 = MuxAVolts.ToArray();
+        volts8[position] = volts;
+        return this with { MuxAVolts = Array.AsReadOnly(volts8) };
+    }
+
+    /// <summary>Mux B position <paramref name="position"/> (read on AN4) at <paramref name="volts"/>.</summary>
+    public BoardInputs WithMuxB(int position, double volts)
+    {
+        var volts8 = MuxBVolts.ToArray();
+        volts8[position] = volts;
+        return this with { MuxBVolts = Array.AsReadOnly(volts8) };
+    }
+
+    /// <summary>The same volts, levels and status word as <paramref name="other"/>.</summary>
+    public bool SameAs(BoardInputs other) =>
+        ChipBStatus == other.ChipBStatus
+        && AnalogVolts.SequenceEqual(other.AnalogVolts)
+        && MuxAVolts.SequenceEqual(other.MuxAVolts)
+        && MuxBVolts.SequenceEqual(other.MuxBVolts)
+        && DigitalInputs.Count == other.DigitalInputs.Count
+        && DigitalInputs.All(p => other.DigitalInputs.TryGetValue(p.Key, out var level) && level == p.Value);
 
     /// <summary>The 10-bit result for <paramref name="volts"/>: floor(V / 5.0 × 1024 + 0.5), clamped to 0…1023.</summary>
     public static int AdcCode(double volts) =>

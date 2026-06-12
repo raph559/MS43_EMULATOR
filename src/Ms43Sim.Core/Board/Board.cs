@@ -117,6 +117,9 @@ public sealed class Board : IPinEnvironment, ISignalPins
         analogSources[channel] = volts;
     }
 
+    /// <summary>The source attached to channel <paramref name="channel"/>, or null when it reads the input set.</summary>
+    public Func<double>? AnalogSource(int channel) => analogSources[channel];
+
     public void SetInputs(BoardInputs inputs)
     {
         var before = Inputs;

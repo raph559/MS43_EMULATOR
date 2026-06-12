@@ -86,6 +86,17 @@ public static class MachineAssumptions
         };
     }
 
+    /// <summary>The car's inputs while a drive runs it (<see cref="CarControls"/>; plan 4 R9, R10).</summary>
+    public static IReadOnlyList<string> ForDrive() => new List<string>
+    {
+        "car temperatures: coolant on mux A 3, intake air on mux A 1 and oil on mux A 2 through the car's sensor curves, linear between the points [ver]; the radiator outlet on mux A 0 reads the ambient + 0.9 × (coolant − ambient), plan 3's 1.20 V at 90 °C and 20 °C [assumption]",
+        "car controls: pedal AN10 = 0.75 + 3.65 p V and AN6 = AN10 / 2 [obs]; clutch on mux B 2, 4.5 V pressed and 0 V released [obs]; brakes: P3.1 and P3.5 both high when pressed [obs]; a battery override reads on AN5, and on AN1 while the key is on [assumption]",
+        "road speed: P7.6 falls 6.971 times a second per km/h (25,096 a km), low for half a period after each fall; a new speed changes the rate without restarting the period [obs; assumption: only the falls count]; CAN 153h carries round(16 × km/h) in bytes 1–2 [obs]",
+        "steering wheel: the \"no button\" frame train on P7.4 every 50 ms while the key is on, FEh and FFh alternating every 1.0 s; the line idles low and stays low with the key off [obs; assumption]",
+        "cluster: 613h bytes 3–4 the clock in minutes; 615h byte 0 C0h with the A/C on, byte 3 the ambient in sign-magnitude °C; their other bytes are plan 3's [obs]",
+        "fault injection: a forced channel reads its volts instead of its sensor until the force is lifted; a silenced partner sends nothing while it is silenced [call]",
+    };
+
     static string Inputs(BoardInputs inputs)
     {
         static string Volts(IEnumerable<double> volts) =>
