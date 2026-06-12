@@ -75,15 +75,20 @@ public static class MachineAssumptions
     public static IReadOnlyList<string> ForEngine(EngineScenario scenario)
     {
         static string N(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
-        return new List<string>
+        var lines = new List<string>
         {
-            $"engine scenario {scenario.Name}: the starter turns the engine at {N(scenario.StarterRpm)} rpm (reached in 0.2 s) for {N(scenario.StarterSeconds)} s from {N(scenario.CrankAtSeconds)} s; the shaft starts at {N(scenario.StartAngle)}° [call]",
+            scenario.CrankAtSeconds is { } crank
+                ? $"engine scenario {scenario.Name}: the starter turns the engine at {N(scenario.StarterRpm)} rpm (reached in 0.2 s) for {N(scenario.StarterSeconds)} s from {N(crank)} s; the shaft starts at {N(scenario.StartAngle)}° [call]"
+                : $"engine scenario {scenario.Name}: the starter turns the engine when the drive cranks, up to the drive's speed in 0.2 s; the shaft starts at {N(scenario.StartAngle)}° [call]",
             "combustion: a spark (a falling edge of an output coil pin P2.6–P2.11 after at least 0.5 ms high; an ignition cut's shorter pulses store no energy) and a rising edge (a closing) of an output injector pin P2.0–P2.5, each within the last 0.25 s; only edges of pins that are outputs before and after count; the engine runs on when the starter releases while combusting; without combustion it coasts down (a 0.5 s lag) and stops below 30 rpm; combustion at 300 rpm or more makes it run again [assumption]",
             "idle-air plant, every 0.5 ms: the valve opening d is the share of time P2.12 is low; Qcmd = min(50 kg/h × d, 480 mg/stroke at the speed); Q follows Qcmd with a 50 ms lag; running, the speed follows Q × 5555.6 / 105 mg/stroke with a 0.3 s lag; no torque model, throttle air not modelled [assumption, constants from the research's verified plant]",
             $"battery: {N(scenario.BatteryOff)} V with the engine stopped, {N(scenario.BatteryStarter)} V while the starter turns, {N(scenario.BatteryRunning)} V running (the alternator); AN5, and AN1 while the key is on, read it ÷ 5.2 [assumption]",
             "MAF (AN0): the car's id_maf_tab__v_maf (0x70EC6) frozen as the sensor's law, linear between its points [obs; assumption below 0.10 V]; knock envelope (AN15): (c(n) + 0.5) × 5 / 256 V, c(n) from the car's ip_nl_sp__n (0x77CBB), 0 V below 50 rpm [obs, ver]; coil current (AN14): 2.7 V while the shaft turns (≥ 50 rpm), 0 V stopped [assumption]; burn feedback (P3.6): high for 1.2 ms after each spark (at least 0.5 ms of dwell), retriggered by a later one [assumption]",
             $"VANOS: x' = 400 °CRK/s × (drive − hold) above 500 rpm, −200 °CRK/s below (no oil pressure); ranges 40.1 and 25.1 °CRK; hold duties {N(scenario.HoldIntake)} (intake) and {N(scenario.HoldExhaust)} (exhaust) from the scenario; a CPU reset is seen only at the next pin or PWM change [assumption]",
         };
+        if (scenario.Law is not null)
+            lines.Add($"breathing law: the airflow is the firmware's own air model, the car's ip_maf_1_diag__n__tps_av (0x7AAEE) frozen as M(n, θ), ρ = p_amb / 95.5 kPa × f_air(intake) × f_cool(coolant) at {N(scenario.AmbientKpa)} kPa; Q_cmd = min(50 kg/h × d × ψ(pr) + the throttle's air above closed, max(the full-load ceiling, 50 kg/h × d)) with a 50 ms lag, in place of the idle-air plant's Qcmd [obs; ver as law 4]");
+        return lines;
     }
 
     /// <summary>The car's inputs while a drive runs it (<see cref="CarControls"/>; plan 4 R9, R10).</summary>
@@ -95,6 +100,7 @@ public static class MachineAssumptions
         "steering wheel: the \"no button\" frame train on P7.4 every 50 ms while the key is on, FEh and FFh alternating every 1.0 s; the line idles low and stays low with the key off [obs; assumption]",
         "cluster: 613h bytes 3–4 the clock in minutes; 615h byte 0 C0h with the A/C on, byte 3 the ambient in sign-magnitude °C; their other bytes are plan 3's [obs]",
         "fault injection: a forced channel reads its volts instead of its sensor until the force is lifted; a silenced partner sends nothing while it is silenced [call]",
+        "engine speed: in a drive segment the drive sets the shaft's speed (a dyno, no torque model), so the engine turns through any cut and the ECU's cuts show as missing sparks or injections; the starter, the idle plant and the combustion rule carry the crank and idle segments [owner]",
     };
 
     static string Inputs(BoardInputs inputs)

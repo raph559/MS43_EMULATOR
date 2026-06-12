@@ -15,14 +15,20 @@ public sealed record EnginePhaseChange(ulong Cycle, EnginePhase Phase);
 /// energy, plan 4 R1) — and a rising edge (a closing) of an output injector pin P2.0–P2.5, each within
 /// the last 0.25 s. Only edges of pins that are outputs before and after count (<see cref="Ports.OutputEdge"/>):
 /// a direction set-up is not an edge.</item>
-/// <item>Phases [assumption]: Stopped until the scenario's crank time; Starter for its starter time
-/// (0 → the starter speed in 0.2 s); then Running if combusting, else Stopping. Running without
+/// <item>Phases [assumption]: Stopped until the scenario's crank time (or until a drive starts the
+/// starter, <see cref="StartStarter"/>); Starter for its starter time (or until <see cref="StopStarter"/>),
+/// 0 → the starter speed in 0.2 s; then Running if combusting, else Stopping. Running without
 /// combustion becomes Stopping; Stopping with combustion at 300 rpm or more runs again, and below
 /// 30 rpm it stops. The battery reads the scenario's value for the phase.</item>
 /// <item>The idle-air plant, every 0.5 ms [assumption; constants from the research's verified plant]:
 /// d is the share of time P2.12 (the idle valve) is low; Qcmd = min(50 kg/h · d, 480 mg/stroke at
-/// n); Q follows Qcmd with a 50 ms lag; running, n follows Q · 5555.6 / 105 mg/stroke with a 0.3 s
-/// lag; stopping, n decays with a 0.5 s lag. At d = 0.34 it settles at 899 rpm with Q = 17.0 kg/h.</item>
+/// n), or the scenario's <see cref="BreathingLaw"/> with the throttle's angle and the temperatures
+/// given (plan 4 R12); Q follows Qcmd with a 50 ms lag; running, n follows Q · 5555.6 / 105 mg/stroke
+/// with a 0.3 s lag; stopping, n decays with a 0.5 s lag. At d = 0.34 it settles at 899 rpm with
+/// Q = 17.0 kg/h.</item>
+/// <item>A commanded speed (<see cref="SetCommandedSpeed"/>, a drive's scripted speed off idle; plan 4
+/// owner decision) turns the shaft at that speed like a dyno: no speed law and no stall, so a cut
+/// shows only as missing sparks or injections; the engine counts as Running (Stopped at 0 rpm).</item>
 /// <item>Sensors: AN0 the MAF for Q, AN14 the coil current, AN15 the knock envelope, P3.6 the burn
 /// pulse after each spark (<see cref="EngineSensors"/>).</item>
 /// </list>
@@ -43,7 +49,10 @@ public sealed class Engine
     readonly PinDrive valve;
     readonly List<EnginePhaseChange> phases = new();
     readonly double cpuHz, stepSeconds;
-    readonly ulong crankAt, releaseAt, combustionWindow;
+    readonly ulong combustionWindow;
+    ulong crankAt, releaseAt;
+    double starterRpm, intakeC, coolantC;
+    double? commanded;
     ulong? lastSpark, lastClosing;
     readonly ulong?[] coilRise = new ulong?[6];
     long burnEnd = -1;
@@ -54,8 +63,10 @@ public sealed class Engine
         Scenario = scenario;
         cpuHz = machine.Options.CpuHz;
         stepSeconds = StepCycles / cpuHz;
-        crankAt = (ulong)Math.Round(scenario.CrankAtSeconds * cpuHz);
-        releaseAt = crankAt + (ulong)Math.Round(scenario.StarterSeconds * cpuHz);
+        crankAt = scenario.CrankAtSeconds is { } crank ? (ulong)Math.Round(crank * cpuHz) : ulong.MaxValue;
+        releaseAt = scenario.CrankAtSeconds is null ? ulong.MaxValue : crankAt + (ulong)Math.Round(scenario.StarterSeconds * cpuHz);
+        starterRpm = scenario.StarterRpm;
+        (intakeC, coolantC) = (scenario.IntakeC, scenario.CoolantC);
         combustionWindow = (ulong)Math.Round(CombustionWindow * cpuHz);
 
         machine.Board.SetInputs(scenario.Inputs.WithBattery(scenario.BatteryOff));
@@ -71,7 +82,8 @@ public sealed class Engine
         machine.Ports.OutputEdge += OnOutputEdge;
 
         phases.Add(new EnginePhaseChange(machine.Cycles, EnginePhase.Stopped));
-        machine.Scheduler.Schedule(crankAt, "starter", () => Change(EnginePhase.Starter));
+        if (scenario.CrankAtSeconds is not null)
+            machine.Scheduler.Schedule(crankAt, "starter", () => Change(EnginePhase.Starter));
         ScheduleStep(machine.Cycles + StepCycles);
     }
 
@@ -97,6 +109,30 @@ public sealed class Engine
     public double AirflowKgPerHour { get; private set; }
 
     public bool Combusting { get; private set; }
+
+    /// <summary>The speed a drive holds the shaft at, or null when the idle plant and the starter decide it.</summary>
+    public double? CommandedRpm => commanded;
+
+    /// <summary>
+    /// Non-null: the shaft turns at <paramref name="rpm"/> from the next step, whatever burns (a dyno);
+    /// null: the idle plant takes the engine back from its speed now.
+    /// </summary>
+    public void SetCommandedSpeed(double? rpm) => commanded = rpm is { } r ? Math.Max(0, r) : null;
+
+    /// <summary>The starter turns the engine from now, up to <paramref name="rpm"/> in 0.2 s, until <see cref="StopStarter"/>.</summary>
+    public void StartStarter(double rpm)
+    {
+        starterRpm = rpm;
+        crankAt = machine.Cycles;
+        releaseAt = ulong.MaxValue;
+        Change(EnginePhase.Starter);
+    }
+
+    /// <summary>The starter releases at the next step: the engine runs on if it is combusting.</summary>
+    public void StopStarter() => releaseAt = machine.Cycles;
+
+    /// <summary>The intake air and coolant temperatures the breathing law's density uses (the scenario's until set).</summary>
+    public void SetTemperatures(double intakeC, double coolantC) => (this.intakeC, this.coolantC) = (intakeC, coolantC);
 
     void OnOutputEdge(int port, int bit, bool level)
     {
@@ -143,10 +179,36 @@ public sealed class Engine
     {
         var now = machine.Cycles;
         var d = valve.TakeLowShare();
-        var command = Math.Min(ValveFlow * d, FullLoad * Rpm / MgPerStroke);
-        AirflowKgPerHour += (command - AirflowKgPerHour) * (1 - Math.Exp(-stepSeconds / FlowLag));
+        if (Scenario.Law is { } law)
+            AirflowKgPerHour = law.AirflowKgPerHour(Rpm, machine.Throttle.Angle, d, Scenario.AmbientKpa, intakeC, coolantC,
+                AirflowKgPerHour, stepSeconds);
+        else
+        {
+            var command = Math.Min(ValveFlow * d, FullLoad * Rpm / MgPerStroke);
+            AirflowKgPerHour += (command - AirflowKgPerHour) * (1 - Math.Exp(-stepSeconds / FlowLag));
+        }
         Combusting = Recent(lastSpark) && Recent(lastClosing);
 
+        if (commanded is { } scripted)
+        {
+            Change(scripted > 0 ? EnginePhase.Running : EnginePhase.Stopped);
+            Rpm = scripted;
+        }
+        else
+            FollowThePlant(now);
+
+        Vanos.Step(stepSeconds, Rpm);
+        if (Vanos.IntakeAdvance != Shaft.IntakeAdvance || Vanos.ExhaustRetard != Shaft.ExhaustRetard)
+            Shaft.SetCamOffsets(Vanos.IntakeAdvance, Vanos.ExhaustRetard);
+        if (Rpm != Shaft.Rpm)
+            Shaft.SetSpeed(Rpm);
+
+        bool Recent(ulong? at) => at is { } t && now - t <= combustionWindow;
+    }
+
+    /// <summary>Plan 3's phases and speed laws: the starter, the idle plant, the run-down.</summary>
+    void FollowThePlant(ulong now)
+    {
         switch (Phase)
         {
             case EnginePhase.Starter when now >= releaseAt:
@@ -162,7 +224,7 @@ public sealed class Engine
         switch (Phase)
         {
             case EnginePhase.Starter:
-                Rpm = Scenario.StarterRpm * Math.Min(1, (now - crankAt) / cpuHz / StarterRamp);
+                Rpm = starterRpm * Math.Min(1, (now - crankAt) / cpuHz / StarterRamp);
                 break;
             case EnginePhase.Running:
                 Rpm += (AirflowKgPerHour * MgPerStroke / IdleLoad - Rpm) * (1 - Math.Exp(-stepSeconds / SpeedLag));
@@ -176,14 +238,6 @@ public sealed class Engine
                 }
                 break;
         }
-
-        Vanos.Step(stepSeconds, Rpm);
-        if (Vanos.IntakeAdvance != Shaft.IntakeAdvance || Vanos.ExhaustRetard != Shaft.ExhaustRetard)
-            Shaft.SetCamOffsets(Vanos.IntakeAdvance, Vanos.ExhaustRetard);
-        if (Rpm != Shaft.Rpm)
-            Shaft.SetSpeed(Rpm);
-
-        bool Recent(ulong? at) => at is { } t && now - t <= combustionWindow;
     }
 
     /// <summary>A new phase, with the battery the scenario gives it.</summary>
