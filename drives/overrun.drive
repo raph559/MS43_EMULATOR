@@ -1,0 +1,11 @@
+# The overrun fuel cut (R8): a lift at 110 km/h in 4th, then the clutch in before the speed falls under idle.
+drive overrun
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..110 pedal=30    # accelerating in 4th from near idle speed (a ramp, not a step from a standstill)
+10 drive gear=4 speed=110..30 pedal=0    # the lift: the overrun fuel cut
+2 drive gear=4 speed=30 pedal=0 clutch=1 # the clutch in: the rpm holds while the road speed holds 30 (R17)
+5 idle

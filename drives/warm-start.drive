@@ -1,0 +1,9 @@
+# The warm start (plan 4 C5): from a blank EEPROM a warm engine starts and idles; then the key goes
+# off and the after-run writes the EEPROM every seasoned drive starts from (R11).
+drive warm-start
+start blank
+set coolant=90 oil=90 intake=33 ambient=20 clock=60   # a warm engine on a mild day, the clock at 01:00
+3 on                # key on: the boot, the throttle check, the CAN partners learned
+1.5 crank rpm=200   # the starter at plan 3's 200 rpm
+40 idle             # the warm idle settles on its 900 rpm target
+15 off              # key off: the after-run writes the EEPROM and the main relay drops

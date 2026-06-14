@@ -1,0 +1,8 @@
+# The cold start (R10): a 0 °C soak from a blank EEPROM, a sagging battery while cranking, then a long
+# fast idle while the engine warms. It must settle on the cold idle target with only explained faults.
+drive cold-start
+start blank
+set coolant=0 oil=0 intake=0 ambient=0 clock=0   # soaked overnight at 0 °C, the clock at midnight
+3 on
+2 crank rpm=160 battery=10                       # a cold starter turns slower on a sagging battery; 2 s lets the engine catch (it runs on its own ~4.5 s in, R10)
+90 idle coolant=0..40 oil=0..30 intake=0..20     # warming at 0.44 °C/s, far under the 5.25 °C per 500 ms slew limit (R10)

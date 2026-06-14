@@ -1,0 +1,11 @@
+# Two power cycles (Review Focus 5): the second key-on starts from the EEPROM the first after-run wrote.
+drive key-cycle
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+10 idle
+15 off              # the after-run writes the EEPROM and the main relay drops
+3 on                # the next key-on: a new power cycle
+1.5 crank rpm=200
+10 idle

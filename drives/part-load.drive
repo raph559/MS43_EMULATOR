@@ -1,0 +1,11 @@
+# A gentle cruise (R9: 15–20 % pedal) and a coast, from the seasoned EEPROM.
+drive part-load
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+10 drive gear=3 speed=40..80 pedal=15   # pulling away gently in 3rd
+20 drive gear=4 speed=90 pedal=12       # cruising in 4th
+5 drive gear=4 speed=90..20 pedal=0     # the coast: the speed falls to near idle before the idle plant takes over
+5 idle
