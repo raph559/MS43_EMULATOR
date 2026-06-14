@@ -81,6 +81,9 @@ public sealed class EngineShaft
     /// <summary>Crank falling edges driven so far.</summary>
     public long CrankTeeth { get; private set; }
 
+    /// <summary>A crank falling edge was just driven (plan 4: the output checks' crank clock).</summary>
+    public event Action? ToothPassed;
+
     /// <summary>The speed from now on; 0 stops the shaft where it is.</summary>
     public void SetSpeed(double rpm)
     {
@@ -186,7 +189,10 @@ public sealed class EngineShaft
             foreach (var (port, bit) in CrankPins)
                 pins.Drive(port, bit, !edge.Falls);
             if (edge.Falls)
+            {
                 CrankTeeth++;
+                ToothPassed?.Invoke();
+            }
             nextCrank = (nextCrank + 1) % CrankEdges.Length;
         }
         if (pendingIntake)
