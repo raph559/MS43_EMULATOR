@@ -121,7 +121,7 @@ public sealed class CylinderEvents
     }
 
     /// <summary>An angle difference normalised to (−360, 360].</summary>
-    static double BeforeTdc(double degrees)
+    internal static double BeforeTdc(double degrees)
     {
         var a = degrees % 720.0;
         return a > 360.0 ? a - 720.0 : a <= -360.0 ? a + 720.0 : a;

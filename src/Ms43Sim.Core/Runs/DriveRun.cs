@@ -271,6 +271,7 @@ public static class DriveRun
                     held = segment.Mode == DriveMode.Drive && point.RpmFromEngine ? engine.Rpm : null;
                     break;
             }
+            context.RaiseSegmentEntered(point);
         }
 
         void Follow(DrivePoint point)

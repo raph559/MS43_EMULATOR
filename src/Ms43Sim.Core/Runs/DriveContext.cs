@@ -50,7 +50,12 @@ public sealed class DriveContext
 
     public event Action<Machine, int>? PowerCycleEnded;
 
+    /// <summary>A segment of the drive begins (after the runner's own entry: the key, the starter, the held speed).</summary>
+    public event Action<DrivePoint>? SegmentEntered;
+
     internal void RaiseStarted(Machine machine, int index) => PowerCycleStarted?.Invoke(machine, index);
 
     internal void RaiseEnded(Machine machine, int index) => PowerCycleEnded?.Invoke(machine, index);
+
+    internal void RaiseSegmentEntered(DrivePoint point) => SegmentEntered?.Invoke(point);
 }

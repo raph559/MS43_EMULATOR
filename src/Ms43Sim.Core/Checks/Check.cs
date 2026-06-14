@@ -58,6 +58,12 @@ public abstract class CheckBase : ICheck
         Context = context;
         context.PowerCycleStarted += Start;
         context.PowerCycleEnded += End;
+        Attached();
+    }
+
+    /// <summary>Once, when the check is attached to its drive: subscribe here to what spans power cycles.</summary>
+    protected virtual void Attached()
+    {
     }
 
     /// <summary>Subscribes to <paramref name="machine"/>, the power cycle <paramref name="index"/>'s, before its power-on.</summary>
