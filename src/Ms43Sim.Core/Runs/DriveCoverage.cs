@@ -100,6 +100,7 @@ internal static class DriveCoverage
         }
 
         var checks = r.Checks.OfType<CheckBase>().ToArray();
+        benign.AddRange(checks.SelectMany(c => c.Notes));
         return new Coverage(r.Stubs,
             checks.Where(c => c.Status == CheckStatus.NotEvaluated).Select(c => $"{c.Name}: {c.NotEvaluatedReason}").ToArray(),
             checks.Where(c => c.Status == CheckStatus.Pass && !c.Exercised).Select(c => c.Name).ToArray(),

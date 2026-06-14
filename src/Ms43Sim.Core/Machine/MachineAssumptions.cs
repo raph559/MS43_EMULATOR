@@ -101,6 +101,7 @@ public static class MachineAssumptions
         "cluster: 613h bytes 3–4 the clock in minutes; 615h byte 0 C0h with the A/C on, byte 3 the ambient in sign-magnitude °C; their other bytes are plan 3's [obs]",
         "fault injection: a forced channel reads its volts instead of its sensor until the force is lifted; a silenced partner sends nothing while it is silenced [call]",
         "engine speed: in a drive segment the drive sets the shaft's speed (a dyno, no torque model), so the engine turns through any cut and the ECU's cuts show as missing sparks or injections; the starter, the idle plant and the combustion rule carry the crank and idle segments [owner]",
+        "CPU load at speed: the instruction timing is the ISM's minimum for external execution (Table 11 + 1 ACT per instruction word, ACT = 2 states at BUSCON0 = 45BFh: ISM §7.2), so a real ECU is at least as loaded; under it the car's periodic tasks stretch from about 2,500 rpm, its lowest queue (Q3) went up to 4 s without running at 5,000 rpm in a full-load pull, and the pull set the queue-overflow flag FD84.7; the scheduler check therefore judges R2 and R4 only below 2,000 rpm (R1 and R3 at every speed) and reports the time above; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [assumption: owner decision 3; plan 4 Task 11]",
     };
 
     static string Inputs(BoardInputs inputs)

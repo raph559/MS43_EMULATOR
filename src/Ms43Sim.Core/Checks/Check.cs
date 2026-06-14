@@ -32,6 +32,7 @@ public abstract class CheckBase : ICheck
 {
     readonly List<Finding> findings = new();
     readonly Dictionary<string, int> byCause = new();
+    readonly List<string> notes = new();
 
     protected CheckBase(string name) => Name = name;
 
@@ -96,6 +97,16 @@ public abstract class CheckBase : ICheck
 
     /// <summary>The check's condition occurred.</summary>
     protected void Exercise() => Exercised = true;
+
+    /// <summary>What the check saw and declared benign: the report's notes, never a finding.</summary>
+    public IReadOnlyList<string> Notes => notes;
+
+    /// <summary>A note for the report (one per text).</summary>
+    protected void Note(string text)
+    {
+        if (!notes.Contains(text))
+            notes.Add(text);
+    }
 
     /// <summary>The check cannot run in this power cycle.</summary>
     protected void NotEvaluated(string reason) => NotEvaluatedReason ??= reason;

@@ -9,11 +9,17 @@ namespace Ms43Sim.Core;
 /// <list type="bullet">
 /// <item>R1: a gap above 15 ms between SRVWDTs at 0E:0144 (before the power-down write) or at 0B:D9AC (during it);</item>
 /// <item>R2: a periodic task with a gap above 2 × period + 5 ms, from its own first run, whose first run
-/// is due by 2 × period + 1.1 s after power-on;</item>
+/// is due by 2 × period + 1.1 s after power-on — judged while the shaft turns below 2,000 rpm at both
+/// ends of the gap (plan 4 Task 11: at the ISM's minimum timing the car's own tasks stretch from about
+/// 2,500 rpm, and at full load its lowest queue goes seconds without running; the time above is
+/// declared in the report);</item>
 /// <item>R3: while F900 = 2 and the shaft turns at 150 rpm or more, a gap between runs of Q1:0Dh above
 /// three segment periods (20,000 / rpm ms) + 5 ms;</item>
-/// <item>R4: FDF2 ≠ 0 or FD84 &amp; 01C0h ≠ 0, read every 10 ms.</item>
+/// <item>R4: a flag newly set in FDF2 or FD84 &amp; 01C0h (both sticky), read every 10 ms, with the shaft
+/// below 2,000 rpm; one set at 2,000 rpm or more is a note, not a finding (the car's full-load pull sets
+/// FD84.7 at the ISM's minimum timing, Task 11).</item>
 /// </list>
+/// R1 and R3 are judged at every speed.
 /// Not evaluated when the program is not MS43X001 or the hook sites do not hold the car file's bytes.
 /// </summary>
 public sealed class SchedulerCheck() : CheckBase("scheduler")
@@ -23,6 +29,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
     const uint Q1 = 0x0E0944, Q2 = 0x0E0976, Q3 = 0x0E09A8, Requests = 0x0E0910;
     const uint T5ms = 0x0E0116, T10ms = 0x0E05C4, T100ms = 0x0E075A, T1s = 0x0E08DA;
     const int CrankTask = 0x0D;
+    const double HighRpm = 2_000;
 
     static readonly byte[] CallDispatcher = { 0xDA, 0x0B, 0xAE, 0xFB };          // CALLS 0Bh, FBAEh
     static readonly byte[] ServiceWatchdog = { 0xA7, 0x58, 0xA7, 0xA7 };         // SRVWDT
@@ -66,8 +73,12 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             NotEvaluated("the scheduler's hook sites (0E:0944, 0E:0976, 0E:09A8, 0E:0910, the four timer sites, 0E:0144, 0B:D9AC) are not the car file's");
             return;
         }
-        new Window(this, machine, index);
+        window = new Window(this, machine, index);
     }
+
+    Window? window;
+
+    protected override void End(Machine machine, int index) => window?.Close();
 
     /// <summary>One power cycle's window.</summary>
     sealed class Window
@@ -76,6 +87,10 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         readonly Machine machine;
         readonly int index;
         readonly Dictionary<(string Kind, int Id), ulong> lastRun = new();
+        readonly Dictionary<(string Kind, int Id), double> rpmAtRun = new();
+        int fdf2Seen, fd84Seen;
+        ulong aboveSince, aboveCycles;
+        bool above;
         readonly HashSet<(string Kind, int Id)> overdue = new();
         readonly HashSet<(string Kind, int Id)> missed = new();
         bool open, closed, powerDown;
@@ -144,15 +159,21 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             var key = (kind, id);
             if (Watching && !powerDown)
             {
-                if (Periods.TryGetValue(key, out var period) && lastRun.TryGetValue(key, out var before) && now - before > Limit(period)
-                    && !overdue.Contains(key))
+                if (Periods.TryGetValue(key, out var period) && lastRun.TryGetValue(key, out var before)
+                    && now - before > Limit(period) && !overdue.Contains(key) && Judged(key))
                     Late(key, period, before, now);
                 if (kind == "Q1" && id == CrankTask)
                     CrankRan(now);
             }
             lastRun[key] = now;
+            rpmAtRun[key] = Rpm();
             overdue.Remove(key);
         }
+
+        double Rpm() => check.Context.Shaft?.Rpm ?? 0;
+
+        /// <summary>R2 judges a task's gap only with the shaft below 2,000 rpm at both of its ends.</summary>
+        bool Judged((string Kind, int Id) key) => rpmAtRun.GetValueOrDefault(key) < HighRpm && Rpm() < HighRpm;
 
         static ulong Limit(int period) => (ulong)(2 * period + 5) * Ms;
 
@@ -193,7 +214,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
                 {
                     if (lastRun.TryGetValue(key, out var before))
                     {
-                        if (now - before > Limit(period) && overdue.Add(key))
+                        if (now - before > Limit(period) && Judged(key) && overdue.Add(key))
                             Late(key, period, before, now);
                     }
                     else if (now > (ulong)(2 * period + 1100) * Ms && missed.Add(key))
@@ -201,6 +222,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
                             $"R2: {key.Kind}:{key.Id:X2}h (every {period} ms) had not run {2 * period + 1100} ms after power-on");
                 }
                 var rpm = check.Context.Shaft?.Rpm ?? 0;
+                Above(now, rpm >= HighRpm);
                 if (lastCrankTask is { } crank && Synced() && rpm >= 150 && crankRpmAtLastRun >= 150 && !crankOverdue)
                 {
                     var limit = CrankLimit(Math.Min(rpm, crankRpmAtLastRun));
@@ -219,14 +241,44 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         {
             if (Watching && !powerDown)
             {
-                var fdf2 = machine.Bus.Peek16(0xFDF2);
-                var fd84 = machine.Bus.Peek16(0xFD84);
-                if (fdf2 != 0)
-                    check.Find("R4 FDF2", $"R4: FDF2 = {fdf2:X4}h, a request came while still pending (power cycle {index + 1})");
-                if ((fd84 & 0x01C0) != 0)
-                    check.Find("R4 FD84", $"R4: FD84 = {fd84:X4}h, a task queue overflowed (power cycle {index + 1})");
+                var fdf2 = (int)machine.Bus.Peek16(0xFDF2);
+                var fd84 = machine.Bus.Peek16(0xFD84) & 0x01C0;
+                var rpm = Rpm();
+                if ((fdf2 & ~fdf2Seen) != 0)
+                    Flag("FDF2", $"FDF2 = {fdf2:X4}h, a request came while still pending", rpm);
+                if ((fd84 & ~fd84Seen) != 0)
+                    Flag("FD84", $"FD84 & 01C0h = {fd84:X4}h, a task queue overflowed", rpm);
+                (fdf2Seen, fd84Seen) = (fdf2, fd84);
             }
             Flags(at + 10 * Ms);
         });
+
+        /// <summary>Counts the time the shaft spends at 2,000 rpm or more inside the window, for the report.</summary>
+        void Above(ulong now, bool high)
+        {
+            if (high && !above)
+                aboveSince = now;
+            else if (!high && above)
+                aboveCycles += now - aboveSince;
+            above = high;
+        }
+
+        /// <summary>The window's end: the time above 2,000 rpm, where R2 and R4 were not judged, goes to the report.</summary>
+        public void Close()
+        {
+            Above(machine.Cycles, false);
+            if (aboveCycles > 0)
+                check.Note($"scheduler: R2 and R4 were not judged for {Seconds(aboveCycles)} s of power cycle {index + 1}, with the shaft at 2,000 rpm or more: at the ISM's minimum timing the car's own tasks stretch there and its lowest queue can wait seconds; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
+        }
+
+        void Flag(string word, string what, double rpm)
+        {
+            if (rpm < HighRpm)
+                check.Find($"R4 {word}", $"R4: {what} (power cycle {index + 1}, at {rpm:0} rpm)");
+            else
+                check.Note($"scheduler: {what} at {rpm:0} rpm (power cycle {index + 1}, {Seconds(check.Context.PowerCycleStart + machine.Cycles)} s): at the ISM's minimum timing the car's own full-load pull does this; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
+        }
+
+        static string Seconds(ulong cycle) => (cycle / 24e6).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
     }
 }
