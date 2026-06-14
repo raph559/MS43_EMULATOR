@@ -15,7 +15,7 @@ public sealed class CheckSet
     /// <summary>The standard checks, then <paramref name="extra"/> ones, each attached to <paramref name="context"/>.</summary>
     public static CheckSet Attach(DriveContext context, IEnumerable<CheckBase>? extra = null)
     {
-        var set = new CheckSet(CrashChecks.All().Concat(extra ?? Array.Empty<CheckBase>()));
+        var set = new CheckSet(CrashChecks.All().Append(new SchedulerCheck()).Concat(extra ?? Array.Empty<CheckBase>()));
         foreach (var check in set.checks)
             check.Attach(context);
         return set;
