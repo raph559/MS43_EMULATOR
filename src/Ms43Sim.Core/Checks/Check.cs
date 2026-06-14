@@ -39,6 +39,9 @@ public abstract class CheckBase : ICheck
 
     public IReadOnlyList<Finding> Findings => findings;
 
+    /// <summary>The check's condition occurred at least once (a pass that never was is "not exercised").</summary>
+    public bool Exercised { get; private set; }
+
     /// <summary>Why the check could not run, in the first power cycle where it could not; null when it always ran.</summary>
     public string? NotEvaluatedReason { get; private set; }
 
@@ -80,6 +83,7 @@ public abstract class CheckBase : ICheck
     /// <summary>A finding over drive cycles <paramref name="first"/> to <paramref name="last"/>; the same cause merges.</summary>
     protected void Find(string cause, string message, ulong first, ulong last)
     {
+        Exercised = true;
         if (byCause.TryGetValue(cause, out var i))
         {
             var found = findings[i];
@@ -89,6 +93,9 @@ public abstract class CheckBase : ICheck
         byCause[cause] = findings.Count;
         findings.Add(new Finding(Name, message, first, last));
     }
+
+    /// <summary>The check's condition occurred.</summary>
+    protected void Exercise() => Exercised = true;
 
     /// <summary>The check cannot run in this power cycle.</summary>
     protected void NotEvaluated(string reason) => NotEvaluatedReason ??= reason;

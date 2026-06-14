@@ -14,23 +14,25 @@ public sealed record DriveRunOptions(MachineOptions? Machine = null, byte[]? Eep
 /// <summary>
 /// One power cycle of a drive: StartCycle and EndCycle in the drive's time; the milestones, the
 /// engine's phases and the scheduler figures in the cycle's own time (from its power-on); the fault
-/// memory, the RAM read-outs and the EEPROM at its end.
+/// memory, the RAM read-outs and the EEPROM at its end; the conditions its faults' explanations rest on.
 /// </summary>
 public sealed record PowerCycle(int Index, ulong StartCycle, StartupMilestones Milestones, EngineSummary? Engine,
     FaultMemoryState Faults, IReadOnlyList<FaultEntry> SavedFaults, FirmwareState Firmware, EepromSummary Eeprom,
-    SchedulerHealth Scheduler, ulong EndCycle);
+    SchedulerHealth Scheduler, ulong EndCycle, FaultContext FaultContext);
 
 /// <summary>
 /// A whole drive: its power cycles, and every power cycle's outputs, cylinder events, trace and machine
 /// events together, in the drive's time. Eeprom is the last cycle's chip, its source the drive's first
-/// image. Checks is empty from <see cref="DriveRun.Run"/>; a run with checks fills it.
+/// image. Checks is empty, Coverage null and Verdict incomplete from <see cref="DriveRun.Run"/>;
+/// <see cref="DriveRun.RunWithChecks"/> fills them.
 /// </summary>
 public sealed record DriveResult(FlashedImage Image, Drive Drive, IReadOnlyList<PowerCycle> PowerCycles,
     IReadOnlyList<OutputEvent> OutputEvents, long OutputEventsDropped, IReadOnlyList<Injection> Injections,
     IReadOnlyList<Spark> Sparks, IReadOnlyList<TraceRow> Trace, EepromSummary Eeprom, int WatchdogResets,
     int SoftwareResets, IReadOnlyList<SimEvent> Events, IReadOnlyDictionary<Type, long> EventCounts,
     IReadOnlyList<AccessRecord> Inventory, IReadOnlyList<StubInfo> Stubs, IReadOnlyList<ICheck> Checks,
-    string StateHash, IReadOnlyList<string> Assumptions, ulong Cycles, ulong Instructions)
+    string StateHash, IReadOnlyList<string> Assumptions, ulong Cycles, ulong Instructions,
+    Coverage? Coverage = null, RunVerdict Verdict = RunVerdict.Incomplete)
 {
     /// <summary>The check called <paramref name="name"/>.</summary>
     public ICheck Check(string name) =>
@@ -57,6 +59,24 @@ public static class DriveRun
     /// <summary>The engine a drive runs: plan 3's warm-idle engine with the breathing law and no starter of its own.</summary>
     public static EngineScenario Scenario { get; } =
         EngineScenario.WarmIdle with { Name = "drive", CrankAtSeconds = null, Law = BreathingLaw.Car };
+
+    /// <summary>
+    /// <see cref="Run"/> with every check observing it, and the coverage and the verdict (C2) filled in:
+    /// what <c>run --drive</c> and <c>check</c> call.
+    /// </summary>
+    public static DriveResult RunWithChecks(FlashedImage image, Drive drive, DriveRunOptions? options = null)
+    {
+        options ??= new DriveRunOptions();
+        CheckSet? set = null;
+        var watch = new DriveCoverage.Watch();
+        var observers = (options.Observers ?? Array.Empty<Action<DriveContext>>())
+            .Prepend(context => watch.Attach(context))
+            .Prepend(context => set = CheckSet.Attach(context)).ToArray();
+        var r = Run(image, drive, options with { Observers = observers });
+        r = r with { Checks = set!.Checks };
+        var coverage = DriveCoverage.Of(r, watch);
+        return r with { Coverage = coverage, Verdict = Verdict.Of(r.Checks, coverage) };
+    }
 
     public static DriveResult Run(FlashedImage image, Drive drive, DriveRunOptions? options = null)
     {
@@ -221,7 +241,8 @@ public static class DriveRun
             new EngineSummary(engine.Scenario.Name, engine.Phases.ToArray(), engine.Rpm, engine.AirflowKgPerHour,
                 engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard, EngineSummary.OutcomeOf(engine.Phases, watch.KeyOff)),
             FaultMemory.Read(Machine), FaultMemory.SavedInEeprom(image.Image, Machine.Board.Eeprom.ToImage()),
-            RunState.ReadFirmwareState(Machine), Eeprom(), watch.Health, Start + Machine.Cycles);
+            RunState.ReadFirmwareState(Machine), Eeprom(), watch.Health, Start + Machine.Cycles,
+            new FaultContext(eepromImage is not { } start || start.All(b => b == 0xFF), CanPartners: true));
 
         void Every(ulong at) => Machine.Scheduler.Schedule(at, "drive step", () =>
         {

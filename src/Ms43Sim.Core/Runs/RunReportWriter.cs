@@ -20,8 +20,8 @@ public static class RunReportWriter
         File.WriteAllText(Path.Combine(directory, "run-report.md"), Report(r));
         File.WriteAllText(Path.Combine(directory, "inventory.csv"), Inventory(r));
         File.WriteAllBytes(Path.Combine(directory, "eeprom.bin"), r.Eeprom.FinalImage);
-        File.WriteAllText(Path.Combine(directory, "events.csv"), EventsCsv(r));
-        File.WriteAllText(Path.Combine(directory, "trace.csv"), TraceCsv(r));
+        File.WriteAllText(Path.Combine(directory, "events.csv"), EventsCsv(r.OutputEvents));
+        File.WriteAllText(Path.Combine(directory, "trace.csv"), TraceCsv(r.Trace));
     }
 
     /// <summary>The text of run-report.md.</summary>
@@ -376,11 +376,11 @@ public static class RunReportWriter
     static string F(double? value, string format) => value is { } v ? v.ToString(format, Inv) : "—";
 
     /// <summary>cycle,time_ms,kind,source,value,crank_deg: one row per kept output event; no angle, an empty cell.</summary>
-    static string EventsCsv(StartupResult r)
+    internal static string EventsCsv(IReadOnlyList<OutputEvent> events)
     {
         var s = new StringBuilder();
         s.AppendLine("cycle,time_ms,kind,source,value,crank_deg");
-        foreach (var e in r.OutputEvents)
+        foreach (var e in events)
         {
             s.Append(e.Cycle.ToString(Inv)).Append(',')
              .Append((e.Cycle / CyclesPerMs).ToString("0.000", Inv)).Append(',')
@@ -394,11 +394,11 @@ public static class RunReportWriter
     }
 
     /// <summary>time_s and the trace's columns: one row per sample; empty cells for null; bit fields in hex.</summary>
-    static string TraceCsv(StartupResult r)
+    internal static string TraceCsv(IReadOnlyList<TraceRow> trace)
     {
         var s = new StringBuilder();
         s.Append("time_s,").AppendLine(string.Join(",", VariableTrace.Columns));
-        foreach (var row in r.Trace)
+        foreach (var row in trace)
         {
             s.Append(row.Seconds.ToString("0.###", Inv));
             for (var i = 0; i < row.Values.Length; i++)

@@ -159,6 +159,7 @@ public static class EngineChecks
                 if (Context.Shaft is not { } shaft || shaft.Rpm < EngineSensors.TurningRpm)
                     return;
                 var angle = shaft.Angle;
+                Exercise();
                 var btdc = CylinderEvents.BeforeTdc(EngineShaft.FiringTdc(c) - angle);
                 if (!InSparkWindow(c, angle))
                     Find($"spark {c}", $"cylinder {c} sparked at {(btdc >= 0 ? $"{btdc:0.0}° BTDC" : $"{-btdc:0.0}° ATDC")}, outside 30° ATDC…75° BTDC of its firing TDC");
@@ -177,7 +178,14 @@ public static class EngineChecks
             }
             var rule = new RevLimitRule();
             var firing = new Firing(machine);
-            Every(machine, Ms, () => rule.Speed(machine.Cycles, Context.Shaft?.Rpm ?? 0, Limit(machine)));
+            Every(machine, Ms, () =>
+            {
+                var limit = Limit(machine);
+                var rpm = Context.Shaft?.Rpm ?? 0;
+                rule.Speed(machine.Cycles, rpm, limit);
+                if (rpm > limit + 50)
+                    Exercise();
+            });
             firing.Spark += c => Report(rule.Spark(machine.Cycles, c));
             firing.Opening += c => Report(rule.Opening(machine.Cycles, c));
 
@@ -200,6 +208,8 @@ public static class EngineChecks
             var machine = Context.Machine!;
             if (mode == DriveMode.Crank)
                 CrankEnded(machine, line);
+            if (point.Mode is DriveMode.Crank or DriveMode.Idle)
+                Exercise();
             (mode, line, ranInIdle, stallSeen) = (point.Mode, point.Segment.Line, false, false);
         };
 
@@ -252,6 +262,8 @@ public static class EngineChecks
             {
                 var rpm = Context.Shaft?.Rpm ?? 0;
                 var asked = Context.Demand is { PowerAsked: true } && rpm >= 900 && rpm <= Limit(machine) - 300;
+                if (asked)
+                    Exercise();
                 var now = rule.Tick(machine.Cycles, asked, rpm).ToHashSet();
                 foreach (var c in now)
                 {

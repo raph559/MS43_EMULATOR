@@ -114,6 +114,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             if (address == MainLoopService && !powerDown)
             {
                 open = true;
+                check.Exercise();
                 Gap(lastService, now, "the main loop's SRVWDT at 0E:0144");
                 lastService = now;
             }

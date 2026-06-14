@@ -111,4 +111,52 @@ public class CliTests
         Assert.Equal(2, Ms43Sim.Cli.Program.Run(new[] { "boot", bin, "--partial-onto", bin, "--ecu-boot", bin }, TextWriter.Null, err));
         Assert.Contains("--ecu-boot", err.ToString());
     }
+
+
+    [Fact] public void Run_DriveWithAMistake_ExitsWithCode2()
+    {
+        using var dir = new TempDirectory();
+        File.WriteAllText(dir.File("bad.drive"), "drive x\n3 idle pedal=20");
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "run", CarPath, "--drive", dir.File("bad.drive") }, TextWriter.Null, err));
+        Assert.Contains("line 2", err.ToString());
+    }
+
+    [Fact] public void Run_ASeasonedDriveWithoutAnEeprom_IsAUsageError()
+    {
+        using var dir = new TempDirectory();
+        File.WriteAllText(dir.File("s.drive"), "drive s\nstart seasoned\n3 on");
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "run", CarPath, "--drive", dir.File("s.drive") }, TextWriter.Null, err));
+        Assert.Contains("starts seasoned", err.ToString());
+    }
+
+    [Fact] public void Check_RunsEveryDriveInADir_WarmStartFirst_AndWritesAVerdictPerDrive()
+    {
+        // a --drives dir written here, so this test does not depend on sim/drives/ (Task 12); the full
+        // seven-drive check of the car and release is Task 13
+        using var drives = new TempDirectory(); using var dir = new TempDirectory();
+        File.WriteAllText(drives.File("warm-start.drive"), "drive warm-start\nstart blank\nset coolant=90 oil=90 intake=33 ambient=20\n3 on\n1.5 crank rpm=200\n10 idle");
+        File.WriteAllText(drives.File("idle.drive"), "drive idle\nstart seasoned\n3 on\n1.5 crank rpm=200\n10 idle");
+        var output = new StringWriter();
+        var code = Program.Run(new[] { "check", CarPath, "--drives", drives.Path, "--out", dir.Path }, output, TextWriter.Null);
+        Assert.True(code == 0, output.ToString());
+        Assert.Equal("pass", File.ReadAllText(Path.Combine(dir.Path, "warm-start", "verdict.txt")).Trim());
+        Assert.Equal("pass", File.ReadAllText(Path.Combine(dir.Path, "idle", "verdict.txt")).Trim());
+        foreach (var file in new[] { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin" })
+            Assert.True(File.Exists(Path.Combine(dir.Path, "idle", file)), file);
+        var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.StartsWith("warm-start", lines.First(l => l.StartsWith("warm-start") || l.StartsWith("idle")));
+    }
+
+    [Fact] public void StockFile_KeyOnRun_IsIncompleteNotPass()                     // Review Focus 4
+    {
+        using var dir = new TempDirectory();
+        File.WriteAllText(dir.File("k.drive"), "drive k\n20 on");
+        var stock = Path.Combine(TestBins.Root, "bins", "MS43_430069_stock.bin");
+        var code = Program.Run(new[] { "run", stock, "--drive", dir.File("k.drive"), "--out", dir.Path }, new StringWriter(), TextWriter.Null);
+        Assert.Equal(4, code);                                                      // the RAM checks are NotEvaluated off MS43X001
+        Assert.Equal("incomplete", File.ReadAllText(dir.File("verdict.txt")).Trim());
+        Assert.Contains("not evaluated", File.ReadAllText(dir.File("drive-report.md")));
+    }
 }

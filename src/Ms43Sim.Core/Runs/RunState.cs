@@ -27,6 +27,8 @@ internal static class RunState
 
     internal static StubInfo[] Stubs(bool canPartners, bool engine, bool drive = false)
     {
+        if (drive)
+            return DriveStubs();
         var stubs = new List<StubInfo>
         {
             new("EEPROM", "blank or from a file", false),
@@ -52,6 +54,29 @@ internal static class RunState
         stubs.Add(new("K-line tester", "none", false));
         return stubs.ToArray();
     }
+
+    /// <summary>
+    /// A drive's stubs, each on the "not between" side of design §7's line with its reason (plan 4 C1):
+    /// the checks read the CPU's own pins upstream of the driver chips, and the rest are inputs or laws
+    /// derived from the CPU's outputs.
+    /// </summary>
+    static StubInfo[] DriveStubs() => new StubInfo[]
+    {
+        new("EEPROM", "blank or from the previous power cycle's after-run", false,
+            "an input the program reads; no checked output passes through it"),
+        new("output-driver chips A/B", "A always answers \"no fault\"; B answers the input set's status word (the car's lambda heaters read open)", false,
+            "the checks read the CPU's own injector and coil pins (P2.0–P2.11), upstream of the chip; a healthy pass-through chip cannot hide a bin fault the pin checks would miss (design §7 'which stubs a pass may have')"),
+        new("monitoring module", "the protocol is modelled; its shut-off path is not", false,
+            "its missing shut-off path can only make real outputs safer, and the monitoring check fails any answer it would object to"),
+        new("CAN partners", "ASC1 153h and the cluster's 613h and 615h with the drive's speed, A/C, ambient and clock; no gearbox, no DSC [owner: ASC]", false,
+            "inputs from the car; no checked output passes through them"),
+        new("knock sensor", "the noise law", false, "derived from the CPU's own outputs (the shaft's speed)"),
+        new("coil feedback", "the 1.2 ms burn pulse and 2.7 V coil current", false, "derived from the CPU's own outputs (its sparks)"),
+        new("engine", "the starter and the idle plant at start and idle, the drive's scripted speed off idle, the breathing law's air; no torque model", false,
+            "the plant around the ECU: it feeds inputs; the checks judge the CPU's outputs against it"),
+        new("steering wheel", "the \"no button\" frame train while the key is on", false, "an input from the car"),
+        new("K-line tester", "none", false, "nothing is connected"),
+    };
 
     /// <summary>RAM read-outs (plan 2, Reference facts): IRAM through the bus; XRAM and the external RAM from their arrays.</summary>
     internal static FirmwareState ReadFirmwareState(Machine m)

@@ -85,8 +85,8 @@ public sealed record MonitorSummary(int Exchanges, int WrongAnswers, int Unexpec
 /// <summary>Source is "blank" or the SHA-256 of the loaded image; FinalImage is the chip at the end; AddressesRead in order.</summary>
 public sealed record EepromSummary(string Source, int WordsRead, int WordsWritten, byte[] FinalImage, IReadOnlyCollection<int> AddressesRead);
 
-/// <summary>A stubbed device and its side of design §7's line.</summary>
-public sealed record StubInfo(string Device, string Behaviour, bool BetweenCpuAndCheckedOutput);
+/// <summary>A stubbed device, its side of design §7's line, and why it stands on that side.</summary>
+public sealed record StubInfo(string Device, string Behaviour, bool BetweenCpuAndCheckedOutput, string Reason = "");
 
 public sealed record StartupResult(
     FlashedImage Image,

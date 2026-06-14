@@ -21,6 +21,18 @@ public static class Program
         "      2,048-byte EEPROM image (default: blank) and is only read; writes run-report.md,\n" +
         "      inventory.csv, eeprom.bin (the chip at the end of the run), events.csv (the\n" +
         "      outputs) and trace.csv (the variables every 100 ms)\n" +
+        "  ms43sim run BIN --drive FILE [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
+        "                  [--eeprom FILE] [--out DIR]\n" +
+        "      runs the drive FILE on BIN with every check; a drive that starts seasoned needs\n" +
+        "      --eeprom (a warm-start run's eeprom.bin); writes drive-report.md, events.csv,\n" +
+        "      trace.csv, eeprom.bin and verdict.txt; the exit code is the verdict: 0 pass,\n" +
+        "      1 fail, 4 incomplete\n" +
+        "  ms43sim check BIN [--drives DIR] [--jobs N] [--raw | --partial-onto ECU.bin]\n" +
+        "                    [--ecu-boot BOOT.bin] [--out DIR]\n" +
+        "      runs every *.drive in DIR (default: sim/drives) on BIN with every check, the\n" +
+        "      warm-start drive first: its final EEPROM is where the seasoned drives start;\n" +
+        "      --jobs N runs the others N at a time; one folder and one line per drive; the\n" +
+        "      exit code is the worst verdict\n" +
         "  ms43sim decode --listing BIN\n" +
         "      linear-sweep listing of the code regions (offset size mnemonic)";
 
@@ -29,7 +41,10 @@ public static class Program
 
     public static int Main(string[] args) => Run(args, Console.Out, Console.Error);
 
-    /// <summary>Exit codes: 0 the command ran, 2 usage error, 3 unreadable or wrong-size image or EEPROM file.</summary>
+    /// <summary>
+    /// Exit codes: 0 the command ran (for a drive or a check: pass), 1 fail, 4 incomplete, 2 usage error
+    /// (a drive file's mistake included), 3 unreadable or wrong-size image or EEPROM file.
+    /// </summary>
     public static int Run(string[] args, TextWriter output, TextWriter error)
     {
         if (args.Length == 0)
@@ -42,7 +57,9 @@ public static class Program
             return args[0] switch
             {
                 "boot" => Boot(args[1..], output, error),
+                "run" when args.Contains("--drive") => DriveCommand(args[1..], output, error),
                 "run" => RunCommand(args[1..], output, error),
+                "check" => CheckCommand(args[1..], output, error),
                 "decode" => Decode(args[1..], output, error),
                 _ => UsageError(error, $"unknown command '{args[0]}'"),
             };
@@ -210,6 +227,149 @@ public static class Program
         output.WriteLine($"report: {Path.Combine(outDir, "run-report.md")}");
         Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
         return 0;
+    }
+
+    static readonly string[] DriveOutputs = { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin", "verdict.txt" };
+
+    static int DriveCommand(string[] args, TextWriter output, TextWriter error)
+    {
+        var image = new ImageArgs();
+        string? outDir = null, eepromFile = null, driveFile = null;
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--drive" when i + 1 < args.Length: driveFile = args[++i]; break;
+                case "--out" when i + 1 < args.Length: outDir = args[++i]; break;
+                case "--eeprom" when i + 1 < args.Length: eepromFile = args[++i]; break;
+                case "--seconds" or "--key-off-at" or "--engine":
+                    return UsageError(error, $"{args[i]} does not go with --drive: the drive sets the time, the key and the engine");
+                default:
+                    if (!image.Take(args, ref i))
+                        return UsageError(error, $"unexpected argument '{args[i]}'");
+                    break;
+            }
+        }
+        if (driveFile is null)
+            return UsageError(error, "--drive needs a FILE");
+        if (image.Problem("run") is { } problem)
+            return UsageError(error, problem);
+        if (ReadDrive(driveFile, error) is not { } drive)
+            return 2;
+        if (drive.Start == StartEeprom.Seasoned && eepromFile is null)
+            return UsageError(error, $"the drive {drive.Name} starts seasoned: give --eeprom FILE (the eeprom.bin of a warm-start run)");
+        outDir ??= Path.Combine("runs", $"drive-{drive.Name}-{Path.GetFileNameWithoutExtension(image.Bin)}");
+        if (Overwritten(image.Inputs.Append(eepromFile).Append(driveFile), outDir, DriveOutputs) is { } clash)
+            return UsageError(error, $"the run would write over its input {clash}: choose another --out");
+
+        var flashed = image.Build();
+        var eeprom = eepromFile != null ? File.ReadAllBytes(eepromFile) : null;
+        var clock = Stopwatch.StartNew();
+        var result = DriveRun.RunWithChecks(flashed, drive, new DriveRunOptions(Eeprom: eeprom));
+        clock.Stop();
+
+        DriveReportWriter.Write(result, outDir);
+        output.WriteLine($"{drive.Name}: {DriveReportWriter.Word(result.Verdict)}");
+        foreach (var reason in Verdict.Reasons(result.Checks, result.Coverage!).Take(5))
+            output.WriteLine($"  {reason}");
+        output.WriteLine($"report: {Path.Combine(outDir, "drive-report.md")}");
+        Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
+        return (int)result.Verdict;
+    }
+
+    static int CheckCommand(string[] args, TextWriter output, TextWriter error)
+    {
+        var image = new ImageArgs();
+        string? outDir = null, drivesDir = null;
+        var jobs = 1;
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--drives" when i + 1 < args.Length: drivesDir = args[++i]; break;
+                case "--out" when i + 1 < args.Length: outDir = args[++i]; break;
+                case "--jobs" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], NumberStyles.None, CultureInfo.InvariantCulture, out jobs) || jobs < 1)
+                        return UsageError(error, "--jobs needs a whole number of 1 or more");
+                    break;
+                default:
+                    if (!image.Take(args, ref i))
+                        return UsageError(error, $"unexpected argument '{args[i]}'");
+                    break;
+            }
+        }
+        if (image.Problem("check") is { } problem)
+            return UsageError(error, problem);
+        drivesDir ??= FindStandardDrives();
+        if (drivesDir is null || !Directory.Exists(drivesDir))
+            return UsageError(error, drivesDir is null ? "no --drives DIR, and no sim/drives above the current folder" : $"no folder {drivesDir}");
+        var drives = new List<Drive>();
+        foreach (var file in Directory.GetFiles(drivesDir, "*.drive").Order(StringComparer.Ordinal))
+        {
+            if (ReadDrive(file, error) is not { } drive)
+                return 2;
+            drives.Add(drive);
+        }
+        if (drives.Count == 0)
+            return UsageError(error, $"no *.drive files in {drivesDir}");
+        var warm = drives.FirstOrDefault(d => d.Name == "warm-start");
+        if (warm is null && drives.Any(d => d.Start == StartEeprom.Seasoned))
+            return UsageError(error, "a seasoned drive needs the warm-start drive in the folder: its final EEPROM is where they start (C5)");
+        outDir ??= Path.Combine("runs", "check-" + Path.GetFileNameWithoutExtension(image.Bin));
+        if (Overwritten(image.Inputs, outDir, DriveOutputs) is { } clash)
+            return UsageError(error, $"the check would write over its input {clash}: choose another --out");
+
+        var flashed = image.Build();
+        var verdicts = new Dictionary<string, RunVerdict>();
+        byte[]? seasoned = null;
+        DriveResult RunOne(Drive drive)
+        {
+            var result = DriveRun.RunWithChecks(flashed, drive,
+                new DriveRunOptions(Eeprom: drive.Start == StartEeprom.Seasoned ? seasoned : null));
+            DriveReportWriter.Write(result, Path.Combine(outDir, drive.Name));
+            return result;
+        }
+        if (warm != null)
+        {
+            var first = RunOne(warm);
+            seasoned = first.Eeprom.FinalImage;
+            verdicts[warm.Name] = first.Verdict;
+            output.WriteLine($"{warm.Name}: {DriveReportWriter.Word(first.Verdict)}");
+        }
+        var rest = drives.Where(d => d != warm).ToArray();
+        var results = new RunVerdict[rest.Length];
+        Parallel.For(0, rest.Length, new ParallelOptions { MaxDegreeOfParallelism = jobs }, i => results[i] = RunOne(rest[i]).Verdict);
+        for (var i = 0; i < rest.Length; i++)
+        {
+            verdicts[rest[i].Name] = results[i];
+            output.WriteLine($"{rest[i].Name}: {DriveReportWriter.Word(results[i])}");
+        }
+        var worst = verdicts.Values.Contains(RunVerdict.Fail) ? RunVerdict.Fail
+            : verdicts.Values.Contains(RunVerdict.Incomplete) ? RunVerdict.Incomplete
+            : RunVerdict.Pass;
+        output.WriteLine($"check: {DriveReportWriter.Word(worst)} ({verdicts.Count} drives; reports in {outDir})");
+        return (int)worst;
+    }
+
+    /// <summary>The drive in <paramref name="file"/>, or null after printing its first mistake with its line.</summary>
+    static Drive? ReadDrive(string file, TextWriter error)
+    {
+        if (DriveParser.TryParse(File.ReadAllText(file), out var drive, out var mistake))
+            return drive;
+        error.WriteLine($"ms43sim: {file}: {mistake}");
+        return null;
+    }
+
+    /// <summary>sim/drives in the current folder or the nearest folder above it.</summary>
+    static string? FindStandardDrives()
+    {
+        for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir != null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "sim", "drives");
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+        return null;
     }
 
     /// <summary>

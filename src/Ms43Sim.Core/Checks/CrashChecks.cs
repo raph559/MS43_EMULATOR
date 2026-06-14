@@ -25,11 +25,17 @@ public static class CrashChecks
 
     sealed class Traps() : CheckBase("traps")
     {
-        protected override void Start(Machine machine, int index) => machine.Events.Added += e =>
+        protected override void Start(Machine machine, int index)
+        {
+            Exercise();
+            machine.Events.Added += e => Trap(e);
+        }
+
+        void Trap(SimEvent e)
         {
             if (e is TrapEvent trap)
                 Find($"{trap.Kind}@{trap.Pc:X}", $"{Describe(trap.Kind)} at {Address(trap.Pc)}");
-        };
+        }
 
         static string Describe(TrapKind kind) => kind switch
         {
@@ -41,18 +47,30 @@ public static class CrashChecks
 
     sealed class Resets() : CheckBase("resets")
     {
-        protected override void Start(Machine machine, int index) => machine.Events.Added += e =>
+        protected override void Start(Machine machine, int index)
+        {
+            Exercise();
+            machine.Events.Added += Reset;
+        }
+
+        void Reset(SimEvent e)
         {
             if (e is ResetEvent { Kind: ResetKind.Watchdog or ResetKind.Software } reset)
                 Find($"{reset.Kind}", reset.Kind == ResetKind.Watchdog
                     ? $"a watchdog reset, first at {Address(reset.Pc)} (repeats are a reset loop)"
                     : $"a software reset (SRST), first at {Address(reset.Pc)}");
-        };
+        }
     }
 
     sealed class Execution() : CheckBase("execution")
     {
-        protected override void Start(Machine machine, int index) => machine.Events.Added += e =>
+        protected override void Start(Machine machine, int index)
+        {
+            Exercise();
+            machine.Events.Added += Fetched;
+        }
+
+        void Fetched(SimEvent e)
         {
             switch (e)
             {
@@ -63,7 +81,7 @@ public static class CrashChecks
                     Find($"outside@{outside.Pc:X}", $"an instruction fetched outside flash at {Address(outside.Pc)}");
                     break;
             }
-        };
+        }
     }
 
     sealed class Boot() : CheckBase("boot")
@@ -81,6 +99,8 @@ public static class CrashChecks
             machine.OnInstruction(RunState.Handover, m => handover ??= m.Cycles);
             machine.Scheduler.Schedule(Limit, "boot check", () =>
             {
+                if (CarControls.KeyIsOn(machine.Board))
+                    Exercise();
                 if (handover is null && CarControls.KeyIsOn(machine.Board))
                     Find($"cycle {index}", $"power cycle {index + 1}: no handover (0E:366A) 1 s after power-on");
             });
@@ -126,6 +146,7 @@ public static class CrashChecks
 
         void Look(Machine m)
         {
+            Exercise();
             var fd26 = m.Bus.Peek16(0xFD26);
             var f8f4 = m.Bus.Peek16(0xF8F4);
             var fd7e = m.Bus.Peek16(0xFD7E);
@@ -147,6 +168,7 @@ public static class CrashChecks
     {
         protected override void Start(Machine machine, int index)
         {
+            Exercise();
             var unexpected = 0;
             var keyOffSeen = false;
             var monitor = machine.Board.Monitor;

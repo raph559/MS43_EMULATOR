@@ -81,6 +81,7 @@ public static class OutputChecks
                 if (level)
                 {
                     (rise[coil], longSeen[coil], stopSeen[coil]) = (now, false, false);
+                    Exercise();
                     return;
                 }
                 if (rise[coil] is { } start && now - start > Limit && !longSeen[coil])
@@ -135,6 +136,7 @@ public static class OutputChecks
                     if (crank.Last is not { } tooth || now - tooth > StopAfter)
                         Find($"no tooth P2.{bit}", $"injector P2.{bit} (cylinder {bit + 1}) opened with no crank tooth in the 100 ms before");
                     (open[bit], dutySeen[bit], stopSeen[bit]) = ((now, Rpm()), false, false);
+                    Exercise();
                     return;
                 }
                 if (open[bit] is { } o && !dutySeen[bit])
@@ -188,6 +190,8 @@ public static class OutputChecks
                 var now = machine.Cycles;
                 var u = Math.Abs(ThrottleBody.Drive(machine.Ports, machine.Pwm));
                 var angle = machine.Throttle.Angle;
+                if (u > 0)
+                    Exercise();
                 if (u > 0.80)
                 {
                     saturated ??= now;
@@ -221,6 +225,11 @@ public static class OutputChecks
         protected override void Start(Machine machine, int index)
         {
             var crank = new CrankClock(machine, Context);
+            machine.Scheduler.Schedule(0, "before-rotation", () =>
+            {
+                if (Context.Shaft is { } shaft)
+                    shaft.ToothPassed += () => Exercise();
+            });
             machine.Ports.OutputEdge += (port, bit, level) =>
             {
                 if (port == 2 && bit <= 11 && crank.First is null)
@@ -296,6 +305,7 @@ public static class OutputChecks
                         return;
                     }
                     holding[output] ??= now;
+                    Exercise();
                     var from = Math.Max(holding[output]!.Value, switched[output] ?? 0);
                     if (now - from > window && !seen[output])
                     {
