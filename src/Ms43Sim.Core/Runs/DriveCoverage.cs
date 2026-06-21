@@ -20,7 +20,7 @@ internal static class DriveCoverage
     /// <summary>A drive's streaming tally of what the event log may not keep: flash writes, unsupported and locked writes, 3Bh frames.</summary>
     internal sealed class Watch
     {
-        public long BenignFlashWrites;
+        public readonly Dictionary<(uint Address, uint Pc), long> BenignFlashWrites = new();
         public readonly Dictionary<string, long> Unmodelled = new();
         public long ShutdownFrames;
 
@@ -31,8 +31,8 @@ internal static class DriveCoverage
             {
                 switch (e)
                 {
-                    case FlashWriteEvent { Address: 0x4286C, IsByte: true }:
-                        BenignFlashWrites++;
+                    case FlashWriteEvent write when BenignAccesses.IsBenignFlashWrite(write):
+                        BenignFlashWrites[(write.Address, write.Pc)] = BenignFlashWrites.GetValueOrDefault((write.Address, write.Pc)) + 1;
                         break;
                     case FlashWriteEvent write:
                         Count($"a flash write of {write.Value:X4}h to physical {write.Address:X5}h{(write.IsByte ? " (byte)" : "")} from {Cpu(write.Pc)}");
@@ -70,8 +70,8 @@ internal static class DriveCoverage
             else
                 unmodelled.Add(line);
         }
-        if (watch.BenignFlashWrites > 0)
-            benign.Add($"{watch.BenignFlashWrites:N0} byte writes to physical flash 4286Ch: plan 2's write beyond the 8 KiB RAM window; a real flash ignores a lone write (R4)");
+        foreach (var ((address, pc), count) in watch.BenignFlashWrites.OrderBy(w => w.Key.Address))
+            benign.Add($"{count:N0} byte writes to physical flash {address:X5}h from {Cpu(pc)}: a write beyond the 8 KiB RAM window; a real flash ignores a lone write (R4)");
         unmodelled.AddRange(watch.Unmodelled.Select(u => $"{u.Key} ×{u.Value:N0}"));
         if (watch.ShutdownFrames > 0)
             benign.Add($"{watch.ShutdownFrames:N0} 3Bh frames after a key-off: the after-run's shutdown handshake (R4)");
@@ -90,9 +90,11 @@ internal static class DriveCoverage
                 else
                     unexplained.Add($"power cycle {cycle.Index + 1}: {Describe(fault)} stored");
             }
+            var maxRpm = r.Trace.Where(t => t.Seconds * 24e6 >= cycle.StartCycle && t.Seconds * 24e6 <= cycle.EndCycle)
+                .Select(t => t.Values[0] ?? 0).DefaultIfEmpty(0).Max();
             foreach (var fault in cycle.Faults.Detected.Where(f => !cycle.Faults.Stored.Any(s => s.Path == f.Path)))
             {
-                if (FaultMemory.Explanation(fault, cycle.FaultContext) is { } why)
+                if ((FaultMemory.Explanation(fault, cycle.FaultContext) ?? FaultMemory.ExplanationAtSpeed(fault, maxRpm)) is { } why)
                     benign.Add($"power cycle {cycle.Index + 1}: {Describe(fault)} detected: {why}");
                 else
                     unexplained.Add($"power cycle {cycle.Index + 1}: {Describe(fault)} detected");

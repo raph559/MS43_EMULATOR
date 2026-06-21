@@ -59,4 +59,35 @@ public class OutputChecksTests
         Assert.Contains(r.Check("before-rotation").Findings, f => f.Message.Contains("P2.6"));
         Assert.Equal(CheckStatus.NotEvaluated, r.Check("stuck").Status);       // not the MS43X001 program
     }
+
+    const ulong Ms = 24_000;
+
+    /// <summary>
+    /// The release's idle drive: idling at 700 rpm, an injector switched 150 ms before the drive stepped
+    /// the shaft to 2,500 rpm; three cycles at 2,500 rpm (144 ms) had passed, three at 700 (514 ms) had not.
+    /// </summary>
+    [Fact] public void AStepUpInSpeed_IsNoStuckOutput()
+    {
+        var rule = new StuckRule();
+        rule.Switched(0);
+        for (ulong t = 1; t <= 150; t++)
+            Assert.Null(rule.Tick(t * Ms, true, 700));
+        Assert.Null(rule.Tick(151 * Ms, true, 2500));
+    }
+
+    [Fact] public void AnOutputThatStopsAtSpeed_IsStuck_OnceAWindow()
+    {
+        var rule = new StuckRule();
+        Assert.Null(rule.Tick(0, true, 2500));                                // the predicate holds from 0
+        rule.Switched(0);
+        for (ulong t = 1; t <= 144; t++)
+            Assert.Null(rule.Tick(t * Ms, true, 2500));                       // three cycles at 2,500 rpm: 144 ms
+        Assert.Equal(0UL, rule.Tick(145 * Ms, true, 2500));                   // stuck since its last switch
+        Assert.Null(rule.Tick(146 * Ms, true, 2500));                         // reported once
+        Assert.Null(rule.Tick(147 * Ms, false, 2500));                        // the predicate drops: no rule
+        for (ulong t = 148; t <= 292; t++)
+            Assert.Null(rule.Tick(t * Ms, true, 2500));                       // it holds again: a new window from 148 ms
+        Assert.Equal(148 * Ms, rule.Tick(293 * Ms, true, 2500));
+    }
 }
+

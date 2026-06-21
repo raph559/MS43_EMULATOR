@@ -133,4 +133,14 @@ public static class FaultMemory
         156 when entry.Type == 2 && context.CanPartners && !entry.Present => "reported until the cluster's first 615h is parsed (a start-up transient a real car shows too); debounce increment 0, never stored",
         _ => null,
     };
+
+    /// <summary>
+    /// Why a detected path is the high-rpm segment-task latency (plan 4 R14, Task 11) when its power cycle
+    /// ran the shaft at <paramref name="maxRpm"/>, or null: only the exhaust cam's "no signal" (path 3,
+    /// type 2), only detected, never stored, and only at 6,000 rpm or more.
+    /// </summary>
+    public static string? ExplanationAtSpeed(FaultEntry entry, double maxRpm) =>
+        !entry.Stored && entry.Path == 3 && entry.Type == 2 && maxRpm >= 6000
+            ? $"the exhaust cam's \"no signal\" with the shaft up to {maxRpm:0} rpm: the segment task runs late at that CPU load under the ISM's minimum timing (R14, Task 11); detected, never stored"
+            : null;
 }

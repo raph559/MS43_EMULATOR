@@ -1,6 +1,44 @@
 namespace Ms43Sim.Core;
 
 /// <summary>
+/// R16's stuck rule for one output: while its predicate holds, the output must switch at least once in
+/// its window — three engine cycles at the slowest shaft speed since the window began (a speed step
+/// does not shorten a window that began slower), or a fixed time — counted from the later of the
+/// predicate's start and the output's last switch. Times are CPU cycles at 24 MHz.
+/// </summary>
+public sealed class StuckRule
+{
+    ulong? holdingSince, lastSwitch;
+    bool reported;
+    double slowest = double.MaxValue;
+
+    public void Switched(ulong now)
+    {
+        lastSwitch = now;
+        reported = false;
+        slowest = double.MaxValue;
+    }
+
+    /// <summary>The window's start when the output is newly stuck at <paramref name="now"/>; else null.</summary>
+    public ulong? Tick(ulong now, bool predicate, double rpm, ulong? fixedWindow = null)
+    {
+        if (!predicate)
+        {
+            (holdingSince, reported, slowest) = (null, false, double.MaxValue);
+            return null;
+        }
+        holdingSince ??= now;
+        slowest = Math.Min(slowest, rpm);
+        var from = Math.Max(holdingSince.Value, lastSwitch ?? 0);
+        var window = fixedWindow ?? (slowest > 0 ? (ulong)(3 * OutputChecks.EngineCycleCycles(slowest)) : ulong.MaxValue);
+        if (now - from <= window || reported)
+            return null;
+        reported = true;
+        return from;
+    }
+}
+
+/// <summary>
 /// The dangerous-output checks (plan 4 R16, C3). They watch only edges of pins that are outputs before
 /// and after (<see cref="Ports.OutputEdge"/>: a direction change is a set-up, never an edge); a pin
 /// released to an input ends its pulse. The crank counts as stopped after 100 ms without a tooth.
@@ -252,15 +290,9 @@ public static class OutputChecks
                 NotEvaluated("the program is not MS43X001 (R15): the predicates read its RAM");
                 return;
             }
-            var switched = new ulong?[14];                // P2.0–P2.11 by bit, then the idle valve and the purge valve
-            var holding = new ulong?[14];
-            var seen = new bool[14];
+            var rules = Enumerable.Range(0, 14).Select(_ => new StuckRule()).ToArray();   // P2.0–P2.11 by bit, then the idle valve and the purge valve
             var coilRise = new ulong?[6];
-            void Switched(int output)
-            {
-                switched[output] = machine.Cycles;
-                seen[output] = false;
-            }
+            void Switched(int output) => rules[output].Switched(machine.Cycles);
             machine.Ports.OutputEdge += (port, bit, level) =>
             {
                 if (port == 8 && bit == 7)
@@ -288,30 +320,20 @@ public static class OutputChecks
                 var spark = running && (bus.Peek16(0xFD72) & 0xC000) == 0 && (bus.Peek16(0xFD74) & 0x000F) == 0
                     && RunState.XramWord(machine, 0xE4B8) != 0 && (bus.Peek16(0xFD50) & 1) == 0;
                 var key = CarControls.KeyIsOn(machine.Board);
-                var cycles = rpm > 0 ? (ulong)(3 * EngineCycleCycles(rpm)) : ulong.MaxValue;
                 for (var n = 0; n < 6; n++)
                 {
-                    Hold(n, fuel && (fb9a >> FiringIndex[n] & 1) == 0, cycles, $"injector P2.{n} (cylinder {n + 1}) did not switch for three engine cycles while it should fire");
-                    Hold(n + 6, spark, cycles, $"coil P2.{n + 6} (cylinder {n + 1}) did not spark for three engine cycles while it should");
+                    Hold(n, fuel && (fb9a >> FiringIndex[n] & 1) == 0, null, $"injector P2.{n} (cylinder {n + 1}) did not switch for three engine cycles while it should fire");
+                    Hold(n + 6, spark, null, $"coil P2.{n + 6} (cylinder {n + 1}) did not spark for three engine cycles while it should");
                 }
                 Hold(Valve, key && now >= 100 * Ms, 25 * Ms, "the idle valve P2.12 did not switch for 25 ms with the key on");
                 Hold(Purge, key && now >= 500 * Ms, 250 * Ms, "the purge valve P8.7 did not switch for 250 ms with the key on");
 
-                void Hold(int output, bool predicate, ulong window, string message)
+                void Hold(int output, bool predicate, ulong? window, string message)
                 {
-                    if (!predicate)
-                    {
-                        (holding[output], seen[output]) = (null, false);
-                        return;
-                    }
-                    holding[output] ??= now;
-                    Exercise();
-                    var from = Math.Max(holding[output]!.Value, switched[output] ?? 0);
-                    if (now - from > window && !seen[output])
-                    {
-                        seen[output] = true;
+                    if (predicate)
+                        Exercise();
+                    if (rules[output].Tick(now, predicate, rpm, window) is { } from)
                         Find($"stuck {output}", message, Context.PowerCycleStart + from, Context.PowerCycleStart + now);
-                    }
                 }
             });
         }
