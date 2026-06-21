@@ -5,13 +5,15 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
 
 - Design: `docs/superpowers/specs/2026-10-20-ms43-emulator-design.md`
 - Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md`,
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md` and
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md`; their records
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`,
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md` and
+  `docs/superpowers/plans/2026-10-21-ms43-emulator-plan4-checks-drives.md`; their records
   (rulings, review findings, open items) beside them
 - Devices and what is modelled: `HARDWARE.md`
-- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up) and §9.8 (warm idle)
+- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up), §9.8 (warm idle) and §9.9
+  (checks and drives)
 
-**Status:** plan 3 done (2026-10-20).
+**Status:** plan 4 done (2026-10-21).
 - Plan 1 gave the CPU, bus, traps, interrupts, PEC, watchdog, timing and the boot runner.
 - Plan 2 added:
   - the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0 and CAN;
@@ -27,6 +29,13 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
   - the fault-memory reader;
   - a 10 Hz variable trace;
   - `--engine warm-idle`.
+- Plan 4 adds:
+  - drive files and the drive runner, across power cycles;
+  - the car's driving inputs (speed pulses, the steering-wheel line, pedal, clutch, brakes,
+    temperatures, A/C, the clock) and fault injection;
+  - the engine off idle at the drive's speed, breathing from the car's throttle-air table;
+  - 16 checks, a verdict with design §7's coverage, `run --drive` and `check`;
+  - the seven standard drives in `drives/`.
 
 The car file starts up with the key on and the engine stopped: its CRC and monitor-sum tasks
 pass, the monitoring handshake completes, and its scheduler runs. A key-off runs the after-run,
@@ -37,6 +46,9 @@ With `--engine warm-idle` the car file starts warm and idles on its 900 rpm targ
 - its sparks, dwells and injections carry out its own decisions;
 - its VANOS and throttle plants track;
 - every detected fault code is explained, and none is stored.
+
+`ms43sim check` passes the car file and the release file on all seven standard drives, and fails
+three known-bad bins (REPORT.md §9.9).
 
 ## Run it
 
@@ -89,10 +101,73 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--out DIR` | `runs/boot-<name>` | Where `boot-report.md` and `inventory.csv` go |
 
 Exit codes, both commands: 0 the run completed (any outcome), 2 usage error, 3 unreadable or
-wrong-size image or EEPROM file.
+wrong-size image or EEPROM file. A drive (`run --drive`, `check`) exits with its verdict (below).
 
 `ms43sim decode --listing BIN` prints the decoder's linear sweep. Compare it with
 `python -I sim/tools/decode_listing.py BIN`, which uses `tools/c167dis.py`.
+
+## Drive it: `run --drive` and `check`
+
+`ms43sim run BIN --drive FILE` runs one drive file on BIN with every check and gives a verdict;
+`ms43sim check BIN` runs every drive in `sim/drives/` (the seven standard drives):
+
+```bash
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll check ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --out sim/runs/check-car
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --drive sim/drives/full-load.drive --eeprom sim/runs/check-car/warm-start/eeprom.bin --out sim/runs/full-load
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `--drive FILE` | | `run` only: the drive to run. It does not take `--seconds`, `--key-off-at` or `--engine`: the drive sets the time, the key and the engine |
+| `--eeprom FILE` | blank | `run` only: the EEPROM at the first key-on. A drive that starts `seasoned` needs one: a warm-start run's `eeprom.bin` |
+| `--drives DIR` | `sim/drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
+| `--jobs N` | 1 | `check` only: how many drives run at once after the warm start; each run is deterministic |
+| `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` |
+| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive): `drive-report.md` (the verdict and its reasons, the drive, the power cycles, the checks and their findings, design §7's coverage), `events.csv`, `trace.csv`, `eeprom.bin` and `verdict.txt` (one word) |
+
+The exit code is the verdict (the worst one for `check`): **0 pass, 1 fail, 4 incomplete**; 2 is a
+usage error (a mistake in a drive file is reported with its line), 3 an unreadable or wrong-size
+input. Fail beats incomplete beats pass:
+- **fail:** a check found something;
+- **incomplete:** a check could not run (the checks that read the firmware's RAM need the MS43X001
+  program, so the stock file and any code patch are incomplete at best), a stub sits between the CPU
+  and a checked output, the run touched something not modelled, or a fault is stored or detected
+  without an explanation;
+- **pass:** none of these.
+
+**A drive file** (`sim/drives/*.drive`, plan 4 R17) is text: `#` starts a comment.
+
+```
+drive part-load                          # first: the name
+start seasoned                           # the EEPROM it expects: blank (default) or seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on                                     # DURATION MODE KEY=VALUE ...
+1.5 crank rpm=200
+6 idle
+10 drive gear=3 speed=40..80 pedal=15    # A..B ramps across the segment
+```
+
+- **Modes:** `on` (key on, engine stopped), `crank` (the starter at `rpm=`), `idle` (plan 3's idle
+  plant, in neutral at a standstill), `drive` (the shaft at the drive's speed, like a dyno), `off`
+  (key off; the after-run runs; a later `on` powers the ECU again from the EEPROM it wrote).
+- **Kept keys** (they hold until changed): `coolant`, `oil`, `intake` (−30…140 °C), `ambient`
+  (−40…50 °C), `clock` (0…1439 min), `ac`, `pedal` (0…95 %), `gear` (`N` or 1–5), `clutch`, `brake`
+  (0 or 1).
+- **Segment keys:** `rpm` (0…7600), `speed` (0…250 km/h), `battery` (6…16 V), `force=CHANNEL:VOLTS`
+  (`AN0`…`AN15` but AN4/AN13, `muxA0`…`muxA7`, `muxB0`…`muxB7`), `silence=ID` (153, 613 or 615).
+- **In a drive segment:** `rpm` and `speed` both given are independent; one given, in gear with the
+  clutch out, the gear ratio gives the other; otherwise the missing one holds.
+- **Mistakes are errors with their line:** an unknown key, a value out of range, a ramp on a key that
+  cannot ramp, a pedal in a crank or idle, an off while moving or twice, an idle or drive before a
+  crank, an on or crank while the engine may run.
+
+**The checks** (plan 4 R16) watch the machine's events, never the output capture: `traps`,
+`resets`, `execution` (erased flash, code outside flash), `boot` (the handover within 1 s),
+`checksums`, `monitoring`, `scheduler` (the watchdog service and the crank task at every speed; the
+periodic tasks and the overflow flags below 2,000 rpm), `dwell` (8.0 ms), `injector` (98 % of the
+engine cycle; no opening with the crank stopped), `throttle` (the bridge drive), `before-rotation`,
+`stuck`, `spark-window` (30° ATDC…75° BTDC), `rev-limit`, `engine` (it starts and idles) and `power`
+(every cylinder fires while the drive asks for power).
 
 ## Build and test
 
@@ -103,15 +178,41 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 479 tests (about 2 minutes in all):
+Run it from the repository root. 677 tests (about 4.5 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
-- a 100 s warm idle with a key-off at 75 s, then a 30 s second key-on.
+- a 100 s warm idle with a key-off at 75 s, then a 30 s second key-on;
+- the drive parser, the runner, every check on its passing and failing side;
+- in the `StandardDrives` category (19 tests): the car and release files on all seven standard
+  drives, and the three known-bad bins.
 
-**Speed:** 132.2 M emulated cycles per second on this PC (Release, a 60 s warm-idle run), 5.5×
-real time. A start-up with the engine stopped ran at 138.7 M, and plan 1's boot-only figure was
-166 M.
+`dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
+(658 tests, about 3 minutes).
+
+**Speed:** 111.3 M emulated cycles per second on this PC (Release, the warm-start drive with every
+check), 4.6× real time; `check` of the car's seven drives takes 41 s with `--jobs 6`. Plan 3's
+60 s warm-idle run, without checks, ran at 132.2 M.
+
+## Assumptions and simplifications in plan 4
+
+A drive run lists the car's inputs too (`MachineAssumptions.ForDrive`):
+- the temperatures through the car's sensor curves (R10), the radiator outlet as the ambient plus
+  0.9 × (coolant − ambient) [assumption];
+- the pedal tracks, the clutch and brake switches, and a battery override on AN5 (and AN1 with the
+  key on);
+- the speed pulses (6.971 per second per km/h on P7.6) and 153h's speed;
+- the steering-wheel "no button" train on P7.4 while the key is on, low with the key off
+  [assumption];
+- the cluster's clock, A/C and ambient on 613h/615h;
+- forced channels and silenced partners (fault injection);
+- the engine at the drive's speed off idle, a dyno with no torque model [owner];
+- the breathing law: the firmware's own air model (`ip_maf_1_diag__n__tps_av`) frozen as the
+  engine's (R12);
+- the CPU load at speed: the instruction timing is the ISM's minimum for external execution, so the
+  scheduler check judges the task cadence below 2,000 rpm only (plan 4 Task 11).
+
+The rulings behind them are in the plan 4 record.
 
 ## Assumptions and simplifications in plan 3
 
@@ -227,9 +328,10 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 
 | Path | Content |
 |---|---|
-| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`), capture, fault memory, the boot and start-up runners |
+| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
-| `tests/Ms43Sim.Tests/` | xUnit tests |
+| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build (the assembler's output only, applied in memory) |
+| `drives/` | the seven standard drive files |
 | `tools/` | Python helpers: manual text extraction, SFR table generation, decoder cross-check |
 | `refs/` | the two Infineon manuals and their text — local only, not committed |
 | `runs/` | `ms43sim` output — local only, not committed |
