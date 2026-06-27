@@ -149,6 +149,20 @@ public class CliTests
         Assert.StartsWith("warm-start", lines.First(l => l.StartsWith("warm-start") || l.StartsWith("idle")));
     }
 
+    [Fact] public void Check_TwoDrivesOfOneName_IsAUsageError_NamingBothFiles()      // final review C1
+    {
+        // one name is one output folder and one verdict: the second run would overwrite the first
+        // and could hide its fail
+        using var drives = new TempDirectory(); using var dir = new TempDirectory();
+        File.WriteAllText(drives.File("a.drive"), "drive same\n0.2 on");
+        File.WriteAllText(drives.File("b.drive"), "drive same\n0.2 on");
+        var err = new StringWriter();
+        Assert.Equal(2, Program.Run(new[] { "check", CarPath, "--drives", drives.Path, "--out", dir.Path }, TextWriter.Null, err));
+        Assert.Contains("a.drive", err.ToString());
+        Assert.Contains("b.drive", err.ToString());
+        Assert.False(Directory.Exists(Path.Combine(dir.Path, "same")));
+    }
+
     [Fact] public void StockFile_KeyOnRun_IsIncompleteNotPass()                     // Review Focus 4
     {
         using var dir = new TempDirectory();

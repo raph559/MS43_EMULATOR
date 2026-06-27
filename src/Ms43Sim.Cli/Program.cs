@@ -304,10 +304,16 @@ public static class Program
         if (drivesDir is null || !Directory.Exists(drivesDir))
             return UsageError(error, drivesDir is null ? "no --drives DIR, and no sim/drives above the current folder" : $"no folder {drivesDir}");
         var drives = new List<Drive>();
+        var files = new Dictionary<string, string>();
         foreach (var file in Directory.GetFiles(drivesDir, "*.drive").Order(StringComparer.Ordinal))
         {
             if (ReadDrive(file, error) is not { } drive)
                 return 2;
+            // a drive's name is its output folder and its line in the verdict: two of one name would
+            // overwrite each other
+            if (files.TryGetValue(drive.Name, out var other))
+                return UsageError(error, $"{other} and {file} are both the drive {drive.Name}: a drive's name must be unique");
+            files[drive.Name] = file;
             drives.Add(drive);
         }
         if (drives.Count == 0)
@@ -320,7 +326,7 @@ public static class Program
             return UsageError(error, $"the check would write over its input {clash}: choose another --out");
 
         var flashed = image.Build();
-        var verdicts = new Dictionary<string, RunVerdict>();
+        var verdicts = new List<RunVerdict>();
         byte[]? seasoned = null;
         DriveResult RunOne(Drive drive)
         {
@@ -333,7 +339,7 @@ public static class Program
         {
             var first = RunOne(warm);
             seasoned = first.Eeprom.FinalImage;
-            verdicts[warm.Name] = first.Verdict;
+            verdicts.Add(first.Verdict);
             output.WriteLine($"{warm.Name}: {DriveReportWriter.Word(first.Verdict)}");
         }
         var rest = drives.Where(d => d != warm).ToArray();
@@ -341,11 +347,11 @@ public static class Program
         Parallel.For(0, rest.Length, new ParallelOptions { MaxDegreeOfParallelism = jobs }, i => results[i] = RunOne(rest[i]).Verdict);
         for (var i = 0; i < rest.Length; i++)
         {
-            verdicts[rest[i].Name] = results[i];
+            verdicts.Add(results[i]);
             output.WriteLine($"{rest[i].Name}: {DriveReportWriter.Word(results[i])}");
         }
-        var worst = verdicts.Values.Contains(RunVerdict.Fail) ? RunVerdict.Fail
-            : verdicts.Values.Contains(RunVerdict.Incomplete) ? RunVerdict.Incomplete
+        var worst = verdicts.Contains(RunVerdict.Fail) ? RunVerdict.Fail
+            : verdicts.Contains(RunVerdict.Incomplete) ? RunVerdict.Incomplete
             : RunVerdict.Pass;
         output.WriteLine($"check: {DriveReportWriter.Word(worst)} ({verdicts.Count} drives; reports in {outDir})");
         return (int)worst;
