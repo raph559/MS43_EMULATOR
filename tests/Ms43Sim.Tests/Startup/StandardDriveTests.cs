@@ -13,8 +13,10 @@ public class StandardDriveTests
     {
         var d = StandardDrives.Load(name);
         Assert.Equal(name, d.Name);
-        // no segment demands power above the car's 7008 rpm limit with spark (R7): rpm ≤ 7050 only in full-load's brief touch
-        Assert.All(d.Segments, s => Assert.True(!s.Keys.TryGetValue("rpm", out var r) || Math.Max(r.From, r.To) <= 7050));
+        // no segment holds the shaft above the car's 7008 rpm limit (R7) but full-load's 1 s past it, at 7,100 rpm:
+        // clear of the limit + 50, so the rev-limit check judges the cut, and short of 7,215 rpm, where the car's
+        // full-load pulse of 16.3 ms passes the injector check's 98 % (final review C2)
+        Assert.All(d.Segments, s => Assert.True(!s.Keys.TryGetValue("rpm", out var r) || Math.Max(r.From, r.To) <= (name == "full-load" ? 7100 : 7008)));
         Assert.Equal(name is "warm-start" or "cold-start" or "key-cycle" ? StartEeprom.Blank : StartEeprom.Seasoned, d.Start);
     }
 

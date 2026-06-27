@@ -19,10 +19,10 @@ public class DriveBuilderTests
         Assert.Equal((DriveMode.On, DriveMode.Crank), (d.Segments[0].Mode, d.Segments[1].Mode));
     }
 
-    [Fact] public void FullLoad_TouchesTheLimiterForOneSecond_AndShiftsWithoutLifting()
+    [Fact] public void FullLoad_GoesPastTheLimiterForOneSecond_AndShiftsWithoutLifting()
     {
         var d = DriveBuilder.Named("full-load");
-        Assert.Single(d.Segments, s => s.Keys.TryGetValue("rpm", out var r) && r.To > 7008);
+        Assert.Single(d.Segments, s => s.Keys.TryGetValue("rpm", out var r) && r.To > 7008 + 50);   // past L + 50: the cut is judged
         Assert.Contains(d.Segments, s => s.Keys.GetValueOrDefault("clutch")?.From == 1 && s.Keys["pedal"].From == 95);
     }
 

@@ -1,4 +1,4 @@
-# Full load to the limiter (R7, R12): a pull in 3rd, a hold just below the limiter, a 1 s touch of it,
+# Full load to the limiter (R7, R12): a pull in 3rd, a hold just below the limiter, 1 s past it,
 # a no-lift upshift and a coast. No launch control: it stores P0500 at a standstill (R7).
 drive full-load
 start seasoned
@@ -8,7 +8,7 @@ set coolant=90 oil=90 intake=33 ambient=20
 6 idle
 8 drive gear=3 speed=50..150 pedal=95            # the pull
 2 drive gear=3 rpm=6900                          # just below the 7,008 rpm limiter: the steady full-load check
-1 drive gear=3 rpm=7050                          # the limiter, for 1 s (Task 11)
+1 drive gear=3 rpm=7100                          # past the limiter for 1 s, clear of 7,008 + 50: rev-limit judges the cut
 0.4 drive gear=3 speed=150 pedal=95 clutch=1     # the no-lift shift: the pedal stays down, the clutch in (R7)
 3 drive gear=4 speed=150..90 pedal=95 clutch=0   # 4th gear, the clutch out again
 6 drive gear=4 speed=90..20 pedal=0              # the coast

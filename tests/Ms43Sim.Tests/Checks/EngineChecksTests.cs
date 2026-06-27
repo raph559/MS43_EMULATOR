@@ -10,11 +10,14 @@ public class EngineChecksTests
 
     static string Why(ICheck c) => $"{c.Name}: {string.Join("; ", c.Findings.Select(f => f.Message))}";
 
-    [Fact] public void CarFullLoad_PassesSparkWindowRevLimitEngineAndPower()
+    [Fact] public void CarFullLoad_ExercisesAndPassesSparkWindowRevLimitEngineAndPower()
     {
         var r = DriveRunWithChecks(DriveBuilder.Named("full-load"));
         foreach (var c in new[] { "spark-window", "rev-limit", "engine", "power" })
+        {
             Assert.True(r.Check(c).Status == CheckStatus.Pass, Why(r.Check(c)));
+            Assert.True(((CheckBase)r.Check(c)).Exercised, $"{c}: its condition never occurred, so its pass judged nothing");   // final review C2
+        }
     }
 
     [Fact] public void CarDrivenAboveItsLimit_CutsItsSparks_AndPassesRevLimit()
@@ -24,6 +27,7 @@ public class EngineChecksTests
             "4 drive gear=3 speed=150..20 pedal=0", "3 idle"));
         var r = DriveRunWithChecks(drive);
         Assert.True(r.Check("rev-limit").Status == CheckStatus.Pass, Why(r.Check("rev-limit")));
+        Assert.True(((CheckBase)r.Check("rev-limit")).Exercised);
         Assert.DoesNotContain(r.Sparks, s => s.Fire > 16 * 24_000_000UL && s.Fire < 16.5 * 24e6);   // 1–1.5 s into 7,300 rpm: no spark
     }
 

@@ -42,7 +42,7 @@ public static class DriveBuilder
             6 idle
             5 drive gear=3 speed=20..140 pedal=95       # the pull
             2 drive gear=3 rpm=6900                     # just below the limiter
-            1 drive gear=3 rpm=7050                     # the limiter, for 1 s
+            1 drive gear=3 rpm=7100                     # past the limiter for 1 s: rev-limit judges the cut
             0.4 drive gear=3 speed=150 pedal=95 clutch=1   # the no-lift shift
             3 drive gear=4 speed=150..90 pedal=95 clutch=0
             5 drive gear=4 speed=90..25 pedal=0         # the coast

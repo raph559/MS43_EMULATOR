@@ -49,6 +49,12 @@ public class KnownGoodTests(KnownGood f) : IClassFixture<KnownGood>
     [InlineData("full-load")] [InlineData("overrun")] [InlineData("key-cycle")]
     public void Release_Passes(string drive) => Assert.True(f.Release[drive].Verdict == RunVerdict.Pass, $"release {drive}: {Why(f.Release[drive])}");
 
+    [Fact] public void FullLoad_TakesBothFilesPastTheirLimit_SoTheCutIsJudged()     // final review C2
+    {
+        foreach (var (file, r) in new[] { ("car", f.Car["full-load"]), ("release", f.Release["full-load"]) })
+            Assert.True(((CheckBase)r.Check("rev-limit")).Exercised, $"{file}: the full-load drive never went past the limit + 50 rpm, so rev-limit judged nothing");
+    }
+
     [Fact] public void TheWarmStart_SeedsASeasonedEeprom()                           // C5, R11
     {
         Assert.True(f.Car["warm-start"].PowerCycles[0].Eeprom.WordsWritten > 0);
