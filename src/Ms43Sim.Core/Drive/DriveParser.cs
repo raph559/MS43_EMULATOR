@@ -10,6 +10,8 @@ namespace Ms43Sim.Core;
 /// <c>set KEY=VALUE …</c>, then the segments, <c>DURATION MODE KEY=VALUE …</c>. A value is a number,
 /// <c>A..B</c> (a linear ramp across the segment), <c>N</c> for the gear, <c>CHANNEL:VOLTS</c> for
 /// <c>force</c> and a partner's identifier for <c>silence</c>. The first mistake is reported with its line.
+/// Plan 5 adds the <c>stall</c> mode and the <c>kline</c> lines, which script the K-line tester: each
+/// applies at the start of the segment that follows it.
 /// </summary>
 public static partial class DriveParser
 {
@@ -34,6 +36,19 @@ public static partial class DriveParser
     };
 
     static readonly uint[] Partners = { 0x153, 0x613, 0x615 };
+
+    const string ModeNames = "on, off, crank, idle, drive or stall";
+
+    const string KLineVerbNames = "connect, disconnect, poll, quiet, send, every or raw";
+
+    /// <summary>
+    /// A DS2 frame is the address, the length, the payload and the xor, and the length byte counts them
+    /// all, so a payload is 255 - 3 = 252 bytes at most. A raw line goes on the wire as it stands.
+    /// </summary>
+    const int MaxPayloadBytes = 252, MaxRawBytes = 255;
+
+    /// <summary>The longest period of a repeated request, in seconds.</summary>
+    const double MaxEverySeconds = 60;
 
     public static Drive Parse(string text) =>
         TryParse(text, out var drive, out var error) ? drive : throw new DriveFormatException(error);
@@ -60,6 +75,7 @@ public static partial class DriveParser
         var start = StartEeprom.Blank;
         var initial = new Dictionary<string, double>();
         var segments = new List<Segment>();
+        var kline = new List<KLineAction>();   // the kline lines waiting for the segment they apply to
         var lines = text.Split('\n');
         for (var index = 0; index < lines.Length; index++)
         {
@@ -105,8 +121,12 @@ public static partial class DriveParser
                             throw Fail(line, $"key '{key}' given twice");
                     }
                     break;
+                case "kline":
+                    kline.Add(ReadKLine(tokens, line));
+                    break;
                 default:
-                    segments.Add(ReadSegment(tokens, line));
+                    segments.Add(ReadSegment(tokens, line) with { KLine = kline.ToArray() });
+                    kline.Clear();
                     break;
             }
         }
@@ -116,6 +136,9 @@ public static partial class DriveParser
             throw Fail(1, "a drive needs at least one segment");
         var drive = new Drive(name, start, segments, initial);
         Validate(drive);
+        // After Validate: a kline line left over follows every segment, so a mistake Validate finds comes first in the file.
+        if (kline.Count > 0)
+            throw Fail(kline[0].Line, "a kline line needs a segment after it: it applies at the start of the next segment");
         return drive;
     }
 
@@ -126,7 +149,7 @@ public static partial class DriveParser
         if (seconds <= 0)
             throw Fail(line, $"duration must be above 0, not {tokens[0]}");
         if (tokens.Length < 2)
-            throw Fail(line, "a segment needs a mode: on, off, crank, idle or drive");
+            throw Fail(line, $"a segment needs a mode: {ModeNames}");
         var mode = tokens[1] switch
         {
             "on" => DriveMode.On,
@@ -134,7 +157,8 @@ public static partial class DriveParser
             "crank" => DriveMode.Crank,
             "idle" => DriveMode.Idle,
             "drive" => DriveMode.Drive,
-            _ => throw Fail(line, $"unknown mode '{tokens[1]}': on, off, crank, idle or drive"),
+            "stall" => DriveMode.Stall,
+            _ => throw Fail(line, $"unknown mode '{tokens[1]}': {ModeNames}"),
         };
         var keys = new Dictionary<string, Ramp>();
         var forces = new Dictionary<string, double>();
@@ -159,6 +183,67 @@ public static partial class DriveParser
             }
         }
         return new Segment(mode, seconds, keys, forces, silenced, line);
+    }
+
+    /// <summary>
+    /// A <c>kline</c> line (plan 5): <c>connect</c>, <c>disconnect</c>, <c>poll</c> and <c>quiet</c> take
+    /// nothing; <c>send HH…</c> is a DS2 request's payload (1–252 bytes, from the command byte on),
+    /// <c>every SECONDS HH…</c> the same payload sent again every SECONDS (above 0, at most 60) and
+    /// <c>raw HH…</c> bytes put on the line as they stand (1–255). A byte is two hex digits.
+    /// </summary>
+    static KLineAction ReadKLine(string[] tokens, int line)
+    {
+        if (tokens.Length < 2)
+            throw Fail(line, $"kline needs a verb: {KLineVerbNames}");
+        var verb = tokens[1] switch
+        {
+            "connect" => KLineVerb.Connect,
+            "disconnect" => KLineVerb.Disconnect,
+            "poll" => KLineVerb.Poll,
+            "quiet" => KLineVerb.Quiet,
+            "send" => KLineVerb.Send,
+            "every" => KLineVerb.Every,
+            "raw" => KLineVerb.Raw,
+            _ => throw Fail(line, $"unknown kline verb '{tokens[1]}': {KLineVerbNames}"),
+        };
+        var arguments = tokens[2..];
+        switch (verb)
+        {
+            case KLineVerb.Send or KLineVerb.Raw:
+                return new KLineAction(verb, KLineBytes(verb, arguments, line), 0, line);
+            case KLineVerb.Every:
+                if (arguments.Length == 0)
+                    throw Fail(line, "kline every needs its period in seconds, then the payload bytes");
+                if (!TryNumber(arguments[0], out var period))
+                    throw Fail(line, $"kline every takes its period in seconds first: '{arguments[0]}' is not a number");
+                if (period <= 0)
+                    throw Fail(line, $"kline every: the period must be above 0 seconds, not {arguments[0]}");
+                if (period > MaxEverySeconds)
+                    throw Fail(line, $"kline every: the period must be at most {N(MaxEverySeconds)} seconds, not {arguments[0]}");
+                return new KLineAction(verb, KLineBytes(verb, arguments[1..], line), period, line);
+            default:
+                if (arguments.Length > 0)
+                    throw Fail(line, $"kline {tokens[1]} takes no arguments, not '{arguments[0]}'");
+                return new KLineAction(verb, Array.Empty<byte>(), 0, line);
+        }
+    }
+
+    /// <summary>The bytes of a send, every or raw line: as many as a frame carries, each two hex digits.</summary>
+    static byte[] KLineBytes(KLineVerb verb, string[] tokens, int line)
+    {
+        var raw = verb == KLineVerb.Raw;
+        var most = raw ? MaxRawBytes : MaxPayloadBytes;
+        var name = verb.ToString().ToLowerInvariant();
+        if (tokens.Length == 0 || tokens.Length > most)
+            throw Fail(line, $"kline {name} takes 1 to {most} {(raw ? "bytes" : "payload bytes")}, not {tokens.Length}");
+        var bytes = new byte[tokens.Length];
+        for (var i = 0; i < tokens.Length; i++)
+        {
+            if (tokens[i].Length != 2 || !char.IsAsciiHexDigit(tokens[i][0]) || !char.IsAsciiHexDigit(tokens[i][1]))
+                throw Fail(line, $"kline {name}: '{tokens[i]}' is not a hex byte (two hex digits, 00 to FF)");
+            bytes[i] = Convert.ToByte(tokens[i], 16);
+        }
+        return bytes;
     }
 
     static IEnumerable<(string Key, string Value)> Pairs(IEnumerable<string> tokens, int line)
@@ -231,7 +316,10 @@ public static partial class DriveParser
     /// drive take an rpm, only a drive a speed; an idle is in neutral with the pedal released, and so is
     /// the pedal in a crank; an idle or a drive needs a crank since the key went on; with the engine
     /// possibly running (after a crank, an idle or a drive) only an idle, a drive, an off or another
-    /// crank after a crank follow; an off comes neither first, nor twice, nor while moving.
+    /// crank after a crank follow; an off comes neither first, nor twice, nor while moving. A stall
+    /// (plan 5) takes the kept keys alone and follows an idle or a drive only; after it the engine
+    /// stands, so an idle or a drive needs a crank again, as after an off, while an on, a crank or an
+    /// off may follow.
     /// </summary>
     static void Validate(Drive drive)
     {
@@ -247,6 +335,8 @@ public static partial class DriveParser
                 throw Fail(line, "crank needs rpm=, the starter's speed");
             if (mode == DriveMode.Crank && keys["rpm"].From != keys["rpm"].To)
                 throw Fail(line, "crank's rpm cannot ramp: the starter turns at one speed");
+            if (mode == DriveMode.Stall && UnkeptKey(segment) is { } unkept)
+                throw Fail(line, $"stall takes only the kept keys, not '{unkept}'");
             if (keys.ContainsKey("rpm") && mode is not (DriveMode.Crank or DriveMode.Drive))
                 throw Fail(line, "rpm only in crank and drive");
             if (keys.ContainsKey("speed") && mode != DriveMode.Drive)
@@ -270,16 +360,22 @@ public static partial class DriveParser
                 case DriveMode.On or DriveMode.Crank when previous is DriveMode.Idle or DriveMode.Drive
                                                        || mode == DriveMode.On && previous == DriveMode.Crank:
                     throw Fail(line, $"the engine runs: {name} needs the key off first");
+                case DriveMode.Stall when previous is not (DriveMode.Idle or DriveMode.Drive):
+                    throw Fail(line, "stall needs a running engine: it follows an idle or a drive");
             }
             cranked = mode switch
             {
                 DriveMode.Crank => true,
-                DriveMode.Off => false,
+                DriveMode.Off or DriveMode.Stall => false,
                 _ => cranked,
             };
             previous = mode;
         }
     }
+
+    /// <summary>The first key (in name order) that <paramref name="segment"/> gives and a later segment would not keep: rpm, speed or battery.</summary>
+    static string? UnkeptKey(Segment segment) =>
+        segment.Keys.Keys.Where(key => !Rules[key].Kept).Order(StringComparer.Ordinal).FirstOrDefault();
 
     static DriveFormatException Fail(int line, string message) => new(new DriveError(line, message));
 

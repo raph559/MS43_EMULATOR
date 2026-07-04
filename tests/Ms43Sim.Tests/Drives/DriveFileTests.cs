@@ -63,5 +63,148 @@ public class DriveFileTests
     [Theory]
     [InlineData("drive x\n3 on\n1.5 crank rpm=200\n1.5 crank rpm=180\n10 idle\n10 off\n3 on\n1 crank rpm=200\n3 drive gear=1 speed=0..10\n2 drive gear=1 speed=10..0\n2 off")]
     [InlineData("drive x\nset coolant=-30 oil=140 intake=0 ambient=-40 clock=1439 ac=1 pedal=0 gear=N clutch=1 brake=1\n1 crank rpm=200 battery=6..16")]
+    // plan 5: every kline verb, in a drive that goes on, cranks, idles and goes off
+    [InlineData("drive k\nkline connect\n3 on\nkline poll\n1 crank rpm=200\nkline send 6D 00\nkline every 0.5 0B B0\nkline raw 12 05 0B B0 AC\nkline quiet\n5 idle\nkline disconnect\n2 off")]
+    // plan 5: a stall after an idle or a drive; then a crank, an on or an off
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 stall pedal=0 clutch=1\n1 crank rpm=200\n5 idle")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n3 on\n2 crank rpm=200\n5 idle")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n3 off\n3 on")]
+    // plan 5: a stall takes every kept key, a ramp of one included, and the forces and silences every mode takes
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall coolant=80..70 oil=90 intake=30 ambient=20 clock=600 ac=1 pedal=0 gear=N clutch=1 brake=1 force=AN0:2.5 silence=153")]
     public void GoodDrives_Parse(string text) => Assert.True(DriveParser.TryParse(text, out _, out var error), error?.ToString());
+
+    // ---- plan 5: the kline lines ----
+
+    [Fact] public void KLineLines_ApplyAtTheStartOfTheNextSegment()
+    {
+        var d = DriveParser.Parse("drive k\n3 on\nkline connect\nkline poll\n2 crank rpm=200\n20 idle\nkline send 6D 00\n5 idle");
+        Assert.Equal(new[] { KLineVerb.Connect, KLineVerb.Poll }, d.Segments[1].KLine.Select(a => a.Verb));
+        Assert.Equal((DriveMode.Crank, 5), (d.Segments[1].Mode, d.Segments[1].Line));       // the segment keeps its own line
+        var send = Assert.Single(d.Segments[3].KLine);
+        Assert.Equal(KLineVerb.Send, send.Verb);
+        Assert.Equal(new byte[] { 0x6D, 0x00 }, send.Bytes);
+        Assert.Empty(d.Segments[0].KLine);
+        Assert.Empty(d.Segments[2].KLine);
+    }
+
+    [Fact] public void KLineActions_CarryTheirVerbBytesPeriodAndLine()
+    {
+        // before the first segment, between comments, in lower-case hex and with a comment after the bytes
+        var d = DriveParser.Parse("drive k\n# a note\nkline send 6d 00   # lower-case hex\nkline every 0.25 0B B0\nkline raw 12 05 0B B0 AC\nkline quiet\n3 on");
+        var actions = d.Segments[0].KLine;
+        Assert.Equal(new[] { KLineVerb.Send, KLineVerb.Every, KLineVerb.Raw, KLineVerb.Quiet }, actions.Select(a => a.Verb));
+        Assert.Equal(new[] { 3, 4, 5, 6 }, actions.Select(a => a.Line));
+        Assert.Equal(new byte[] { 0x6D, 0x00 }, actions[0].Bytes);
+        Assert.Equal(new byte[] { 0x0B, 0xB0 }, actions[1].Bytes);
+        Assert.Equal(new byte[] { 0x12, 0x05, 0x0B, 0xB0, 0xAC }, actions[2].Bytes);
+        Assert.Empty(actions[3].Bytes);
+        Assert.Equal(new[] { 0, 0.25, 0, 0 }, actions.Select(a => a.Period));       // a period is the every verb's alone
+    }
+
+    [Theory]
+    [InlineData("drive k\n3 on\nkline poll", 3, "needs a segment after it")]
+    [InlineData("drive k\nkline fetch\n3 on", 2, "unknown")]
+    [InlineData("drive k\nkline send 6G\n3 on", 2, "hex")]
+    [InlineData("drive k\nkline every 6D 00\n3 on", 2, "seconds")]
+    [InlineData("drive k\nkline raw\n3 on", 2, "bytes")]
+    // the first of several dangling lines; an earlier mistake in the file comes first; no segment at all
+    [InlineData("drive k\n3 on\nkline poll\nkline quiet", 3, "needs a segment after it")]
+    [InlineData("drive k\n1 off\nkline poll", 2, "the first segment cannot be off")]
+    [InlineData("drive k\nkline poll", 1, "at least one segment")]
+    // physical lines, past blanks and comments
+    [InlineData("drive k\n\n# a note\nkline fetch   # not a verb\n3 on", 4, "unknown")]
+    // a verb is needed, and the four plain verbs take nothing
+    [InlineData("drive k\nkline\n3 on", 2, "verb")]
+    [InlineData("drive k\nkline poll now\n3 on", 2, "no arguments")]
+    [InlineData("drive k\nkline connect 12 08\n3 on", 2, "no arguments")]
+    // a byte is exactly two hex digits
+    [InlineData("drive k\nkline send 6D 0\n3 on", 2, "hex")]
+    [InlineData("drive k\nkline send 0x6D\n3 on", 2, "hex")]
+    [InlineData("drive k\nkline raw 12 FFF\n3 on", 2, "hex")]
+    [InlineData("drive k\nkline every 1 6D 0G\n3 on", 2, "hex")]
+    // send and every need a payload, raw its bytes
+    [InlineData("drive k\nkline send\n3 on", 2, "bytes")]
+    [InlineData("drive k\nkline every 1\n3 on", 2, "bytes")]
+    // every needs a period: a number above 0 and at most 60. The plan's "seconds" row at the top also
+    // matches the message of a line that is not a kline line at all ("a segment starts with its duration
+    // in seconds"), so these fragments are stricter.
+    [InlineData("drive k\nkline every 6D 00\n3 on", 2, "not a number")]
+    [InlineData("drive k\nkline every NaN 6D\n3 on", 2, "not a number")]
+    [InlineData("drive k\nkline every\n3 on", 2, "its period")]
+    [InlineData("drive k\nkline every 0 6D\n3 on", 2, "above 0")]
+    [InlineData("drive k\nkline every -1 6D\n3 on", 2, "above 0")]
+    [InlineData("drive k\nkline every 60.5 6D\n3 on", 2, "at most 60")]
+    public void KLine_Mistakes_AreReportedWithTheirLine(string text, int line, string fragment)
+    {
+        Assert.False(DriveParser.TryParse(text, out _, out var error));
+        Assert.Equal(line, error.Line);
+        Assert.Contains(fragment, error.Message);
+    }
+
+    [Fact] public void EveryPeriod_AtMostSixtySeconds_IsAccepted()
+    {
+        Assert.True(DriveParser.TryParse("drive k\nkline every 60 6D 00\nkline every 0.001 0B B0\n3 on", out var d, out var error), error?.ToString());
+        Assert.Equal(new[] { 60.0, 0.001 }, d.Segments[0].KLine.Select(a => a.Period));
+    }
+
+    /// <summary>A drive with one kline line: <paramref name="verb"/> (for every, with its period) and then <paramref name="count"/> bytes.</summary>
+    static string KLineWithBytes(string verb, int count) => $"drive k\nkline {verb} {string.Join(' ', Enumerable.Repeat("6D", count))}\n3 on";
+
+    [Fact] public void SendPayloadOver252Bytes_IsAMistake()
+    {
+        Assert.True(DriveParser.TryParse(KLineWithBytes("send", 252), out var d, out var accepted), accepted?.ToString());
+        Assert.Equal(252, d.Segments[0].KLine[0].Bytes.Count);
+        Assert.False(DriveParser.TryParse(KLineWithBytes("send", 253), out _, out var error));
+        Assert.Equal(2, error.Line);
+        Assert.Contains("252", error.Message);
+    }
+
+    [Theory]
+    [InlineData("every 1", 252)]
+    [InlineData("raw", 255)]
+    public void EveryAndRawBytes_AreLimitedToWhatAFrameCarries(string verb, int most)
+    {
+        Assert.True(DriveParser.TryParse(KLineWithBytes(verb, most), out var d, out var accepted), accepted?.ToString());
+        Assert.Equal(most, d.Segments[0].KLine[0].Bytes.Count);
+        Assert.False(DriveParser.TryParse(KLineWithBytes(verb, most + 1), out _, out var error));
+        Assert.Equal(2, error.Line);
+        Assert.Contains(most.ToString(), error.Message);
+    }
+
+    // ---- plan 5: the stall mode ----
+
+    [Fact] public void Stall_ThenCrank_IsAccepted_AndIdleAfterAStallNeedsACrank()
+    {
+        Assert.True(DriveParser.TryParse("drive s\n1 crank rpm=200\n5 idle\n2 stall\n1 crank rpm=200\n5 idle", out var d, out var accepted), accepted?.ToString());
+        Assert.Equal(DriveMode.Stall, d.Segments[2].Mode);
+        Assert.False(DriveParser.TryParse("drive s\n1 crank rpm=200\n5 idle\n2 stall\n5 idle", out _, out var error));
+        Assert.Equal(5, error.Line);
+        Assert.Contains("idle needs a crank first", error.Message);
+    }
+
+    [Fact] public void Stall_NeedsARunningEngine()
+    {
+        Assert.False(DriveParser.TryParse("drive k\n3 on\n2 stall", out _, out var error));
+        Assert.Equal(3, error.Line);
+        Assert.Contains("stall needs a running engine", error.Message);
+    }
+
+    [Theory]
+    // a stall follows an idle or a drive only: not first, not a crank (the engine may not have caught), not an off, not a stall
+    [InlineData("drive s\n2 stall", 2, "stall needs a running engine")]
+    [InlineData("drive s\n1 crank rpm=200\n2 stall", 3, "stall needs a running engine")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 off\n2 stall", 5, "stall needs a running engine")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n2 stall", 5, "stall needs a running engine")]
+    // after a stall a drive needs a crank first, as an idle does
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n2 drive gear=3 speed=40", 5, "drive needs a crank first")]
+    // a stall takes the kept keys alone
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall rpm=0", 4, "stall takes only the kept keys, not 'rpm'")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 stall speed=0", 5, "stall takes only the kept keys, not 'speed'")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall battery=12", 4, "stall takes only the kept keys, not 'battery'")]
+    public void Stall_Mistakes_AreReportedWithTheirLine(string text, int line, string fragment)
+    {
+        Assert.False(DriveParser.TryParse(text, out _, out var error));
+        Assert.Equal(line, error.Line);
+        Assert.Contains(fragment, error.Message);
+    }
 }
