@@ -123,7 +123,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--drives DIR` | `sim/drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
 | `--jobs N` | 1 | `check` only: how many drives run at once after the warm start; each run is deterministic |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` |
-| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive): `drive-report.md` (the verdict and its reasons, the drive, the power cycles, the checks and their findings, design §7's coverage), `events.csv`, `trace.csv`, `eeprom.bin` and `verdict.txt` (one word) |
+| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the verdict and its reasons, the drive, the power cycles and why each ended, the checks and their findings, design §7's coverage with what did not run and what the checks did not judge), `events.csv`, `trace.csv`, `eeprom.bin` and `verdict.txt` (one word) |
 
 The exit code is the verdict (the worst one for `check`): **0 pass, 1 fail, 4 incomplete**; 2 is a
 usage error (a mistake in a drive file is reported with its line), 3 an unreadable or wrong-size
@@ -131,8 +131,9 @@ input. Fail beats incomplete beats pass:
 - **fail:** a check found something;
 - **incomplete:** a check could not run (the checks that read the firmware's RAM need the MS43X001
   program, so the stock file and any code patch are incomplete at best), a stub sits between the CPU
-  and a checked output, the run touched something not modelled, or a fault is stored or detected
-  without an explanation;
+  and a checked output, the run touched something not modelled, a fault is stored or detected
+  without an explanation, or part of the drive did not run (the main relay dropped while the drive
+  had the key on, or the drive never cranks the engine);
 - **pass:** none of these.
 
 **A drive file** (`sim/drives/*.drive`, plan 4 R17) is text: `#` starts a comment.
@@ -162,12 +163,15 @@ set coolant=90 oil=90 intake=33 ambient=20
   crank, an on or crank while the engine may run.
 
 **The checks** (plan 4 R16) watch the machine's events, never the output capture: `traps`,
-`resets`, `execution` (erased flash, code outside flash), `boot` (the handover within 1 s),
+`resets` (and a main-relay drop with the key read on), `execution` (erased flash, code outside
+flash), `boot` (the handover within 1 s),
 `checksums`, `monitoring`, `scheduler` (the watchdog service and the crank task at every speed; the
 periodic tasks and the overflow flags below 2,000 rpm), `dwell` (8.0 ms), `injector` (98 % of the
 engine cycle; no opening with the crank stopped), `throttle` (the bridge drive), `before-rotation`,
 `stuck`, `spark-window` (30° ATDC…75° BTDC), `rev-limit`, `engine` (it starts and idles) and `power`
-(every cylinder fires while the drive asks for power).
+(every cylinder fires while the drive asks for power). The report lists, apart from the benign
+notes, what the checks declare they did not judge (the scheduler's periodic tasks above 2,000 rpm);
+the verdict does not count it.
 
 ## Build and test
 
@@ -178,21 +182,23 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 677 tests (about 4.5 minutes in all):
+Run it from the repository root. 687 tests (about 5 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
 - a 100 s warm idle with a key-off at 75 s, then a 30 s second key-on;
-- the drive parser, the runner, every check on its passing and failing side;
-- in the `StandardDrives` category (19 tests): the car and release files on all seven standard
+- the drive parser and the runner; every check passing, and failing on a known-bad, raw or
+  synthetic run, except `scheduler` and `boot` (no bin trips them yet) and the `rev-limit`, `power`
+  and `spark-window` rules, which fail as pure rules only (the plan 4 record);
+- in the `StandardDrives` category (20 tests): the car and release files on all seven standard
   drives, and the three known-bad bins.
 
 `dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
-(658 tests, about 3 minutes).
+(667 tests, about 3 minutes).
 
-**Speed:** 111.3 M emulated cycles per second on this PC (Release, the warm-start drive with every
-check), 4.6× real time; `check` of the car's seven drives takes 41 s with `--jobs 6`. Plan 3's
-60 s warm-idle run, without checks, ran at 132.2 M.
+**Speed:** 95–111 M emulated cycles per second on this PC (Release, the warm-start drive with every
+check; it varies with the PC's load), 4.0–4.6× real time; `check` of the car's seven drives takes
+about 41 s with `--jobs 6`. Plan 3's 60 s warm-idle run, without checks, ran at 132.2 M.
 
 ## Assumptions and simplifications in plan 4
 
