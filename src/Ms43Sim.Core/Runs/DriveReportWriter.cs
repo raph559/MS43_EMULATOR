@@ -70,6 +70,7 @@ public static class DriveReportWriter
             s.AppendLine($"### Power cycle {cycle.Index + 1}: {Seconds(cycle.StartCycle)} s to {Seconds(cycle.EndCycle)} s").AppendLine();
             var m = cycle.Milestones;
             s.AppendLine($"- handover {Since(m.Handover)}, main loop {Since(m.MainLoop)}, key-off {Since(m.KeyOff)}, power-off {Since(m.PowerOff)} (from this cycle's power-on)");
+            s.AppendLine($"- ended: {Ended(cycle.End)}");
             if (cycle.Engine is { } engine)
                 s.AppendLine($"- engine: {engine.Describe()}");
             s.AppendLine($"- EEPROM: {cycle.Eeprom.WordsRead:N0} words read, {cycle.Eeprom.WordsWritten:N0} written; E17A (the throttle check) = {cycle.Firmware.ThrottleCheckState}");
@@ -102,6 +103,8 @@ public static class DriveReportWriter
             List(s, "Not exercised (a pass whose condition never occurred)", coverage.NotExercised);
             List(s, "Not modelled", coverage.UnmodelledAccesses);
             List(s, "Unexplained faults", coverage.UnexplainedFaults);
+            List(s, "Not run (part of the drive that never ran)", coverage.NotRun);
+            List(s, "Not judged (gaps the checks declare; the verdict does not count them)", coverage.NotJudged);
             List(s, "Benign notes", coverage.BenignNotes);
         }
 
@@ -123,6 +126,14 @@ public static class DriveReportWriter
         foreach (var line in lines)
             s.AppendLine($"- {line}");
     }
+
+    static string Ended(CycleEnd end) => end switch
+    {
+        CycleEnd.DriveEnded => "the drive's end",
+        CycleEnd.AfterRun => "the after-run: the main relay dropped after the key-off",
+        CycleEnd.RelayDroppedKeyOn => "**the main relay dropped with the key on** (the ECU switched itself off)",
+        _ => "**the main relay dropped while the drive had the key on** (the firmware read it off: AN1 forced)",
+    };
 
     static string N(double value) => value.ToString("0.###", Inv);
 

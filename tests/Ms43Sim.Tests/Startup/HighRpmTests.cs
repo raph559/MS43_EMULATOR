@@ -18,7 +18,8 @@ public class HighRpmTests
         Assert.True(r.Verdict == RunVerdict.Pass, string.Join("; ", Verdict.Reasons(r.Checks, r.Coverage!)));
         Assert.DoesNotContain(r.PowerCycles[^1].Faults.Stored, f => f.Path == 0);    // path 0 = maf (P0102/P0103)
         Assert.DoesNotContain(r.PowerCycles[^1].Faults.Detected, f => f.Path == 0);
-        Assert.Contains(r.Coverage!.BenignNotes, n => n.Contains("R2 and R4 were not judged"));   // the narrowing is declared (Task 11)
+        Assert.DoesNotContain(r.Coverage!.BenignNotes, n => n.Contains("R2 and R4 were not judged"));   // a gap, not a benign access (final review I5)
+        Assert.Contains(r.Coverage.NotJudged, n => n.Contains("R2 and R4 were not judged"));             // the narrowing is declared (Task 11)
         Assert.True(((CheckBase)r.Check("scheduler")).Exercised);                                // R1 and R3 judged throughout
     }
 }

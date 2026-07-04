@@ -65,7 +65,7 @@ internal static class RunState
         new("EEPROM", "blank or from the previous power cycle's after-run", false,
             "an input the program reads; no checked output passes through it"),
         new("output-driver chips A/B", "A always answers \"no fault\"; B answers the input set's status word (the car's lambda heaters read open)", false,
-            "the checks read the CPU's own injector and coil pins (P2.0–P2.11), upstream of the chip; a healthy pass-through chip cannot hide a bin fault the pin checks would miss (design §7 'which stubs a pass may have')"),
+            "the checks read the CPU's own injector and coil pins (P2.0–P2.11), upstream of the chip; a healthy pass-through chip cannot hide a bin fault the pin checks would miss (design §7 'which stubs a pass may have'); the chips never report an injector or coil driver fault, so the firmware's injector and coil driver-fault reactions are never exercised"),
         new("monitoring module", "the protocol is modelled; its shut-off path is not", false,
             "its missing shut-off path can only make real outputs safer, and the monitoring check fails any answer it would object to"),
         new("CAN partners", "ASC1 153h and the cluster's 613h and 615h with the drive's speed, A/C, ambient and clock; no gearbox, no DSC [owner: ASC]", false,

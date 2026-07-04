@@ -63,6 +63,44 @@ public class DriveRunTests
         Assert.Equal(2, r.PowerCycles.Count);
     }
 
+    [Fact] public void ARelayDropWhileTheDriveHasTheKeyOn_LeavesTheRestUnrun_SoTheRunIsIncomplete()   // final review I3
+    {
+        // AN1 forced to 0 V reads as the key off: the firmware runs its after-run and drops the main relay
+        // while the drive still has the key on, and the drive's last segment never runs
+        var drive = DriveParser.Parse(string.Join('\n', "drive dropped", "start blank", "set coolant=90 oil=90 intake=33 ambient=20",
+            "3 on", "1.5 crank rpm=200", "6 idle", "30 idle force=AN1:0", "10 idle"));
+        var r = DriveRun.RunWithChecks(TestImages.Car, drive);
+        Assert.Equal(RunVerdict.Incomplete, r.Verdict);
+        Assert.Equal(CycleEnd.RelayDroppedKeyReadOff, Assert.Single(r.PowerCycles).End);
+        Assert.Contains(r.Coverage!.NotRun, line => line.Contains("main relay dropped") && line.EndsWith("did not run again"));
+        Assert.Equal(CheckStatus.Pass, r.Check("resets").Status);                // the firmware read the key off: it did right
+        Assert.Contains("- ended: **the main relay dropped while the drive had the key on**", DriveReportWriter.Report(r));
+    }
+
+    [Fact] public void ADriveWhoseEngineNeverRuns_IsIncomplete()                     // final review I6
+    {
+        // a key-on drive sees no start, spark or injection: a pass would vouch for outputs it never judged
+        var r = DriveRun.RunWithChecks(TestImages.Car, DriveParser.Parse("drive k\n10 on"));
+        Assert.Equal(RunVerdict.Incomplete, r.Verdict);
+        Assert.Contains(r.Coverage!.NotRun, line => line.Contains("never cranks"));
+        Assert.Equal(CycleEnd.DriveEnded, Assert.Single(r.PowerCycles).End);
+    }
+
+    [Theory]                                                                       // final review I3
+    [InlineData(false, true, true, CycleEnd.DriveEnded)]
+    [InlineData(true, false, false, CycleEnd.AfterRun)]
+    [InlineData(true, true, true, CycleEnd.RelayDroppedKeyOn)]                     // the ECU switched itself off: resets fails it
+    [InlineData(true, true, false, CycleEnd.RelayDroppedKeyReadOff)]               // AN1 forced: the drive could not go on
+    public void ACycleEnds_ByTheRelay_TheDrivesKey_AndTheKeyAsRead(bool dropped, bool driveKeyOn, bool readOn, CycleEnd end) =>
+        Assert.Equal(end, DriveRun.EndOf(dropped, driveKeyOn, readOn));
+
+    [Fact] public void AnOffWithItsAfterRun_EndsTheCycleNormally()
+    {
+        var r = DriveRun.RunWithChecks(TestImages.Car, DriveBuilder.Named("key-cycle"));
+        Assert.Equal(new[] { CycleEnd.AfterRun, CycleEnd.DriveEnded }, r.PowerCycles.Select(c => c.End));
+        Assert.Empty(r.Coverage!.NotRun);
+    }
+
     [Fact] public void EqualDriveRuns_GiveTheSameHash()
     {
         var drive = DriveParser.Parse("drive x\nstart blank\n3 on\n1.5 crank rpm=200\n4 idle");

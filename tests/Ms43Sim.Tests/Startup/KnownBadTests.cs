@@ -44,7 +44,9 @@ public class KnownBadTests(KnownBad f) : IClassFixture<KnownBad>
     [Fact] public void Overlay_FailsAWarmStart_ButAKeyOnRunCannotSeeIt()           // Review Focus 1
     {
         Assert.Equal(RunVerdict.Fail, f.OverlayWarm.Verdict);                     // ILLINA trap / reset at ~4.31 s (R3)
-        Assert.True(f.OverlayWarm.Check("traps").Status == CheckStatus.Fail || f.OverlayWarm.Check("resets").Status == CheckStatus.Fail);
+        Assert.Contains(f.OverlayWarm.Check("traps").Findings, x => x.Message.Contains("IllegalInstructionAccess"));   // each on its own (final review I8)
+        Assert.Equal(CheckStatus.Fail, f.OverlayWarm.Check("resets").Status);
+        Assert.Contains(f.OverlayWarm.Check("engine").Findings, x => x.Message.Contains("stopped during the idle"));   // the stall rule's failing side
         Assert.NotEqual(RunVerdict.Pass, f.OverlayKeyOn.Verdict);                 // incomplete: a code patch makes the RAM checks not evaluated
         Assert.Contains(f.OverlayKeyOn.Coverage!.NotEvaluated, s => s.Contains("program"));
     }

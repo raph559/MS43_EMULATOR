@@ -106,7 +106,35 @@ internal static class DriveCoverage
         return new Coverage(r.Stubs,
             checks.Where(c => c.Status == CheckStatus.NotEvaluated).Select(c => $"{c.Name}: {c.NotEvaluatedReason}").ToArray(),
             checks.Where(c => c.Status == CheckStatus.Pass && !c.Exercised).Select(c => c.Name).ToArray(),
-            unmodelled, unexplained, benign);
+            unmodelled, unexplained, benign)
+        {
+            NotRun = NotRun(r),
+            NotJudged = checks.SelectMany(c => c.Gaps).ToArray(),
+        };
+    }
+
+    /// <summary>
+    /// The drive's time after a main-relay drop with the key on, to its next key-on or its end (final
+    /// review I3), and an engine the drive never cranks: nothing judged a start, a spark or an injection (I6).
+    /// </summary>
+    static string[] NotRun(DriveResult r)
+    {
+        var lines = new List<string>();
+        var end = (ulong)Math.Round(DriveTimeline.Duration(r.Drive) * 24e6);
+        for (var i = 0; i < r.PowerCycles.Count; i++)
+        {
+            var cycle = r.PowerCycles[i];
+            if (cycle.End is not (CycleEnd.RelayDroppedKeyOn or CycleEnd.RelayDroppedKeyReadOff))
+                continue;
+            var next = i + 1 < r.PowerCycles.Count;
+            var resumed = next ? r.PowerCycles[i + 1].StartCycle : end;
+            var read = cycle.End == CycleEnd.RelayDroppedKeyOn ? "the firmware read the key on" : "the firmware read the key off: AN1 forced";
+            lines.Add(string.Create(CultureInfo.InvariantCulture,
+                $"{cycle.EndCycle / 24e6:0.000}–{resumed / 24e6:0.000} s: the main relay dropped while the drive had the key on ({read}); the drive {(next ? "ran again from its next key-on" : "did not run again")}"));
+        }
+        if (!r.Drive.Segments.Any(s => s.Mode == DriveMode.Crank))
+            lines.Add("the engine: the drive never cranks it, so no check judged a start, a spark or an injection");
+        return lines.ToArray();
     }
 
     static string Describe(FaultEntry f) =>

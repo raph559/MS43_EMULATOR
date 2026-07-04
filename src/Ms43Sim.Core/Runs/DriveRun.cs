@@ -12,13 +12,21 @@ public sealed record DriveRunOptions(MachineOptions? Machine = null, byte[]? Eep
     Action<DriveContext>[]? Observers = null, int CaptureCapacity = OutputCapture.Capacity);
 
 /// <summary>
+/// Why a power cycle's run stopped (final review I3): the drive's time ran out; the main relay dropped
+/// after the drive turned the key off (the after-run's end); or it dropped while the drive had the key
+/// on, with the firmware reading the key on (the ECU switched itself off) or off (AN1 forced).
+/// </summary>
+public enum CycleEnd { DriveEnded, AfterRun, RelayDroppedKeyOn, RelayDroppedKeyReadOff }
+
+/// <summary>
 /// One power cycle of a drive: StartCycle and EndCycle in the drive's time; the milestones, the
 /// engine's phases and the scheduler figures in the cycle's own time (from its power-on); the fault
-/// memory, the RAM read-outs and the EEPROM at its end; the conditions its faults' explanations rest on.
+/// memory, the RAM read-outs and the EEPROM at its end; the conditions its faults' explanations rest on;
+/// why it ended.
 /// </summary>
 public sealed record PowerCycle(int Index, ulong StartCycle, StartupMilestones Milestones, EngineSummary? Engine,
     FaultMemoryState Faults, IReadOnlyList<FaultEntry> SavedFaults, FirmwareState Firmware, EepromSummary Eeprom,
-    SchedulerHealth Scheduler, ulong EndCycle, FaultContext FaultContext);
+    SchedulerHealth Scheduler, ulong EndCycle, FaultContext FaultContext, CycleEnd End);
 
 /// <summary>
 /// A whole drive: its power cycles, and every power cycle's outputs, cylinder events, trace and machine
@@ -49,6 +57,8 @@ public sealed record DriveResult(FlashedImage Image, Drive Drive, IReadOnlyList<
 /// coast.</item>
 /// <item>When the main relay drops after an off and a later segment turns the key on again, that
 /// key-on powers a new machine with the EEPROM image the after-run wrote — never the file.</item>
+/// <item>When it drops while the drive has the key on, the drive's time up to its next key-on after an
+/// off (or its end) does not run: the coverage lists it, and the run is incomplete (final review I3).</item>
 /// </list>
 /// </summary>
 public static class DriveRun
@@ -136,6 +146,16 @@ public static class DriveRun
             last.Start + last.Machine.Cycles, (ulong)runs.Sum(r => (decimal)r.Machine.Instructions));
     }
 
+    /// <summary>
+    /// Why a power cycle's run ended: whether the main relay dropped (after the handover), whether the
+    /// drive had the key on then, and whether the firmware read it on (AN1).
+    /// </summary>
+    public static CycleEnd EndOf(bool relayDropped, bool driveKeyOn, bool keyReadOn) =>
+        !relayDropped ? CycleEnd.DriveEnded
+        : !driveKeyOn ? CycleEnd.AfterRun
+        : keyReadOn ? CycleEnd.RelayDroppedKeyOn
+        : CycleEnd.RelayDroppedKeyReadOff;
+
     static string Source(byte[]? eeprom) =>
         eeprom is null ? "blank" : Convert.ToHexString(SHA256.HashData(eeprom)).ToLowerInvariant();
 
@@ -173,7 +193,7 @@ public static class DriveRun
                 startOf[i] = at;
 
             Machine = Machine.Create(image, options);
-            (context.PowerCycleIndex, context.PowerCycleStart, context.Machine, context.Engine, context.Demand) = (index, start, Machine, null, null);
+            (context.PowerCycleIndex, context.PowerCycleStart, context.Machine, context.Engine, context.Demand, context.Ended) = (index, start, Machine, null, null, null);
             context.RaiseStarted(Machine, index);
             Machine.PowerOn();
             engine = Engine.Attach(Machine, Scenario);
@@ -207,11 +227,16 @@ public static class DriveRun
 
         public IReadOnlyList<TraceRow> Trace => trace;
 
+        /// <summary>Why the run stopped; DriveEnded until it has.</summary>
+        public CycleEnd End { get; private set; }
+
         double Seconds => (Start + Machine.Cycles) / cpuHz;
 
         public void RunTo(ulong total)
         {
             Machine.Run(total - Start, _ => watch.PowerOff != null);
+            End = EndOf(watch.PowerOff != null, !keyOff, CarControls.KeyIsOn(Machine.Board));
+            context.Ended = End;
             context.RaiseEnded(Machine, index);
         }
 
@@ -242,7 +267,7 @@ public static class DriveRun
                 engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard, EngineSummary.OutcomeOf(engine.Phases, watch.KeyOff)),
             FaultMemory.Read(Machine), FaultMemory.SavedInEeprom(image.Image, Machine.Board.Eeprom.ToImage()),
             RunState.ReadFirmwareState(Machine), Eeprom(), watch.Health, Start + Machine.Cycles,
-            new FaultContext(eepromImage is not { } start || start.All(b => b == 0xFF), CanPartners: true));
+            new FaultContext(eepromImage is not { } start || start.All(b => b == 0xFF), CanPartners: true), End);
 
         void Every(ulong at) => Machine.Scheduler.Schedule(at, "drive step", () =>
         {

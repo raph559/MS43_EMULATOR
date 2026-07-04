@@ -44,6 +44,13 @@ public class VerdictTests
             CoverageWith(stub: new StubInfo("valve driver", "always healthy", true, "it sits between the CPU and the valve the checks watch"))));
     }
 
+    [Fact] public void PartOfTheDriveNotRun_MakesARunIncomplete_ButADeclaredGapDoesNot()   // final review I3, I5, I6
+    {
+        Assert.Equal(RunVerdict.Incomplete, Verdict.Of(Checks(CheckStatus.Pass), CleanCoverage with { NotRun = new[] { "12.000–40.000 s" } }));
+        Assert.Contains("not run: 12.000–40.000 s", Verdict.Reasons(Checks(CheckStatus.Pass), CleanCoverage with { NotRun = new[] { "12.000–40.000 s" } }));
+        Assert.Equal(RunVerdict.Pass, Verdict.Of(Checks(CheckStatus.Pass), CleanCoverage with { NotJudged = new[] { "scheduler: R2 and R4 were not judged" } }));
+    }
+
     [Fact] public void TheBenignAccesses_DoNotMakeARunIncomplete()                 // R4: F024h, the 0x4286C byte writes
     {
         var r = DriveRun.RunWithChecks(TestImages.Car, DriveBuilder.Named("warm-start"));
@@ -53,5 +60,6 @@ public class VerdictTests
         Assert.Contains(r.Coverage.BenignNotes, n => n.Contains("4286C"));
         Assert.All(r.Coverage.Stubs, s => Assert.False(s.BetweenCpuAndCheckedOutput));
         Assert.All(r.Coverage.Stubs, s => Assert.False(string.IsNullOrWhiteSpace(s.Reason)));
+        Assert.Contains(r.Coverage.Stubs, s => s.Device == "output-driver chips A/B" && s.Reason.Contains("driver-fault reactions are never exercised"));   // final review: C1's cost, stated
     }
 }

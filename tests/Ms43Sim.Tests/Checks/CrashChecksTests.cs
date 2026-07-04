@@ -28,6 +28,9 @@ public class CrashChecksTests
         var r = DriveRunWithChecks(DriveBuilder.Named("warm-start"), FlashImageBuilder.Raw(FirmwareImage.FromBytes(TestBins.CarBytes)));
         Assert.Equal(CheckStatus.Fail, r.Check("checksums").Status);
         Assert.Equal(CheckStatus.Fail, r.Check("resets").Status);
+        // the failing sides of monitoring and stuck on a real run (final review I8)
+        Assert.Contains(r.Check("monitoring").Findings, f => f.Message.Contains("3Bh frames"));
+        Assert.Contains(r.Check("stuck").Findings, f => f.Message.Contains("idle valve P2.12"));
     }
 
     [Fact] public void TheStockProgram_IsNotEvaluatedByTheChecksThatReadItsRam()

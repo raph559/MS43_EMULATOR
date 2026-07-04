@@ -20,13 +20,15 @@ public class CheckSetTests
         }
     }
 
-    [Fact] public void ChecksSeeEventsTheCaptureDropped()
+    [Fact] public void ChecksSeeEventsTheCaptureDropped()                          // Review Focus 2, final review I7
     {
-        // a tiny capture capacity drops most events; the checks subscribe to the machine, not the capture
-        var r = DriveRunWithChecks(DriveBuilder.Named("warm-start"), captureCapacity: 8);
+        // the capture keeps only the first 8 output events; the long-dwell bin's dwells come after them, so
+        // dwell can fail only on events the capture dropped: the checks subscribe to the machine
+        var image = InMemoryBin.With(TestBins.CarBytes, (0x7C92E, new byte[] { 0x53, 0x07 }));   // R3
+        var r = DriveRunWithChecks(DriveBuilder.Named("warm-start"), image, captureCapacity: 8);
         Assert.True(r.OutputEventsDropped > 0);
-        // Assert.Equal(CheckStatus.Pass, r.Check("dwell").Status);            // dwell is Task 8's
-        Assert.Equal(CheckStatus.Pass, r.Check("resets").Status);
+        Assert.Equal(CheckStatus.Fail, r.Check("dwell").Status);
+        Assert.True(r.Check("dwell").Findings[0].FirstCycle > r.OutputEvents[^1].Cycle);
     }
 
     [Fact] public void Findings_AccumulateAcrossPowerCycles_AndMergeByCause()

@@ -46,6 +46,9 @@ public sealed class DriveContext
     /// <summary>What the drive asks now; null before the first step of a power cycle.</summary>
     public DriveDemand? Demand { get; internal set; }
 
+    /// <summary>Why the power cycle under way stopped, set before <see cref="PowerCycleEnded"/>; null while it runs.</summary>
+    public CycleEnd? Ended { get; internal set; }
+
     public event Action<Machine, int>? PowerCycleStarted;
 
     public event Action<Machine, int>? PowerCycleEnded;

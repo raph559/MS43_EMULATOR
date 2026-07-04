@@ -268,7 +268,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         {
             Above(machine.Cycles, false);
             if (aboveCycles > 0)
-                check.Note($"scheduler: R2 and R4 were not judged for {Seconds(aboveCycles)} s of power cycle {index + 1}, with the shaft at 2,000 rpm or more: at the ISM's minimum timing the car's own tasks stretch there and its lowest queue can wait seconds; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
+                check.Gap($"scheduler: R2 and R4 were not judged for {Seconds(aboveCycles)} s of power cycle {index + 1}, with the shaft at 2,000 rpm or more: at the ISM's minimum timing the car's own tasks stretch there and its lowest queue can wait seconds; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
         }
 
         void Flag(string word, string what, double rpm)
@@ -276,7 +276,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             if (rpm < HighRpm)
                 check.Find($"R4 {word}", $"R4: {what} (power cycle {index + 1}, at {rpm:0} rpm)");
             else
-                check.Note($"scheduler: {what} at {rpm:0} rpm (power cycle {index + 1}, {Seconds(check.Context.PowerCycleStart + machine.Cycles)} s): at the ISM's minimum timing the car's own full-load pull does this; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
+                check.Gap($"scheduler: {what} at {rpm:0} rpm (power cycle {index + 1}, {Seconds(check.Context.PowerCycleStart + machine.Cycles)} s): at the ISM's minimum timing the car's own full-load pull does this; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [Task 11]");
         }
 
         static string Seconds(ulong cycle) => (cycle / 24e6).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);

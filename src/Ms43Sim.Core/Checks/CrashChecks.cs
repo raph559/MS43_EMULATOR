@@ -4,7 +4,8 @@ namespace Ms43Sim.Core;
 /// The checks that say whether the program runs at all (plan 4 R16):
 /// <list type="bullet">
 /// <item>traps: any trap; a stack overflow or underflow is named;</item>
-/// <item>resets: any watchdog or software reset (repeats are the reset loop);</item>
+/// <item>resets: any watchdog or software reset (repeats are the reset loop), or the main relay dropped
+/// while the drive had the key on and the firmware read it on (the ECU switched itself off);</item>
 /// <item>execution: an instruction fetched from erased flash, or from outside flash;</item>
 /// <item>boot: a power cycle with the key on that has not reached the handover (0E:366A) 1 s after power-on;</item>
 /// <item>checksums: read 10 s after the main loop started with the key on and at the power cycle's
@@ -59,6 +60,12 @@ public static class CrashChecks
                 Find($"{reset.Kind}", reset.Kind == ResetKind.Watchdog
                     ? $"a watchdog reset, first at {Address(reset.Pc)} (repeats are a reset loop)"
                     : $"a software reset (SRST), first at {Address(reset.Pc)}");
+        }
+
+        protected override void End(Machine machine, int index)
+        {
+            if (Context.Ended == CycleEnd.RelayDroppedKeyOn)
+                Find($"relay {index}", $"power cycle {index + 1}: the main relay dropped with the key on (the ECU switched itself off)");
         }
     }
 

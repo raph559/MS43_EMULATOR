@@ -33,6 +33,7 @@ public abstract class CheckBase : ICheck
     readonly List<Finding> findings = new();
     readonly Dictionary<string, int> byCause = new();
     readonly List<string> notes = new();
+    readonly List<string> gaps = new();
 
     protected CheckBase(string name) => Name = name;
 
@@ -101,11 +102,21 @@ public abstract class CheckBase : ICheck
     /// <summary>What the check saw and declared benign: the report's notes, never a finding.</summary>
     public IReadOnlyList<string> Notes => notes;
 
+    /// <summary>What the check declares it did not judge: the coverage's "not judged" list, never a finding (final review I5).</summary>
+    public IReadOnlyList<string> Gaps => gaps;
+
     /// <summary>A note for the report (one per text).</summary>
     protected void Note(string text)
     {
         if (!notes.Contains(text))
             notes.Add(text);
+    }
+
+    /// <summary>A gap the check declares (one per text): what it did not judge, and why.</summary>
+    protected void Gap(string text)
+    {
+        if (!gaps.Contains(text))
+            gaps.Add(text);
     }
 
     /// <summary>The check cannot run in this power cycle.</summary>
