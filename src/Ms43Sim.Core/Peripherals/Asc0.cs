@@ -56,9 +56,11 @@ public sealed class Asc0
     /// <summary>Data bits per frame, the parity or wake-up bit included.</summary>
     int DataBits => Mode is 4 or 5 or 7 ? 9 : 8;
 
-    int FrameBits => 1 + DataBits + ((con & Stp) != 0 ? 2 : 1);
+    /// <summary>Bits in a frame now: the start bit, the data field and its stop bits.</summary>
+    public int FrameBits => 1 + DataBits + ((con & Stp) != 0 ? 2 : 1);
 
-    ulong BitCycles => 16ul * ((con & Brs) != 0 ? 3ul : 2ul) * (bg + 1ul);
+    /// <summary>The bit time now in CPU cycles, 16 × (2, or 3 with S0BRS) × (S0BG + 1): a frame takes it when it starts.</summary>
+    public double BitCycles => 16.0 * ((con & Brs) != 0 ? 3 : 2) * (bg + 1);
 
     public void OnReset()
     {
@@ -122,12 +124,13 @@ public sealed class Asc0
         interrupts.Request(transmitBuffer);
         var now = scheduler.Now;
         var bits = (ulong)FrameBits;
-        transmitEvent = scheduler.Schedule(now + (bits - 1) * BitCycles, "ASC0 last bit", () =>
+        var bit = (ulong)BitCycles;
+        transmitEvent = scheduler.Schedule(now + (bits - 1) * bit, "ASC0 last bit", () =>
         {
             transmitEvent = -1;
             interrupts.Request(transmit);
         });
-        frameEndEvent = scheduler.Schedule(now + bits * BitCycles, "ASC0 frame end", FrameEnd);
+        frameEndEvent = scheduler.Schedule(now + bits * bit, "ASC0 frame end", FrameEnd);
     }
 
     void FrameEnd()

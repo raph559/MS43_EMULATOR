@@ -40,6 +40,7 @@ public sealed partial class Machine : ICpuHost
         Board.AttachAnalog(12, () => ThrottleBody.Track1Volts(Throttle.Angle));
         Board.AttachAnalog(11, () => ThrottleBody.Track2Volts(Throttle.Angle));
         Asc0 = new Asc0(Scheduler, Sfrs, Interrupts, Events);
+        KLine = new KLineBus(Scheduler, Asc0, Events);
         Can = new CanModule(Scheduler, Interrupts, Events);
         Bus.AttachCan(Can);
         Bus.AttachDevice(3, Board.Latch);
@@ -70,6 +71,10 @@ public sealed partial class Machine : ICpuHost
     public Pwm Pwm { get; }
     public ThrottleBody Throttle { get; }
     public Asc0 Asc0 { get; }
+
+    /// <summary>The K-line on ASC0; no device is on it until a run attaches one.</summary>
+    public KLineBus KLine { get; }
+
     public CanModule Can { get; }
 
     /// <summary>The CPU address of every SRVWDT executed.</summary>

@@ -61,4 +61,16 @@ public class Asc0Tests
         t.M.Asc0.Receive(0x0011);
         Assert.Equal((0, 0), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
     }
+
+    [Theory]
+    [InlineData(0x004D, 0x80F7, 2_496.0, 11)]    // 8E1 at the firmware's S0BG: 16 × 2 × 78 cycles, 1 + 9 + 1 bits
+    [InlineData(0x0005, 0x80F7, 192.0, 11)]      // 125,000 baud: 16 × 2 × 6
+    [InlineData(0x004D, 0xA0F7, 3_744.0, 11)]    // S0BRS: 16 × 3 × 78
+    [InlineData(0x004D, 0x8001, 2_496.0, 10)]    // 8N1
+    [InlineData(0x004D, 0x8009, 2_496.0, 11)]    // 8N2
+    public void BitCycles_AndFrameBits_DescribeTheFrameThatStartsNow(int reload, int control, double bitCycles, int frameBits)
+    {
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFEB4, (ushort)reload).WriteSfr(0xFFB0, (ushort)control);
+        Assert.Equal((bitCycles, frameBits), (t.M.Asc0.BitCycles, t.M.Asc0.FrameBits));
+    }
 }

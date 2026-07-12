@@ -1,0 +1,155 @@
+using System.Numerics;
+
+namespace Ms43Sim.Core;
+
+/// <summary>The device end of the K-line, a tester: <see cref="KLineBus"/> tells it every byte that reaches it.</summary>
+public interface IKLineDevice
+{
+    /// <summary>
+    /// A byte reached the device at the end of its stop bit, in <paramref name="cycle"/>: the device's own
+    /// byte coming back (<paramref name="own"/>), or one the ECU sent.
+    /// </summary>
+    void OnLineByte(byte value, bool own, ulong cycle);
+}
+
+/// <summary>What a device needs of the line. <see cref="KLineBus"/> is the car's; a test can stand in for the ECU end.</summary>
+public interface IKLinePort
+{
+    /// <summary>One 8E1 byte from the device, on the line from now at <paramref name="bitCycles"/> CPU cycles a bit.</summary>
+    void Send(byte value, double bitCycles);
+
+    /// <summary>A device byte is on the line at this moment.</summary>
+    bool Busy { get; }
+}
+
+/// <summary>
+/// A byte the bus lost: <see cref="Kind"/> is "mismatch" (the device's bit time is more than 3 % from
+/// ASC0's) or "collision" (it overlapped another byte); <see cref="Cycle"/> is when it would have arrived.
+/// </summary>
+public sealed record KLineNote(ulong Cycle, string Kind, byte Value);
+
+/// <summary>
+/// The car's K-line: one wire between the ECU's ASC0 and a tester (plan 5 C1–C3). A byte from either end
+/// reaches both ends at the end of its stop bit. A device byte (8E1: 11 bit times at the device's bit
+/// time) goes into ASC0 with its even parity bit in bit 8, if the two bit times are within 3 %, and back to
+/// the device as its own echo. An ASC0 frame goes to the device and, in the same cycle, back into ASC0's own
+/// receiver, as the wire echoes it, whether or not a device is attached; ASC0 takes a frame or not as S0R
+/// and S0REN decide. Bytes that overlap in time are both lost.
+/// [assumption] There is no transceiver delay. A byte at a bit time more than 3 % from ASC0's, and bytes
+/// that collide, are lost and noted; a real UART would receive garbage and run the firmware's error path,
+/// which is not exercised here. The bus learns of an ECU frame only when it ends (ASC0 reports a frame at
+/// its end) and takes its start from the frame's length then; a device byte that ended inside the frame
+/// has reached ASC0 by then, so only the ECU's frame is lost. ECU bytes reach the device whatever its baud
+/// rate. The echo is not combined with S0LB, which would deliver each ECU frame twice: neither of the
+/// firmware's set-ups uses it (S0CON = 80F7h for DS2, 80D1h for KWP).
+/// </summary>
+public sealed class KLineBus : IKLinePort
+{
+    const int DeviceFrameBits = 11;          // start bit, 8 data bits, even parity, one stop bit
+    const double BitTimeTolerance = 0.03;
+    const string Mismatch = "mismatch", Collision = "collision";
+
+    readonly Scheduler scheduler;
+    readonly Asc0 ecu;
+    readonly List<DeviceByte> onLine = new();
+    IKLineDevice? device;
+    ulong lastDeviceByteEnd;
+
+    /// <param name="log">Not used. A lost byte goes to <see cref="Noted"/>: an unsupported event would make every drive that loses one count as incomplete (DriveCoverage).</param>
+    public KLineBus(Scheduler scheduler, Asc0 ecu, EventLog log)
+    {
+        this.scheduler = scheduler;
+        this.ecu = ecu;
+        ecu.FrameTransmitted += OnEcuFrame;
+    }
+
+    /// <summary>A byte the bus has lost, in the cycle it would have arrived.</summary>
+    public event Action<KLineNote>? Noted;
+
+    /// <summary>
+    /// A device byte is on the line: one whose stop bit has not yet ended. A byte that ends in this cycle
+    /// is already off, whichever event of the cycle runs first.
+    /// </summary>
+    public bool Busy
+    {
+        get
+        {
+            foreach (var sent in onLine)
+            {
+                if (sent.End > scheduler.Now)
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Puts the one device on the line; attaching another replaces it.</summary>
+    public void Attach(IKLineDevice device) => this.device = device;
+
+    /// <summary>
+    /// One 8E1 byte from the device, on the line from now for 11 bit times. At its end it goes into ASC0 and
+    /// back to the device, or is lost and noted; a byte sent while another is on the line collides with it.
+    /// </summary>
+    public void Send(byte value, double bitCycles)
+    {
+        if (!double.IsFinite(bitCycles) || bitCycles < 1)
+            throw new ArgumentOutOfRangeException(nameof(bitCycles), bitCycles, "a bit lasts at least one CPU cycle");
+        var start = scheduler.Now;
+        var end = start + (ulong)Math.Round(DeviceFrameBits * bitCycles, MidpointRounding.AwayFromZero);   // 24 MHz / baud need not be whole
+        var sent = new DeviceByte(value, bitCycles, start, end);
+        foreach (var other in onLine)
+        {
+            if (other.End > start)
+                other.Collided = sent.Collided = true;
+        }
+        onLine.Add(sent);
+        scheduler.Schedule(end, "K-line device byte", () => EndOfDeviceByte(sent));
+    }
+
+    void EndOfDeviceByte(DeviceByte sent)
+    {
+        onLine.Remove(sent);
+        lastDeviceByteEnd = sent.End;
+        if (sent.Collided)
+            Note(Collision, sent.Value);
+        else if (Math.Abs(sent.BitCycles - ecu.BitCycles) > BitTimeTolerance * ecu.BitCycles)
+            Note(Mismatch, sent.Value);
+        else
+            ecu.Receive((ushort)(sent.Value | (EvenParityBit(sent.Value) << 8)));
+        device?.OnLineByte(sent.Value, own: true, scheduler.Now);
+    }
+
+    void OnEcuFrame(ushort frame)
+    {
+        var now = scheduler.Now;
+        var length = (ulong)(ecu.FrameBits * ecu.BitCycles);
+        var started = now > length ? now - length : 0;                       // the bit time may have been lengthened while the frame ran
+        var collided = lastDeviceByteEnd > started;
+        foreach (var sent in onLine)
+        {
+            if (sent.Start < now && sent.End > started)
+                sent.Collided = collided = true;
+        }
+        var value = (byte)frame;
+        if (collided)
+        {
+            Note(Collision, value);
+            return;
+        }
+        ecu.Receive(frame);
+        device?.OnLineByte(value, own: false, now);
+    }
+
+    void Note(string kind, byte value) => Noted?.Invoke(new KLineNote(scheduler.Now, kind, value));
+
+    static int EvenParityBit(byte value) => BitOperations.PopCount(value) & 1;
+
+    sealed class DeviceByte(byte value, double bitCycles, ulong start, ulong end)
+    {
+        public byte Value { get; } = value;
+        public double BitCycles { get; } = bitCycles;
+        public ulong Start { get; } = start;
+        public ulong End { get; } = end;
+        public bool Collided { get; set; }
+    }
+}
