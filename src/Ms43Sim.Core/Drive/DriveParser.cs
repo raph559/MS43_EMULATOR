@@ -317,9 +317,10 @@ public static partial class DriveParser
     /// the pedal in a crank; an idle or a drive needs a crank since the key went on; with the engine
     /// possibly running (after a crank, an idle or a drive) only an idle, a drive, an off or another
     /// crank after a crank follow; an off comes neither first, nor twice, nor while moving. A stall
-    /// (plan 5) takes the kept keys alone and follows an idle or a drive only; after it the engine
-    /// stands, so an idle or a drive needs a crank again, as after an off, while an on, a crank or an
-    /// off may follow.
+    /// (plan 5) takes the kept keys alone and follows an idle, or a drive that ends at standstill,
+    /// only: a stall stands the car still, so, like an off, it cannot follow a segment that ends
+    /// moving. After it the engine stands, so an idle or a drive needs a crank again, as after an
+    /// off, while an on, a crank or an off may follow.
     /// </summary>
     static void Validate(Drive drive)
     {
@@ -362,6 +363,8 @@ public static partial class DriveParser
                     throw Fail(line, $"the engine runs: {name} needs the key off first");
                 case DriveMode.Stall when previous is not (DriveMode.Idle or DriveMode.Drive):
                     throw Fail(line, "stall needs a running engine: it follows an idle or a drive");
+                case DriveMode.Stall when at.PreviousSpeed > 0:
+                    throw Fail(line, $"stall while moving: the car is still moving, the segment before ends at {N(at.PreviousSpeed)} km/h");
             }
             cranked = mode switch
             {

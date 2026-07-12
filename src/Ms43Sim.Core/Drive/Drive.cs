@@ -2,7 +2,8 @@ namespace Ms43Sim.Core;
 
 /// <summary>
 /// What a segment does with the key and the engine (plan 4 R17). Stall (plan 5): the key stays on and
-/// the engine plant is starved, so a running engine runs down; it follows an idle or a drive.
+/// the engine plant is starved, so a running engine runs down; it follows an idle, or a drive that
+/// ends at standstill.
 /// </summary>
 public enum DriveMode { On, Off, Crank, Idle, Drive, Stall }
 

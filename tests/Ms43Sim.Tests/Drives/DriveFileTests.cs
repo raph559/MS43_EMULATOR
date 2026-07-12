@@ -65,8 +65,9 @@ public class DriveFileTests
     [InlineData("drive x\nset coolant=-30 oil=140 intake=0 ambient=-40 clock=1439 ac=1 pedal=0 gear=N clutch=1 brake=1\n1 crank rpm=200 battery=6..16")]
     // plan 5: every kline verb, in a drive that goes on, cranks, idles and goes off
     [InlineData("drive k\nkline connect\n3 on\nkline poll\n1 crank rpm=200\nkline send 6D 00\nkline every 0.5 0B B0\nkline raw 12 05 0B B0 AC\nkline quiet\n5 idle\nkline disconnect\n2 off")]
-    // plan 5: a stall after an idle or a drive; then a crank, an on or an off
-    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 stall pedal=0 clutch=1\n1 crank rpm=200\n5 idle")]
+    // plan 5: a stall after an idle, or after a drive that ends at standstill (a ramp down to 0, a dyno revving at 0); then a crank, an on or an off
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=1 speed=10..0\n2 stall pedal=0 clutch=1\n1 crank rpm=200\n5 idle")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=N rpm=2500 speed=0\n2 stall")]
     [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n3 on\n2 crank rpm=200\n5 idle")]
     [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n3 off\n3 on")]
     // plan 5: a stall takes every kept key, a ramp of one included, and the forces and silences every mode takes
@@ -189,6 +190,14 @@ public class DriveFileTests
         Assert.Contains("stall needs a running engine", error.Message);
     }
 
+    [Fact] public void Stall_AfterADriveEndingAtSpeed_IsAMistake_BecauseTheCarIsStillMoving()
+    {
+        Assert.False(DriveParser.TryParse("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 stall", out _, out var error));
+        Assert.Equal(5, error.Line);
+        Assert.Contains("still moving", error.Message);
+        Assert.Contains("ends at 40 km/h", error.Message);
+    }
+
     [Theory]
     // a stall follows an idle or a drive only: not first, not a crank (the engine may not have caught), not an off, not a stall
     [InlineData("drive s\n2 stall", 2, "stall needs a running engine")]
@@ -199,8 +208,13 @@ public class DriveFileTests
     [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall\n2 drive gear=3 speed=40", 5, "drive needs a crank first")]
     // a stall takes the kept keys alone
     [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall rpm=0", 4, "stall takes only the kept keys, not 'rpm'")]
-    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 stall speed=0", 5, "stall takes only the kept keys, not 'speed'")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=1 speed=10..0\n2 stall speed=0", 5, "stall takes only the kept keys, not 'speed'")]
     [InlineData("drive s\n1 crank rpm=200\n5 idle\n2 stall battery=12", 4, "stall takes only the kept keys, not 'battery'")]
+    // a stall stands the car still, so it cannot follow a segment that ends moving, as an off cannot:
+    // a ramp that ends above 0, a speed held from the segment before, a speed that an rpm in gear gives
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=60..20\n2 stall", 5, "ends at 20 km/h")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 speed=40\n2 drive gear=3 pedal=10\n2 stall", 6, "ends at 40 km/h")]
+    [InlineData("drive s\n1 crank rpm=200\n5 idle\n3 drive gear=3 rpm=3000\n2 stall", 5, "still moving")]
     public void Stall_Mistakes_AreReportedWithTheirLine(string text, int line, string fragment)
     {
         Assert.False(DriveParser.TryParse(text, out _, out var error));
