@@ -92,7 +92,7 @@ public static class MachineAssumptions
         return lines;
     }
 
-    /// <summary>The car's inputs while a drive runs it (<see cref="CarControls"/>; plan 4 R9, R10).</summary>
+    /// <summary>The car's inputs, and the K-line tester's session, while a drive runs it (<see cref="CarControls"/>, <see cref="KLineTester"/>; plan 4 R9, R10; plan 5 C4).</summary>
     public static IReadOnlyList<string> ForDrive() => new List<string>
     {
         "car temperatures: coolant on mux A 3, intake air on mux A 1 and oil on mux A 2 through the car's sensor curves, linear between the points [ver]; the radiator outlet on mux A 0 reads the ambient + 0.9 × (coolant − ambient), plan 3's 1.20 V at 90 °C and 20 °C [assumption]",
@@ -101,6 +101,7 @@ public static class MachineAssumptions
         "steering wheel: the \"no button\" frame train on P7.4 every 50 ms while the key is on, FEh and FFh alternating every 1.0 s; the line idles low and stays low with the key off [obs; assumption]",
         "cluster: 613h bytes 3–4 the clock in minutes; 615h byte 0 C0h with the A/C on, byte 3 the ambient in sign-magnitude °C; their other bytes are plan 3's [obs]",
         "fault injection: a forced channel reads its volts instead of its sensor until the force is lifted; a silenced partner sends nothing while it is silenced [call]",
+        "K-line tester (a drive's kline lines; plan 5 C4): the app's DS2 session frame for frame, one request at a time, its bytes back to back at 9,600 or 125,000 baud, each when the echo of the one before returns; the next request leaves 1 ms after a reply or a timeout, or at once after a longer idle, standing for the app's loop overhead [assumption]; it listens 500 ms for a 0x91 command and 400 ms for any other, from the end of the request [obs: the logging ADX's listen timeouts]; the reply is the first whole frame from the ECU after the request (whole when its length byte says so), malformed if its address is not 12h or its length or xor is wrong; connect and disconnect move the tester's baud only on an A0 reply; an every is due as it is told, then at each multiple of its period, and leaves at the first free turn [call]",
         "engine speed: in a drive segment the drive sets the shaft's speed (a dyno, no torque model), so the engine turns through any cut and the ECU's cuts show as missing sparks or injections; the starter, the idle plant and the combustion rule carry the crank and idle segments [owner]",
         "CPU load at speed: the instruction timing is the ISM's minimum for external execution (Table 11 + 1 ACT per instruction word, ACT = 2 states at BUSCON0 = 45BFh: ISM §7.2), so a real ECU is at least as loaded; under it the car's periodic tasks stretch from about 2,500 rpm, its lowest queue (Q3) went up to 4 s without running at 5,000 rpm in a full-load pull, and the pull set the queue-overflow flag FD84.7; the scheduler check therefore judges R2 and R4 only below 2,000 rpm (R1 and R3 at every speed) and reports the time above; whether the real ECU is as loaded is unknown (a car probe, declined, would settle it) [assumption: owner decision 3; plan 4 Task 11]",
     };

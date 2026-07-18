@@ -15,7 +15,11 @@ public interface IKLineDevice
 /// <summary>What a device needs of the line. <see cref="KLineBus"/> is the car's; a test can stand in for the ECU end.</summary>
 public interface IKLinePort
 {
-    /// <summary>One 8E1 byte from the device, on the line from now at <paramref name="bitCycles"/> CPU cycles a bit.</summary>
+    /// <summary>
+    /// One 8E1 byte from the device, on the line from now at <paramref name="bitCycles"/> CPU cycles a bit. A device that sends
+    /// several bytes back to back sends each when the echo of the one before comes back (<c>own: true</c>), or when
+    /// <see cref="Busy"/> goes false: the port rounds a byte's length its own way.
+    /// </summary>
     void Send(byte value, double bitCycles);
 
     /// <summary>A device byte is on the line at this moment.</summary>
@@ -23,6 +27,9 @@ public interface IKLinePort
 
     /// <summary>A byte the line has lost, in the cycle it would have arrived.</summary>
     event Action<KLineNote>? Noted;
+
+    /// <summary>Puts the one device on the line; attaching another replaces it.</summary>
+    void Attach(IKLineDevice device);
 }
 
 /// <summary>
