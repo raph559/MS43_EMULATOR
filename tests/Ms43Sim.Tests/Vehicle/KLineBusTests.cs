@@ -144,17 +144,64 @@ public class KLineBusTests
         Assert.Equal(new[] { new Seen(0x12, true, 28_112) }, device.Heard);
     }
 
-    [Fact] public void AnEcuByteThatOverlapsADeviceByteAlreadyDelivered_IsStillLost()
+    [Fact] public void ADeviceByteThatStartedBeforeAnEcuByte_IsLostWithIt()
     {
-        // The bus learns of an ECU frame only when it ends. The device's byte ended at 27,500, 500 cycles into
-        // the frame (27,000 to 54,456), so it had reached ASC0 by then: what the bus can still do is lose the ECU's.
+        // The device's byte (0 to 27,500) ends 500 cycles into ASC0's frame (27,000 to 54,456): it ends first, but they overlap.
         var (t, device, notes) = Rig();
         t.M.KLine.Send(0x12, 2_500);
         t.M.Scheduler.Advance(27_000);
         t.WriteSfr(S0Tbuf, 0x0055);
         t.M.Scheduler.Advance(54_456);
-        Assert.Equal(new[] { new KLineNote(54_456, "collision", 0x55) }, notes);
-        Assert.DoesNotContain(device.Heard, h => !h.Own);
+        Assert.Equal(new[] { new KLineNote(27_500, "collision", 0x12), new KLineNote(54_456, "collision", 0x55) }, notes);
+        Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));          // neither reached the other end
+        Assert.Equal(new[] { new Seen(0x12, true, 27_500) }, device.Heard);  // the device hears only itself
+    }
+
+    [Fact] public void ADeviceByteInsideAnEcuByte_IsLostWithIt()
+    {
+        var (t, device, notes) = Rig();
+        t.WriteSfr(S0Tbuf, 0x0055);                                          // the ECU's frame: 0 to 27,456
+        t.M.Scheduler.Advance(5_000);
+        t.M.KLine.Send(0x12, 192);                                           // 125,000 baud, 5,000 to 7,112: all of it inside the frame
+        t.M.Scheduler.Advance(27_456);
+        Assert.Equal(new[] { new KLineNote(7_112, "collision", 0x12), new KLineNote(27_456, "collision", 0x55) }, notes);
+        Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
+        Assert.Equal(new[] { new Seen(0x12, true, 7_112) }, device.Heard);
+    }
+
+    [Fact] public void AnEcuByteInsideADeviceByte_IsLostWithIt()
+    {
+        var (t, device, notes) = Rig();
+        t.WriteSfr(0xFEB4, 0x0005);                                          // ASC0 at 125,000 baud: 192 cycles a bit, a frame of 2,112
+        t.M.KLine.Send(0x12, 2_500);                                         // the device's byte: 0 to 27,500
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(S0Tbuf, 0x0055);                                          // ASC0's frame: 1,000 to 3,112, all of it inside the byte
+        t.M.Scheduler.Advance(27_500);
+        Assert.Equal(new[] { new KLineNote(3_112, "collision", 0x55), new KLineNote(27_500, "collision", 0x12) }, notes);
+        Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
+        Assert.Equal(new[] { new Seen(0x12, true, 27_500) }, device.Heard);
+    }
+
+    [Fact] public void AnEcuByteStartingInTheCycleTheDeviceByteEnds_IsNotACollision_WhicheverEventRunsFirst()
+    {
+        var (t, device, notes) = Rig();
+        // scheduled before the byte is sent, so ASC0 starts its frame before the bus finishes the byte, in the same cycle
+        t.M.Scheduler.Schedule(27_500, "test ecu", () => t.WriteSfr(S0Tbuf, 0x0034));
+        t.M.KLine.Send(0x12, 2_500);
+        t.M.Scheduler.Advance(54_956);
+        Assert.Empty(notes);
+        Assert.Equal(new[] { new Seen(0x12, true, 27_500), new Seen(0x34, false, 54_956) }, device.Heard);
+    }
+
+    [Fact] public void ADeviceByteStartingInTheCycleTheEcuByteEnds_IsNotACollision_WhicheverEventRunsFirst()
+    {
+        var (t, device, notes) = Rig();
+        // scheduled before ASC0's frame is written, so the byte is sent before the bus handles that frame's end, in the same cycle
+        t.M.Scheduler.Schedule(27_456, "test device", () => t.M.KLine.Send(0x12, 2_500));
+        t.WriteSfr(S0Tbuf, 0x0034);
+        t.M.Scheduler.Advance(54_956);
+        Assert.Empty(notes);
+        Assert.Equal(new[] { new Seen(0x34, false, 27_456), new Seen(0x12, true, 54_956) }, device.Heard);
     }
 
     [Fact] public void AnEcuByteStartingWhereTheDeviceByteEnds_IsNotACollision()
@@ -228,6 +275,17 @@ public class KLineBusTests
         Assert.False(t.M.KLine.Busy);
     }
 
+    [Fact] public void Notes_ReachASubscriberOnThePort()
+    {
+        var t = Dsl();
+        IKLinePort port = t.M.KLine;
+        var notes = new List<KLineNote>();
+        port.Noted += notes.Add;
+        port.Send(0x12, 192);                                                // 125,000 baud against ASC0's 9,615
+        t.M.Scheduler.Advance(2_112);
+        Assert.Equal(new[] { new KLineNote(2_112, "mismatch", 0x12) }, notes);
+    }
+
     [Fact] public void NoDevice_LeavesTheEcuUntouched()
     {
         // Ruling P2: with no device attached and an ECU that sends nothing, the bus schedules no events
@@ -235,7 +293,7 @@ public class KLineBusTests
         var t = Dsl();
         var hash = t.M.StateHash();
         var elsewhere = new Scheduler();
-        var bus = new KLineBus(elsewhere, t.M.Asc0, t.M.Events);
+        var bus = new KLineBus(elsewhere, t.M.Asc0);
         elsewhere.Advance(100_000_000);
         Assert.Equal((ulong.MaxValue, false, hash), (elsewhere.NextDue, bus.Busy, t.M.StateHash()));
         Assert.Equal(0L, t.M.Asc0.FramesTransmitted);

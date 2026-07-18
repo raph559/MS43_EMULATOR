@@ -62,6 +62,29 @@ public class Asc0Tests
         Assert.Equal((0, 0), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
     }
 
+    [Fact] public void FrameInProgress_GivesWhereTheFrameOnTheLineStartsAndEnds()
+    {
+        var t = Dsl();
+        Assert.Null(t.M.Asc0.FrameInProgress);
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(0xFEB0, 0x0055);                                          // the frame starts at once and takes 11 bits of 2,496 cycles
+        Assert.Equal((1_000UL, 28_456UL), t.M.Asc0.FrameInProgress);
+        t.M.Scheduler.Advance(28_455);
+        Assert.NotNull(t.M.Asc0.FrameInProgress);
+        t.M.Scheduler.Advance(28_456);
+        Assert.Null(t.M.Asc0.FrameInProgress);                               // idle again in the cycle the frame ends
+    }
+
+    [Fact] public void FrameInProgress_ShowsABufferedFrameFromWhereTheFirstEnds_AndNothingAfterAReset()
+    {
+        var t = Dsl();
+        t.WriteSfr(0xFEB0, 0x0055).WriteSfr(0xFEB0, 0x0057);                 // the second waits in S0TBUF
+        t.M.Scheduler.Advance(27_456);
+        Assert.Equal((27_456UL, 54_912UL), t.M.Asc0.FrameInProgress);
+        t.M.Asc0.OnReset();
+        Assert.Null(t.M.Asc0.FrameInProgress);
+    }
+
     [Theory]
     [InlineData(0x004D, 0x80F7, 2_496.0, 11)]    // 8E1 at the firmware's S0BG: 16 × 2 × 78 cycles, 1 + 9 + 1 bits
     [InlineData(0x0005, 0x80F7, 192.0, 11)]      // 125,000 baud: 16 × 2 × 6

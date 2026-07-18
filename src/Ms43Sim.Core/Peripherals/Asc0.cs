@@ -32,6 +32,7 @@ public sealed class Asc0
     ushort con, tbuf, rbuf, bg;
     bool tbufFull, transmitting, rbufUnread;
     ushort shifting;
+    ulong frameStart, frameEnd;
     long transmitEvent = -1, frameEndEvent = -1;
 
     public Asc0(Scheduler scheduler, SfrFile sfrs, InterruptController interrupts, EventLog log)
@@ -61,6 +62,9 @@ public sealed class Asc0
 
     /// <summary>The bit time now in CPU cycles, 16 × (2, or 3 with S0BRS) × (S0BG + 1): a frame takes it when it starts.</summary>
     public double BitCycles => 16.0 * ((con & Brs) != 0 ? 3 : 2) * (bg + 1);
+
+    /// <summary>The frame being sent: the cycle it started and the cycle its last stop bit ends; null while the transmitter is idle.</summary>
+    public (ulong Start, ulong End)? FrameInProgress => transmitting ? (frameStart, frameEnd) : null;
 
     public void OnReset()
     {
@@ -125,12 +129,14 @@ public sealed class Asc0
         var now = scheduler.Now;
         var bits = (ulong)FrameBits;
         var bit = (ulong)BitCycles;
+        frameStart = now;
+        frameEnd = now + bits * bit;
         transmitEvent = scheduler.Schedule(now + (bits - 1) * bit, "ASC0 last bit", () =>
         {
             transmitEvent = -1;
             interrupts.Request(transmit);
         });
-        frameEndEvent = scheduler.Schedule(now + bits * bit, "ASC0 frame end", FrameEnd);
+        frameEndEvent = scheduler.Schedule(frameEnd, "ASC0 frame end", FrameEnd);
     }
 
     void FrameEnd()

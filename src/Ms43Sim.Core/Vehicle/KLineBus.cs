@@ -20,6 +20,9 @@ public interface IKLinePort
 
     /// <summary>A device byte is on the line at this moment.</summary>
     bool Busy { get; }
+
+    /// <summary>A byte the line has lost, in the cycle it would have arrived.</summary>
+    event Action<KLineNote>? Noted;
 }
 
 /// <summary>
@@ -34,14 +37,14 @@ public sealed record KLineNote(ulong Cycle, string Kind, byte Value);
 /// time) goes into ASC0 with its even parity bit in bit 8, if the two bit times are within 3 %, and back to
 /// the device as its own echo. An ASC0 frame goes to the device and, in the same cycle, back into ASC0's own
 /// receiver, as the wire echoes it, whether or not a device is attached; ASC0 takes a frame or not as S0R
-/// and S0REN decide. Bytes that overlap in time are both lost.
+/// and S0REN decide. Bytes that overlap in time are both lost, whichever began first, and each is noted as a
+/// collision in the cycle it would have arrived. Overlap is judged on exact cycles from ASC0's frame in
+/// progress: a byte that begins where the other ends does not overlap it, whichever event of that cycle runs first.
 /// [assumption] There is no transceiver delay. A byte at a bit time more than 3 % from ASC0's, and bytes
 /// that collide, are lost and noted; a real UART would receive garbage and run the firmware's error path,
-/// which is not exercised here. The bus learns of an ECU frame only when it ends (ASC0 reports a frame at
-/// its end) and takes its start from the frame's length then; a device byte that ended inside the frame
-/// has reached ASC0 by then, so only the ECU's frame is lost. ECU bytes reach the device whatever its baud
-/// rate. The echo is not combined with S0LB, which would deliver each ECU frame twice: neither of the
-/// firmware's set-ups uses it (S0CON = 80F7h for DS2, 80D1h for KWP).
+/// which is not exercised here. ECU bytes reach the device whatever its baud rate. The echo is not combined
+/// with S0LB, which would deliver each ECU frame twice: neither of the firmware's set-ups uses it
+/// (S0CON = 80F7h for DS2, 80D1h for KWP).
 /// </summary>
 public sealed class KLineBus : IKLinePort
 {
@@ -53,10 +56,9 @@ public sealed class KLineBus : IKLinePort
     readonly Asc0 ecu;
     readonly List<DeviceByte> onLine = new();
     IKLineDevice? device;
-    ulong lastDeviceByteEnd;
+    ulong? collidedFrameEnd;
 
-    /// <param name="log">Not used. A lost byte goes to <see cref="Noted"/>: an unsupported event would make every drive that loses one count as incomplete (DriveCoverage).</param>
-    public KLineBus(Scheduler scheduler, Asc0 ecu, EventLog log)
+    public KLineBus(Scheduler scheduler, Asc0 ecu)
     {
         this.scheduler = scheduler;
         this.ecu = ecu;
@@ -109,7 +111,11 @@ public sealed class KLineBus : IKLinePort
     void EndOfDeviceByte(DeviceByte sent)
     {
         onLine.Remove(sent);
-        lastDeviceByteEnd = sent.End;
+        if (ecu.FrameInProgress is { } frame && frame.Start < sent.End)
+        {
+            sent.Collided = true;                // ASC0 is sending, and began before this byte ended: they overlap,
+            collidedFrameEnd = frame.End;        // and the frame is lost with the byte when it ends
+        }
         if (sent.Collided)
             Note(Collision, sent.Value);
         else if (Math.Abs(sent.BitCycles - ecu.BitCycles) > BitTimeTolerance * ecu.BitCycles)
@@ -122,12 +128,11 @@ public sealed class KLineBus : IKLinePort
     void OnEcuFrame(ushort frame)
     {
         var now = scheduler.Now;
-        var length = (ulong)(ecu.FrameBits * ecu.BitCycles);
-        var started = now > length ? now - length : 0;                       // the bit time may have been lengthened while the frame ran
-        var collided = lastDeviceByteEnd > started;
+        var collided = collidedFrameEnd == now;  // a device byte ended while this frame was on the line
+        collidedFrameEnd = null;
         foreach (var sent in onLine)
         {
-            if (sent.Start < now && sent.End > started)
+            if (sent.Start < now)                // still on the line as the frame ends, and began before: they overlap
                 sent.Collided = collided = true;
         }
         var value = (byte)frame;
