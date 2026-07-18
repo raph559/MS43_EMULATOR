@@ -8,8 +8,10 @@ namespace Ms43Sim.Core;
 /// bit, the data field LSB first (the generated parity bit in bit 7 or 8) and its stop bits.
 /// A write to S0TBUF moves to the shift register at once when the transmitter is idle and S0R is
 /// set (S0TBIR); S0TIR comes before the last bit of the frame; a loaded S0TBUF follows at the end
-/// of the frame. A received frame moves to S0RBUF (S0RIR) if S0R and S0REN are set; overwriting an
-/// unread S0RBUF sets S0OE and, with S0OEN, S0EIR. S0LB loops each transmitted frame back.
+/// of the frame. A received frame moves to S0RBUF (S0RIR) if S0R and S0REN were set at its start bit
+/// (UM §11.1.2: reception begins on the start bit's falling edge, and clearing S0REN completes the frame
+/// being received); overwriting an unread S0RBUF sets S0OE and, with S0OEN, S0EIR. S0LB loops each
+/// transmitted frame back.
 /// [assumption] Transmission starts without the divide-by-16 latency; received frames are clean, so
 /// framing and parity errors are never raised; a loopback frame arrives at the end of its stop bits.
 /// Not modelled, each reported once: synchronous mode (S0M = 000 with S0R set) and the reserved
@@ -19,6 +21,7 @@ public sealed class Asc0
 {
     const uint ConAddress = 0xFFB0, TbufAddress = 0xFEB0, RbufAddress = 0xFEB2, BgAddress = 0xFEB4;
     const ushort Stp = 0x0008, Ren = 0x0010, Oen = 0x0080, Oe = 0x0400, Odd = 0x1000, Brs = 0x2000, Lb = 0x4000, Run = 0x8000;
+    const ulong ReceiverMemory = 1UL << 26;   // 2.8 s, longer than any frame: an 11-bit frame at 4 baud
 
     readonly Scheduler scheduler;
     readonly InterruptController interrupts;
@@ -28,6 +31,7 @@ public sealed class Asc0
     readonly InterruptSource receive = InterruptSources.ByName("S0R");
     readonly InterruptSource error = InterruptSources.ByName("S0E");
     readonly HashSet<string> reported = new();
+    readonly List<(ulong Cycle, bool On)> receiverSwitched = new();   // oldest first, from the one in force ReceiverMemory ago
 
     ushort con, tbuf, rbuf, bg;
     bool tbufFull, transmitting, rbufUnread;
@@ -47,8 +51,8 @@ public sealed class Asc0
         OnReset();
     }
 
-    /// <summary>Each frame's data field as sent, the generated parity bit included.</summary>
-    public event Action<ushort>? FrameTransmitted;
+    /// <summary>Each frame's data field as sent, the generated parity bit included, and the cycle its start bit began.</summary>
+    public event Action<ushort, ulong>? FrameTransmitted;
 
     public long FramesTransmitted { get; private set; }
 
@@ -72,12 +76,16 @@ public sealed class Asc0
         Cancel(ref frameEndEvent);
         con = tbuf = rbuf = bg = shifting = 0;
         tbufFull = transmitting = rbufUnread = false;
+        NoteReceiver();
     }
 
-    /// <summary>A complete frame from outside: its data field, LSB first, as S0RBUF would hold it.</summary>
-    public void Receive(ushort frame)
+    /// <summary>
+    /// A complete frame from outside, at the end of its stop bit: its data field, LSB first, as S0RBUF would hold it,
+    /// and the cycle its start bit began. It is taken if the receiver was on then, whatever it is now.
+    /// </summary>
+    public void Receive(ushort frame, ulong startBit)
     {
-        if ((con & Run) == 0 || (con & Ren) == 0)
+        if (!ReceiverOnAt(startBit))
             return;
         if (Mode == 5 && (frame & 0x100) == 0)
             return;                         // wake-up mode keeps only frames with the 9th bit set
@@ -95,6 +103,7 @@ public sealed class Asc0
     void WriteCon(ushort value)
     {
         con = value;
+        NoteReceiver();
         if ((value & Run) != 0)
         {
             if (Mode == 0)
@@ -145,10 +154,39 @@ public sealed class Asc0
         transmitting = false;
         FramesTransmitted++;
         var frame = shifting;
-        FrameTransmitted?.Invoke(frame);
+        FrameTransmitted?.Invoke(frame, frameStart);
         if ((con & Lb) != 0)
-            Receive(frame);
+            Receive(frame, frameStart);
         TryStart();
+    }
+
+    /// <summary>The receiver is on: S0R and S0REN are both set.</summary>
+    bool ReceiverOn => (con & Run) != 0 && (con & Ren) != 0;
+
+    /// <summary>Whether the receiver was on in <paramref name="cycle"/>: after the last switching in or before it; off before the first.</summary>
+    bool ReceiverOnAt(ulong cycle)
+    {
+        for (var i = receiverSwitched.Count - 1; i >= 0; i--)
+        {
+            if (receiverSwitched[i].Cycle <= cycle)
+                return receiverSwitched[i].On;
+        }
+        return false;
+    }
+
+    /// <summary>Writes down a switching of the receiver, the last of a cycle standing for it, and forgets those older than <see cref="ReceiverMemory"/>.</summary>
+    void NoteReceiver()
+    {
+        var on = ReceiverOn;
+        if (receiverSwitched.Count > 0 && receiverSwitched[^1].On == on)
+            return;
+        var now = scheduler.Now;
+        if (receiverSwitched.Count > 0 && receiverSwitched[^1].Cycle == now)
+            receiverSwitched[^1] = (now, on);
+        else
+            receiverSwitched.Add((now, on));
+        while (receiverSwitched.Count > 1 && receiverSwitched[1].Cycle + ReceiverMemory <= now)
+            receiverSwitched.RemoveAt(0);
     }
 
     /// <summary>The data field sent for an S0TBUF value: 7 or 8 data bits plus the generated parity, or 8 or 9 bits as written.</summary>

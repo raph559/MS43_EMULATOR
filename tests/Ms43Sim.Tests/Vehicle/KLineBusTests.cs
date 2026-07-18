@@ -85,13 +85,39 @@ public class KLineBusTests
         Assert.Equal((0x157, 0x80), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
     }
 
+    [Fact] public void TheEcusEcho_IsNotReceived_WhenItsReceiverWasOffAtTheStartBit_ThoughBackOnBeforeTheEnd()
+    {
+        // The firmware's reply: S0CON = 80EFh (8E2, S0REN = 0) for the frame, 80F7h again in the S0T interrupt of the last
+        // byte, which comes before that byte's last stop bit (11 × 2,496 of a 12-bit frame).
+        var (t, device, notes) = Rig();
+        t.WriteSfr(0xFFB0, 0x80EF).WriteSfr(S0Tbuf, 0x00B6);
+        t.M.Scheduler.Advance(27_456);
+        t.WriteSfr(0xFFB0, 0x80F7);
+        t.M.Scheduler.Advance(29_952);
+        Assert.Equal(new[] { new Seen(0xB6, false, 29_952) }, device.Heard);  // the device hears it
+        Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));          // the ECU does not hear itself
+        Assert.Empty(notes);
+    }
+
+    [Fact] public void ADeviceByte_IsNotReceived_WhenTheEcusReceiverWasOffAtItsStartBit()
+    {
+        var (t, device, _) = Rig();
+        t.WriteSfr(0xFFB0, 0x80E7);                                          // S0REN = 0
+        t.M.KLine.Send(0x12, 2_500);
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(0xFFB0, 0x80F7);
+        t.M.Scheduler.Advance(27_500);
+        Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
+        Assert.Equal(new[] { new Seen(0x12, true, 27_500) }, device.Heard);
+    }
+
     [Fact] public void BaudMismatch_LosesTheByte_AndNotesIt()
     {
         var (t, device, notes) = Rig();
         t.M.KLine.Send(0x12, 192);                                           // 125,000 baud against ASC0's 9,615
         t.M.Scheduler.Advance(2_112);                                        // 11 × 192
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
-        Assert.Equal(new[] { new KLineNote(2_112, "mismatch", 0x12) }, notes);
+        Assert.Equal(new[] { new KLineNote(2_112, "mismatch", 0x12, "tester") }, notes);
         Assert.Equal(new[] { new Seen(0x12, true, 2_112) }, device.Heard);   // the device still hears itself
     }
 
@@ -116,7 +142,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(1_000);
         t.M.KLine.Send(0x34, 2_500);                                         // and from 1,000 to 28,500
         t.M.Scheduler.Advance(28_500);
-        Assert.Equal(new[] { new KLineNote(27_500, "collision", 0x12), new KLineNote(28_500, "collision", 0x34) }, notes);
+        Assert.Equal(new[] { new KLineNote(27_500, "collision", 0x12, "tester"), new KLineNote(28_500, "collision", 0x34, "tester") }, notes);
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
         Assert.Equal(new[] { new Seen(0x12, true, 27_500), new Seen(0x34, true, 28_500) }, device.Heard);
     }
@@ -128,7 +154,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(1_000);
         t.M.KLine.Send(0x12, 2_500);                                         // the device's from 1,000 to 28,500
         t.M.Scheduler.Advance(28_500);
-        Assert.Equal(new[] { new KLineNote(27_456, "collision", 0x55), new KLineNote(28_500, "collision", 0x12) }, notes);
+        Assert.Equal(new[] { new KLineNote(27_456, "collision", 0x55, "ecu"), new KLineNote(28_500, "collision", 0x12, "tester") }, notes);
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));          // the ECU's frame did not echo, the device's did not arrive
         Assert.Equal(new[] { new Seen(0x12, true, 28_500) }, device.Heard);  // the device hears only itself
     }
@@ -140,7 +166,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(26_000);
         t.M.KLine.Send(0x12, 192);                                           // 125,000 baud, from 26,000 to 28,112
         t.M.Scheduler.Advance(28_112);
-        Assert.Equal(new[] { new KLineNote(27_456, "collision", 0x55), new KLineNote(28_112, "collision", 0x12) }, notes);
+        Assert.Equal(new[] { new KLineNote(27_456, "collision", 0x55, "ecu"), new KLineNote(28_112, "collision", 0x12, "tester") }, notes);
         Assert.Equal(new[] { new Seen(0x12, true, 28_112) }, device.Heard);
     }
 
@@ -152,7 +178,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(27_000);
         t.WriteSfr(S0Tbuf, 0x0055);
         t.M.Scheduler.Advance(54_456);
-        Assert.Equal(new[] { new KLineNote(27_500, "collision", 0x12), new KLineNote(54_456, "collision", 0x55) }, notes);
+        Assert.Equal(new[] { new KLineNote(27_500, "collision", 0x12, "tester"), new KLineNote(54_456, "collision", 0x55, "ecu") }, notes);
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));          // neither reached the other end
         Assert.Equal(new[] { new Seen(0x12, true, 27_500) }, device.Heard);  // the device hears only itself
     }
@@ -164,7 +190,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(5_000);
         t.M.KLine.Send(0x12, 192);                                           // 125,000 baud, 5,000 to 7,112: all of it inside the frame
         t.M.Scheduler.Advance(27_456);
-        Assert.Equal(new[] { new KLineNote(7_112, "collision", 0x12), new KLineNote(27_456, "collision", 0x55) }, notes);
+        Assert.Equal(new[] { new KLineNote(7_112, "collision", 0x12, "tester"), new KLineNote(27_456, "collision", 0x55, "ecu") }, notes);
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
         Assert.Equal(new[] { new Seen(0x12, true, 7_112) }, device.Heard);
     }
@@ -177,7 +203,7 @@ public class KLineBusTests
         t.M.Scheduler.Advance(1_000);
         t.WriteSfr(S0Tbuf, 0x0055);                                          // ASC0's frame: 1,000 to 3,112, all of it inside the byte
         t.M.Scheduler.Advance(27_500);
-        Assert.Equal(new[] { new KLineNote(3_112, "collision", 0x55), new KLineNote(27_500, "collision", 0x12) }, notes);
+        Assert.Equal(new[] { new KLineNote(3_112, "collision", 0x55, "ecu"), new KLineNote(27_500, "collision", 0x12, "tester") }, notes);
         Assert.Equal((0, 0), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));
         Assert.Equal(new[] { new Seen(0x12, true, 27_500) }, device.Heard);
     }
@@ -283,7 +309,7 @@ public class KLineBusTests
         port.Noted += notes.Add;
         port.Send(0x12, 192);                                                // 125,000 baud against ASC0's 9,615
         t.M.Scheduler.Advance(2_112);
-        Assert.Equal(new[] { new KLineNote(2_112, "mismatch", 0x12) }, notes);
+        Assert.Equal(new[] { new KLineNote(2_112, "mismatch", 0x12, "tester") }, notes);
     }
 
     [Fact] public void NoDevice_LeavesTheEcuUntouched()

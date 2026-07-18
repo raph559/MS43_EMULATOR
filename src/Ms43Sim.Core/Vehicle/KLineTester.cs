@@ -17,10 +17,11 @@ public enum KLineOutcome
 /// One request and what came of it. <see cref="SentAt"/> is the cycle its first byte went on the line, at
 /// <see cref="Baud"/>. <see cref="RepliedAt"/> is the cycle the last byte of the ECU's frame arrived and
 /// <see cref="Reply"/> the frame's bytes: both null when it <see cref="KLineOutcome.TimedOut"/>, whatever part of a
-/// frame may have come.
+/// frame may have come. <see cref="EndedAt"/> is the cycle it ended: the reply's, or the end of the listen time, or
+/// the unplugging (a power cycle) for a request that went with its machine.
 /// </summary>
 public sealed record KLineExchange(ulong SentAt, IReadOnlyList<byte> Request, int Baud, ulong? RepliedAt,
-    IReadOnlyList<byte>? Reply, KLineOutcome Outcome);
+    IReadOnlyList<byte>? Reply, KLineOutcome Outcome, ulong EndedAt);
 
 /// <summary>
 /// The scripted K-line tester: the MS43 logger app's DS2 session on the line, frame for frame (plan 5 C4). It only puts
@@ -28,8 +29,9 @@ public sealed record KLineExchange(ulong SentAt, IReadOnlyList<byte> Request, in
 /// <list type="bullet">
 /// <item>One request at a time. Its bytes go back to back at the tester's <see cref="Baud"/>: each leaves when the
 /// echo of the one before comes back (<c>own: true</c>), whatever became of it on the line.</item>
-/// <item>The next request leaves 1 ms after the reply or the timeout of the last [assumption: it stands for the app's
-/// loop overhead], or at once if the tester has been idle longer.</item>
+/// <item>The next request leaves 20 ms after a reply [obs: the app's LiveLogger pauses 20 ms after each sample; after a
+/// connect the app polls at once, and the 20 ms stand for its serial cable's latency there, assumption], 1 ms after a
+/// timeout or a malformed answer [assumption: the app sends again at once], or at once if the tester has been idle longer.</item>
 /// <item>The queue: the one-shot requests told so far (connect, disconnect, send, raw) in the order told, then an
 /// <c>every</c> that is due, in the order told, then the poll while polling.</item>
 /// <item>The reply is the first whole frame from the ECU (<c>own: false</c>) after the request's last byte has come back.
@@ -49,7 +51,8 @@ public sealed class KLineTester : IKLineDevice
 {
     const double CpuHz = 24_000_000;
     const int LowBaud = 9_600, HighBaud = 125_000;
-    const ulong GapCycles = 24_000;                              // 1 ms
+    const ulong GapCycles = 24_000;                              // 1 ms: after a timeout or a malformed answer
+    const ulong PauseCycles = 480_000;                           // 20 ms: after a reply, the app's pause after each sample
     const ulong NormalListenCycles = 9_600_000;                  // 400 ms
     const ulong SpeedSwitchListenCycles = 12_000_000;            // 500 ms
     const double LongestPeriodSeconds = 60;
@@ -68,7 +71,7 @@ public sealed class KLineTester : IKLineDevice
     ulong origin;                                                // the drive's cycle at which the scheduler reads 0
     bool polling;
     Flight? flight;
-    ulong notBefore;                                             // no request leaves before this cycle: 1 ms after the last exchange
+    ulong notBefore;                                             // no request leaves before this cycle: the gap or the pause after the last exchange
     long startToken;                                             // a start event of an older token has been superseded
     ulong? startAt;                                              // the cycle the live start event is due
 
@@ -271,12 +274,12 @@ public sealed class KLineTester : IKLineDevice
         Log(f, outcome, at, reply);
         if (outcome == KLineOutcome.Replied && f.Request.Kind != RequestKind.Plain && reply is { Length: > 3 } && reply[2] == Acknowledged)
             Baud = f.Request.Kind == RequestKind.Connect ? HighBaud : LowBaud;
-        notBefore = scheduler.Now + GapCycles;
+        notBefore = scheduler.Now + (outcome == KLineOutcome.Replied ? PauseCycles : GapCycles);
         PlanNext();
     }
 
     void Log(Flight f, KLineOutcome outcome, ulong? at, byte[]? reply) =>
-        exchanges.Add(new KLineExchange(origin + f.SentAt, f.Request.Bytes, f.Baud, at + origin, reply, outcome));
+        exchanges.Add(new KLineExchange(origin + f.SentAt, f.Request.Bytes, f.Baud, at + origin, reply, outcome, origin + scheduler.Now));
 
     void OnNote(KLineNote note) => notes.Add(note with { Cycle = note.Cycle + origin });
 

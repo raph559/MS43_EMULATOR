@@ -12,7 +12,8 @@ namespace Ms43Sim.Tests.Vehicle;
 /// </summary>
 public class KLineTesterTests
 {
-    const ulong Gap = 24_000;                                            // 1 ms
+    const ulong Gap = 24_000;                                            // 1 ms, after a timeout or a malformed answer
+    const ulong Pause = 480_000;                                         // 20 ms, after a reply: the app's pause after each sample
     const string ConnectFrame = "12 08 91 01 E8 48 00 2A", DisconnectFrame = "12 08 91 00 25 80 00 2E";
     const string PollFrame = "12 05 0B B0 AC", Ack = "12 04 A0 B6";
     const uint S0Rbuf = 0xFEB2;
@@ -203,10 +204,10 @@ public class KLineTesterTests
         ecu.Reply(Ack, delay: 10_000);                                   // the connect gets its answer, the polls none
         tester.Apply(Do(KLineVerb.Connect));
         tester.Apply(Do(KLineVerb.Poll));
-        s.Advance(363_824 + 5 * 2_112);                                  // connected at 339,824; the poll leaves 1 ms later, 5 bytes of 2,112
+        s.Advance(819_824 + 5 * 2_112);                                  // connected at 339,824; the poll leaves 20 ms later, 5 bytes of 2,112
         var poll = ecu.Heard.Skip(8).ToArray();
         Assert.Equal(Hex.Bytes(PollFrame), poll.Select(w => w.Value));
-        Assert.Equal(363_824UL, poll[0].Start);
+        Assert.Equal(819_824UL, poll[0].Start);
         Assert.All(poll, w => Assert.Equal(192.0, w.BitCycles));
     }
 
@@ -218,7 +219,7 @@ public class KLineTesterTests
         s.Advance(339_824);
         Assert.Equal(125_000, tester.Baud);
         tester.Apply(Do(KLineVerb.Connect));
-        s.Advance(363_824);
+        s.Advance(819_824);
         Assert.Equal(9_600, tester.Baud);
         Assert.Equal(2_500.0, ecu.Heard[8].BitCycles);
         Assert.Equal(Hex.Bytes(ConnectFrame)[0], ecu.Heard[8].Value);
@@ -232,18 +233,18 @@ public class KLineTesterTests
         s.Advance(339_824);                                              // connected: 125,000 baud
         ecu.ByteCycles = 2_112;                                          // and the ECU answers at 125,000 too
         ecu.Reply(Ack, delay: 1_000);
-        tester.Apply(Do(KLineVerb.Disconnect));                          // leaves 1 ms after the reply, at 363,824
-        s.Advance(390_167);                                              // 8 bytes of 2,112 end at 380,720; the ECU starts 1,000 later; 4 bytes of 2,112
+        tester.Apply(Do(KLineVerb.Disconnect));                          // leaves 20 ms after the reply, at 819,824
+        s.Advance(846_167);                                              // 8 bytes of 2,112 end at 836,720; the ECU starts 1,000 later; 4 bytes of 2,112
         Assert.Equal(125_000, tester.Baud);
-        s.Advance(390_168);
+        s.Advance(846_168);
         Assert.Equal(9_600, tester.Baud);
 
         var sent = ecu.Heard.Skip(8).ToArray();
         Assert.Equal(Hex.Bytes(DisconnectFrame), sent.Select(w => w.Value));
-        Assert.Equal(363_824UL, sent[0].Start);
+        Assert.Equal(819_824UL, sent[0].Start);
         Assert.All(sent, w => Assert.Equal(192.0, w.BitCycles));
         var exchange = tester.Exchanges[1];
-        Assert.Equal((125_000, 390_168UL, KLineOutcome.Replied), (exchange.Baud, exchange.RepliedAt, exchange.Outcome));
+        Assert.Equal((125_000, 846_168UL, KLineOutcome.Replied), (exchange.Baud, exchange.RepliedAt, exchange.Outcome));
     }
 
     [Fact] public void ASendOfTheConnectPayload_IsNotAConnect_ItLeavesTheBaudAlone()
@@ -264,26 +265,26 @@ public class KLineTesterTests
         s.Advance(339_824);                                              // connected: 125,000 baud
         ecu.ByteCycles = 2_112;
         ecu.Reply(Ack, delay: 1_000);
-        tester.Apply(Do(KLineVerb.Send, "91 00 25 80 00"));              // leaves at 363,824; answered at 390,168, as the disconnect is
-        s.Advance(390_168);
+        tester.Apply(Do(KLineVerb.Send, "91 00 25 80 00"));              // leaves at 819,824; answered at 846,168, as the disconnect is
+        s.Advance(846_168);
         Assert.Equal(KLineOutcome.Replied, tester.Exchanges[1].Outcome);
         Assert.Equal(125_000, tester.Baud);
     }
 
     // ---- the poll, the timeout and the pace ----
 
-    [Fact] public void Poll_RepeatsTheAppsRequest_OneMillisecondAfterEachReply()
+    [Fact] public void Poll_RepeatsTheAppsRequest_20MillisecondsAfterEachReply()
     {
         var (s, ecu, tester) = Rig();
         ecu.Always(Ack, delay: 10_000);
         tester.Apply(Do(KLineVerb.Poll));
-        s.Advance(700_148);                                              // a request is 137,500 cycles, the ECU's answer 10,000 + 109,824 more, then 24,000: 281,324 in all
-        Assert.Equal(new[] { 0UL, 281_324UL, 562_648UL }, ecu.Requests.Select(r => r.Start));
+        s.Advance(1_612_148);                                            // a request is 137,500 cycles, the ECU's answer 10,000 + 109,824 more, then 480,000: 737,324 in all
+        Assert.Equal(new[] { 0UL, 737_324UL, 1_474_648UL }, ecu.Requests.Select(r => r.Start));
         Assert.All(ecu.Requests, r => Assert.Equal(Hex.Bytes(PollFrame), r.Frame));
-        Assert.Equal(new[] { 257_324UL, 538_648UL }, tester.Exchanges.Select(x => x.RepliedAt!.Value));
+        Assert.Equal(new[] { 257_324UL, 994_648UL }, tester.Exchanges.Select(x => x.RepliedAt!.Value));
         Assert.All(tester.Exchanges, x => Assert.Equal(KLineOutcome.Replied, x.Outcome));
         for (var i = 0; i < 2; i++)
-            Assert.Equal(Gap, ecu.Requests[i + 1].Start - tester.Exchanges[i].RepliedAt!.Value);
+            Assert.Equal(Pause, ecu.Requests[i + 1].Start - tester.Exchanges[i].RepliedAt!.Value);
     }
 
     [Fact] public void NoReply_TimesOutAfter400ms_AndPollingGoesOn()
@@ -391,8 +392,8 @@ public class KLineTesterTests
         ecu.Reply("12 05 A0 00 B7", delay: 10_000);                      // 12 ^ 05 ^ A0 ^ 00 = B7
         tester.Apply(Do(KLineVerb.Send, "0B B0"));
         s.Advance(300_000);
-        tester.Apply(Do(KLineVerb.Send, "0B B0"));                       // leaves at 300,000, after the stray byte has come and gone
-        s.Advance(300_000 + 137_500 + 10_000 + 5 * 27_456);              // the second answer ends at 584,780
+        tester.Apply(Do(KLineVerb.Send, "0B B0"));                       // leaves 20 ms after the reply, at 737,324, the stray byte long gone
+        s.Advance(737_324 + 137_500 + 10_000 + 5 * 27_456);              // the second answer ends at 1,022,104
         Assert.Equal(2, tester.Exchanges.Count);
         Assert.Equal(Hex.Bytes(Ack), tester.Exchanges[0].Reply);
         Assert.Equal(Hex.Bytes("12 05 A0 00 B7"), tester.Exchanges[1].Reply);   // not 55 12 05 A0 00
@@ -476,33 +477,33 @@ public class KLineTesterTests
 
     [Fact] public void QueuedSends_GoBeforeThePoll_AndEveryRepeats()
     {
-        // An exchange and its millisecond take 300,000 cycles here: 137,500 for the request, 38,500 and 4 bytes of
-        // 25,000 for the answer, 24,000 for the gap. So requests leave at multiples of 300,000.
+        // An exchange and its pause take 756,000 cycles here: 137,500 for the request, 38,500 and 4 bytes of
+        // 25,000 for the answer, 480,000 for the pause. So requests leave at multiples of 756,000.
         var (s, ecu, tester) = Rig();
         ecu.ByteCycles = 25_000;
         ecu.Always(Ack, delay: 38_500);
         tester.Apply(Do(KLineVerb.Poll));                                // the poll was told first
         tester.Apply(Do(KLineVerb.Send, "6D 00"));
         tester.Apply(Do(KLineVerb.Send, "6D 01"));
-        tester.Apply(Every(0.05, "6D 02"));                              // 1,200,000 cycles: every fourth request
-        s.Advance(2_400_000 + 137_500);
+        tester.Apply(Every(0.126, "6D 02"));                             // 3,024,000 cycles: every fourth request
+        s.Advance(6_048_000 + 137_500);
         Assert.Equal(new[] { "6D00", "6D01", "6D02", "0BB0", "6D02", "0BB0", "0BB0", "0BB0", "6D02" }, Commands(ecu));
-        Assert.Equal(Enumerable.Range(0, 9).Select(i => (ulong)i * 300_000), ecu.Requests.Select(r => r.Start));
+        Assert.Equal(Enumerable.Range(0, 9).Select(i => (ulong)i * 756_000), ecu.Requests.Select(r => r.Start));
     }
 
     [Fact] public void Every_KeepsItsRhythm_ALateSendDoesNotDelayTheNextOne()
     {
-        // The same 300,000-cycle exchanges, an every of 0.04 s = 960,000 cycles: due at 0, 960,000, 1,920,000, 2,880,000.
-        // It leaves at the first request after it falls due: 0, 1,200,000, 2,100,000, 3,000,000. A period counted
-        // from each send would give 2,400,000 for the third.
+        // The same 756,000-cycle exchanges, an every of 0.1008 s = 2,419,200 cycles: due at 0, 2,419,200, 4,838,400, 7,257,600.
+        // It leaves at the first request after it falls due: 0, 3,024,000, 5,292,000, 7,560,000. A period counted
+        // from each send would give 6,048,000 for the third.
         var (s, ecu, tester) = Rig();
         ecu.ByteCycles = 25_000;
         ecu.Always(Ack, delay: 38_500);
         tester.Apply(Do(KLineVerb.Poll));
-        tester.Apply(Every(0.04, "6D 02"));
-        s.Advance(3_000_000 + 137_500);
+        tester.Apply(Every(0.1008, "6D 02"));
+        s.Advance(7_560_000 + 137_500);
         var at = ecu.Requests.Where(r => r.Frame[2] == 0x6D).Select(r => r.Start);
-        Assert.Equal(new[] { 0UL, 1_200_000UL, 2_100_000UL, 3_000_000UL }, at);
+        Assert.Equal(new[] { 0UL, 3_024_000UL, 5_292_000UL, 7_560_000UL }, at);
     }
 
     [Fact] public void Every_AloneWithNoPoll_LeavesWhenItFallsDue()
@@ -514,25 +515,25 @@ public class KLineTesterTests
         Assert.Equal(new[] { 0UL, 12_000_000UL }, ecu.Requests.Select(r => r.Start));
     }
 
-    [Fact] public void AnEveryWaitingForItsMoment_StillWaitsAMillisecondAfterARequestThatEndedJustBefore()
+    [Fact] public void AnEveryWaitingForItsMoment_StillWaitsThePauseAfterARequestThatEndedJustBefore()
     {
         var (s, ecu, tester) = Rig();
         ecu.Always(Ack, delay: 10_000);
         tester.Apply(Every(0.5, "6D 02"));                               // due at 0 and then at 12,000,000
         s.Advance(11_732_676);
         tester.Apply(Do(KLineVerb.Send, "6D 00"));                       // takes 257,324: answered at 11,990,000, 10,000 before the every falls due
-        s.Advance(12_014_000 + 137_500);
-        Assert.Equal(new[] { 0UL, 11_732_676UL, 12_014_000UL }, ecu.Requests.Select(r => r.Start));   // the every waits for the millisecond: 11,990,000 + 24,000
+        s.Advance(12_470_000 + 137_500);
+        Assert.Equal(new[] { 0UL, 11_732_676UL, 12_470_000UL }, ecu.Requests.Select(r => r.Start));   // the every waits for the pause: 11,990,000 + 480,000
     }
 
     [Fact] public void AnEveryPeriodUnderOneCycle_IsRaisedToOneCycle_AndNeverStopsTime()
     {
         var (s, ecu, tester) = Rig();
-        ecu.ByteCycles = 25_000;                                         // 300,000-cycle exchanges, as in QueuedSends_GoBeforeThePoll_AndEveryRepeats
+        ecu.ByteCycles = 25_000;                                         // 756,000-cycle exchanges, as in QueuedSends_GoBeforeThePoll_AndEveryRepeats
         ecu.Always(Ack, delay: 38_500);
         tester.Apply(Do(KLineVerb.Poll));
         tester.Apply(Every(1e-9, "6D 02"));                              // 0.024 of a cycle
-        s.Advance(900_000 + 137_500);                                    // always due, so it takes every slot and the poll none
+        s.Advance(2_268_000 + 137_500);                                  // always due, so it takes every slot and the poll none
         Assert.Equal(new[] { "6D02", "6D02", "6D02", "6D02" }, Commands(ecu));
     }
 
@@ -562,15 +563,15 @@ public class KLineTesterTests
         Assert.Equal(9_761_500UL, ecu.Requests[1].Start);
     }
 
-    [Fact] public void ARequestTold_WhileIdle_LeavesAtOnce_ButNotSoonerThanAMillisecondAfterTheLastReply()
+    [Fact] public void ARequestTold_WhileIdle_LeavesAtOnce_ButNotSoonerThan20MillisecondsAfterTheLastReply()
     {
         var (s, ecu, tester) = Rig();
         ecu.Always(Ack, delay: 10_000);
         tester.Apply(Do(KLineVerb.Send, "6D 00"));
         s.Advance(257_324 + 10_000);                                     // answered at 257,324; now 10,000 cycles later
-        tester.Apply(Do(KLineVerb.Send, "6D 01"));                       // told too soon: it waits for the millisecond after the reply
-        s.Advance(257_324 + Gap + 137_500);
-        Assert.Equal(257_324 + Gap, ecu.Requests[1].Start);
+        tester.Apply(Do(KLineVerb.Send, "6D 01"));                       // told too soon: it waits for the pause after the reply
+        s.Advance(257_324 + Pause + 137_500);
+        Assert.Equal(257_324 + Pause, ecu.Requests[1].Start);
         s.Advance(2_000_000);                                            // and a long idle spell later
         tester.Apply(Do(KLineVerb.Send, "6D 02"));                       // told in good time: it leaves at once
         s.Advance(2_000_000 + 137_500);
@@ -586,9 +587,9 @@ public class KLineTesterTests
         ecu.Always(Ack, delay: 38_500);
         tester.Apply(Do(KLineVerb.Poll));
         tester.Apply(Every(0.05, "6D 02"));
-        s.Advance(1_000_000);                                            // requests left at 0, 300,000, 600,000 and 900,000; the fourth is in flight
+        s.Advance(2_500_000);                                            // requests left at 0, 756,000, 1,512,000 and 2,268,000; the fourth is in flight
         tester.Apply(Do(KLineVerb.Quiet));
-        s.Advance(1_300_000);                                            // the fourth is answered at 1,176,000
+        s.Advance(2_600_000);                                            // the fourth is answered at 2,544,000
         Assert.Equal((20, 4), (ecu.Heard.Count, tester.Exchanges.Count));
         s.Advance(200_000_000);
         Assert.Equal((20, 4), (ecu.Heard.Count, tester.Exchanges.Count));
@@ -672,9 +673,9 @@ public class KLineTesterTests
     [Fact] public void Notes_AreCollectedFromThePort()
     {
         var (_, ecu, tester) = Rig();
-        ecu.Note(new KLineNote(5, "mismatch", 0x12));
-        ecu.Note(new KLineNote(9, "collision", 0x34));
-        Assert.Equal(new[] { new KLineNote(5, "mismatch", 0x12), new KLineNote(9, "collision", 0x34) }, tester.Notes);
+        ecu.Note(new KLineNote(5, "mismatch", 0x12, "tester"));
+        ecu.Note(new KLineNote(9, "collision", 0x34, "ecu"));
+        Assert.Equal(new[] { new KLineNote(5, "mismatch", 0x12, "tester"), new KLineNote(9, "collision", 0x34, "ecu") }, tester.Notes);
     }
 
     [Fact] public void PluggedAgainAfterAPowerCycle_TheSessionGoesOnAt125000_OnTheNewMachinesClock()
@@ -686,14 +687,16 @@ public class KLineTesterTests
         first.Reply(Ack, delay: 10_000);
         tester.Apply(Do(KLineVerb.Connect));
         tester.Apply(Do(KLineVerb.Poll));
-        s1.Advance(400_000);                                             // connected at 339,824; the poll left at 363,824 at 125,000 baud and nobody answers it
+        s1.Advance(900_000);                                             // connected at 339,824; the poll left 20 ms later, at 819,824, at 125,000 baud, and nobody answers it
         Assert.Equal((125_000, 1), (tester.Baud, tester.Exchanges.Count));
 
         var s2 = new Scheduler();                                        // a power cycle: a new machine with a clock of its own; it starts at drive cycle 50,000,000
         var second = new EcuEnd(s2);
         tester.Plug(second, s2, origin: 50_000_000);
         Assert.Equal(new[] { KLineOutcome.Replied, KLineOutcome.TimedOut }, tester.Exchanges.Select(x => x.Outcome));   // the poll in flight went with the old machine
-        Assert.Equal((363_824UL, 125_000), (tester.Exchanges[1].SentAt, tester.Exchanges[1].Baud));
+        Assert.Equal((819_824UL, 125_000), (tester.Exchanges[1].SentAt, tester.Exchanges[1].Baud));
+        Assert.Equal(900_000UL, tester.Exchanges[1].EndedAt);           // it ended when its machine went away
+        Assert.Equal(tester.Exchanges[0].RepliedAt, tester.Exchanges[0].EndedAt);
 
         s2.Advance(20_000);
         Assert.Equal(5, second.Heard.Count);                             // it polls again at once, still at 125,000 baud: 5 bytes of 2,112
@@ -702,12 +705,13 @@ public class KLineTesterTests
         s2.Advance(10_560 + 9_600_000);                                  // the deaf ECU: 400 ms after the request ended
         var exchange = tester.Exchanges[2];
         Assert.Equal((50_000_000UL, KLineOutcome.TimedOut, 125_000), (exchange.SentAt, exchange.Outcome, exchange.Baud));
+        Assert.Equal(50_000_000UL + 10_560 + 9_600_000, exchange.EndedAt);   // when the tester gave up, in the drive's cycles
         s2.Advance(10_560 + 9_600_000 + Gap);
         Assert.Equal(9_634_560UL, second.Heard[5].Start);
 
-        second.Note(new KLineNote(123, "mismatch", 0x12));
-        first.Note(new KLineNote(7, "mismatch", 0x12));                  // the old machine's line is no longer listened to
-        Assert.Equal(new[] { new KLineNote(50_000_123, "mismatch", 0x12) }, tester.Notes);
+        second.Note(new KLineNote(123, "mismatch", 0x12, "tester"));
+        first.Note(new KLineNote(7, "mismatch", 0x12, "tester"));        // the old machine's line is no longer listened to
+        Assert.Equal(new[] { new KLineNote(50_000_123, "mismatch", 0x12, "tester") }, tester.Notes);
     }
 
     [Fact] public void AfterAPlug_TheExchangesAreLoggedInTheDrivesCycles()
@@ -766,5 +770,5 @@ public class KLineTesterTests
 
     [Fact] public void TheDriveAssumptions_NameTheTestersGapAndListenTimes() =>
         Assert.Contains(MachineAssumptions.ForDrive(),
-            line => line.Contains("K-line tester") && line.Contains("1 ms") && line.Contains("500 ms") && line.Contains("400 ms"));
+            line => line.Contains("K-line tester") && line.Contains("20 ms") && line.Contains("1 ms") && line.Contains("500 ms") && line.Contains("400 ms"));
 }

@@ -7,8 +7,9 @@ namespace Ms43Sim.Core;
 /// Writes a drive's results (plan 4 Task 10): drive-report.md (the verdict and its reasons, the drive,
 /// the power cycles, the checks and their findings, and design §7's coverage: the stubs with their side
 /// and reason, what was not evaluated, what was not exercised, what is not modelled, the unexplained
-/// faults and the benign notes), events.csv (every kept output event, in the drive's time), trace.csv
-/// (the variables every 100 ms), eeprom.bin (the chip at the end) and verdict.txt (one word).
+/// faults and the benign notes; plan 5 adds the K-line), events.csv (every kept output event, in the drive's
+/// time), trace.csv (the variables every 100 ms), eeprom.bin (the chip at the end), verdict.txt (one word) and
+/// kline.csv (the tester's requests, what came of them and the bytes the line lost).
 /// </summary>
 public static class DriveReportWriter
 {
@@ -22,7 +23,81 @@ public static class DriveReportWriter
         File.WriteAllText(Path.Combine(directory, "trace.csv"), RunReportWriter.TraceCsv(r.Trace));
         File.WriteAllBytes(Path.Combine(directory, "eeprom.bin"), r.Eeprom.FinalImage);
         File.WriteAllText(Path.Combine(directory, "verdict.txt"), Word(r.Verdict) + "\n");
+        File.WriteAllText(Path.Combine(directory, "kline.csv"), KLineCsv(r));
     }
+
+    /// <summary>
+    /// The K-line in the drive's time (plan 5 Task 4), sorted by cycle: each request (tester); its reply, malformed
+    /// answer or timeout (ecu), the timeout when the tester gave up, with no bytes; and each byte the line lost
+    /// (mismatch or collision), with the end that sent it. The bytes are spaced hex.
+    /// </summary>
+    public static string KLineCsv(DriveResult r)
+    {
+        var rows = new List<(ulong Cycle, string Row)>();
+        void Add(ulong cycle, string direction, string outcome, IEnumerable<byte> bytes) =>
+            rows.Add((cycle, $"{cycle},{(cycle / 24e3).ToString("0.000", Inv)},{direction},{outcome},{Hex(bytes)}"));
+        foreach (var e in r.KLine)
+        {
+            Add(e.SentAt, "tester", "request", e.Request);
+            Add(e.EndedAt, "ecu", Outcome(e.Outcome), e.Reply ?? Array.Empty<byte>());
+        }
+        foreach (var n in r.KLineNotes)
+            Add(n.Cycle, n.From, n.Kind, new[] { n.Value });
+        var s = new StringBuilder("cycle,time_ms,direction,outcome,bytes\n");
+        foreach (var row in rows.OrderBy(x => x.Cycle))
+            s.Append(row.Row).Append('\n');
+        return s.ToString();
+    }
+
+    static string Outcome(KLineOutcome outcome) => outcome switch
+    {
+        KLineOutcome.Replied => "reply",
+        KLineOutcome.Malformed => "malformed",
+        _ => "timeout",
+    };
+
+    static string Hex(IEnumerable<byte> bytes) => string.Join(" ", bytes.Select(b => b.ToString("X2", Inv)));
+
+    /// <summary>
+    /// The K-line section: the tester (its stub entry), what it asked and got, the bytes the line lost, and the first ten
+    /// problems in time order.
+    /// </summary>
+    static void KLine(StringBuilder s, DriveResult r)
+    {
+        s.AppendLine("## K-line").AppendLine();
+        var tester = r.Stubs.FirstOrDefault(stub => stub.Device == "K-line tester")?.Behaviour ?? "none";
+        if (tester == "none")
+        {
+            s.AppendLine("K-line tester: none (the drive has no kline line).").AppendLine();
+            return;
+        }
+        int Count(KLineOutcome o) => r.KLine.Count(e => e.Outcome == o);
+        s.AppendLine($"K-line tester: {tester}. Its requests and the bytes the line lost, in the drive's time, are all in kline.csv.").AppendLine();
+        s.AppendLine($"- requests: {r.KLine.Count}; replies: {Count(KLineOutcome.Replied)}; timeouts: {Count(KLineOutcome.TimedOut)}; malformed: {Count(KLineOutcome.Malformed)}");
+        s.AppendLine($"- bytes lost: {r.KLineNotes.Count(n => n.Kind == "mismatch")} to a baud rate more than 3 % from the ECU's, {r.KLineNotes.Count(n => n.Kind == "collision")} in collisions");
+        var problems = r.KLine.Where(e => e.Outcome != KLineOutcome.Replied).Select(e => (Cycle: e.EndedAt, Text: Problem(e)))
+            .Concat(r.KLineNotes.Select(n => (n.Cycle, Text: Problem(n))))
+            .OrderBy(p => p.Cycle).ToList();
+        s.AppendLine();
+        if (problems.Count == 0)
+        {
+            s.AppendLine("No problems: every request was answered and the line lost no byte.").AppendLine();
+            return;
+        }
+        s.AppendLine("First problems:").AppendLine();
+        foreach (var p in problems.Take(10))
+            s.AppendLine($"- {Seconds(p.Cycle)} s: {p.Text}");
+        if (problems.Count > 10)
+            s.AppendLine($"- and {(problems.Count - 10).ToString("N0", Inv)} more in kline.csv");
+        s.AppendLine();
+    }
+
+    static string Problem(KLineExchange e) => e.Outcome == KLineOutcome.Malformed
+        ? $"a malformed reply to {Hex(e.Request)}, sent at {Seconds(e.SentAt)} s at {e.Baud.ToString("N0", Inv)} baud: {Hex(e.Reply!)}"
+        : $"no reply to {Hex(e.Request)}, sent at {Seconds(e.SentAt)} s at {e.Baud.ToString("N0", Inv)} baud";
+
+    static string Problem(KLineNote n) => (n.From == "ecu" ? "the ECU's" : "the tester's") + $" byte {n.Value:X2} was lost: " +
+        (n.Kind == "collision" ? "it collided with another" : "its baud rate is more than 3 % from the ECU's");
 
     /// <summary>pass, fail or incomplete.</summary>
     public static string Word(RunVerdict verdict) => verdict.ToString().ToLowerInvariant();
@@ -111,6 +186,8 @@ public static class DriveReportWriter
         s.AppendLine("## Outputs").AppendLine();
         s.AppendLine($"{r.OutputEvents.Count:N0} output events kept ({r.OutputEventsDropped:N0} beyond the capture's capacity; the checks saw them all); {r.Sparks.Count:N0} sparks and {r.Injections.Count:N0} injections kept. Every kept event is in events.csv.").AppendLine();
         s.AppendLine($"Watchdog resets: {r.WatchdogResets}; software resets: {r.SoftwareResets}; state hash {r.StateHash}.").AppendLine();
+
+        KLine(s, r);
 
         s.AppendLine("## Assumptions").AppendLine();
         foreach (var a in r.Assumptions)

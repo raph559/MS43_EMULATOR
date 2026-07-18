@@ -25,8 +25,43 @@ public class Asc0Tests
     [Fact] public void Receive_OverAnUnreadS0rbuf_SetsS0oeAndS0eir()
     {
         var t = Dsl();
-        t.M.Asc0.Receive(0x0011); t.M.Asc0.Receive(0x0022);
+        t.M.Asc0.Receive(0x0011, t.M.Scheduler.Now); t.M.Asc0.Receive(0x0022, t.M.Scheduler.Now);
         Assert.Equal((0x0400, 0x80), (t.Sfr(0xFFB0) & 0x0400, t.Sfr(0xFF70) & 0x80));
+    }
+
+    [Fact] public void AFrameWhoseStartBitCameWithTheReceiverOff_IsLost_ThoughTheReceiverIsOnAtItsEnd()
+    {
+        // UM V3.1 §11.1.2 (p. 257): reception is initiated by the start bit's falling edge, provided S0R and S0REN are set.
+        var t = TestMachine.Create("0DFF").WriteSfr(0xFEB4, 0x004D).WriteSfr(0xFFB0, 0x80EF);   // 8E2, S0REN = 0
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(0xFFB0, 0x80F7);                                          // on again at 1,000
+        t.M.Scheduler.Advance(2_000);
+        t.M.Asc0.Receive(0x0011, startBit: 999);
+        Assert.Equal((0, 0), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
+        t.M.Asc0.Receive(0x0022, startBit: 1_000);                           // a start bit in the cycle it came on is seen
+        Assert.Equal((0x0022, 0x80), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
+    }
+
+    [Fact] public void AFrameWhoseStartBitCameWithTheReceiverOn_IsCompleted_ThoughS0renIsClearedBeforeItsEnd()
+    {
+        // UM V3.1 §11.1.2: clearing S0REN stops reception, but a frame being received is completed with its interrupt.
+        var t = Dsl();
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(0xFFB0, 0x80E7);                                          // S0REN = 0 at 1,000
+        t.M.Scheduler.Advance(2_000);
+        t.M.Asc0.Receive(0x0011, startBit: 500);
+        Assert.Equal((0x0011, 0x80), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
+    }
+
+    [Fact] public void FrameTransmitted_GivesWhereEachFrameStarted()
+    {
+        var t = Dsl();
+        var sent = new List<(ushort, ulong)>();
+        t.M.Asc0.FrameTransmitted += (frame, start) => sent.Add((frame, start));
+        t.M.Scheduler.Advance(1_000);
+        t.WriteSfr(0xFEB0, 0x0055).WriteSfr(0xFEB0, 0x0057);                 // the second starts where the first ends
+        t.M.Scheduler.Advance(1_000 + 2 * 27_456);
+        Assert.Equal(new[] { ((ushort)0x055, 1_000UL), ((ushort)0x157, 28_456UL) }, sent);
     }
 
     [Fact] public void SynchronousMode_IsReported()
@@ -39,7 +74,7 @@ public class Asc0Tests
     {
         var t = Dsl();
         var sent = new List<ushort>();
-        t.M.Asc0.FrameTransmitted += sent.Add;
+        t.M.Asc0.FrameTransmitted += (frame, _) => sent.Add(frame);
         t.WriteSfr(0xF19C, 0x0000).WriteSfr(0xFEB0, 0x0055).WriteSfr(0xF19C, 0x0000).WriteSfr(0xFEB0, 0x0057);
         Assert.Equal(0, t.Sfr(0xF19C) & 0x80);                              // the second frame waits in S0TBUF
         t.M.Scheduler.Advance(11 * 2_496); Assert.Equal(0x80, t.Sfr(0xF19C) & 0x80);
@@ -58,7 +93,7 @@ public class Asc0Tests
     [Fact] public void Receive_WithTheReceiverOff_IsLost()
     {
         var t = TestMachine.Create("0DFF").WriteSfr(0xFFB0, 0x8001);       // 8N1, S0REN = 0
-        t.M.Asc0.Receive(0x0011);
+        t.M.Asc0.Receive(0x0011, t.M.Scheduler.Now);
         Assert.Equal((0, 0), (t.Sfr(0xFEB2), t.Sfr(0xFF6E) & 0x80));
     }
 

@@ -12,7 +12,10 @@ namespace Ms43Sim.Core;
 /// is due by 2 × period + 1.1 s after power-on — judged while the shaft turns below 2,000 rpm at both
 /// ends of the gap (plan 4 Task 11: at the ISM's minimum timing the car's own tasks stretch from about
 /// 2,500 rpm, and at full load its lowest queue goes seconds without running; the time above is
-/// declared in the report);</item>
+/// declared in the report). The serial-line task T10ms:08h (09:FAAE) re-arms its own 10 ms timer, E3AE,
+/// with F904: one tick while the K-line is idle, four (F910) to hold the reply to a DS2 connect (plan 5
+/// Task 4). Its gap is judged by the period it armed, read from E3AE when it returns to 0E:05C8, and not
+/// at all while that is 0 (the timer is off);</item>
 /// <item>R3: while F900 = 2 and the shaft turns at 150 rpm or more, a gap between runs of Q1:0Dh above
 /// three segment periods (20,000 / rpm ms) + 5 ms;</item>
 /// <item>R4: a flag newly set in FDF2 or FD84 &amp; 01C0h (both sticky), read every 10 ms, with the shaft
@@ -28,11 +31,14 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
     const uint MainLoopService = 0x0E0144, PowerDownService = 0x0BD9AC;
     const uint Q1 = 0x0E0944, Q2 = 0x0E0976, Q3 = 0x0E09A8, Requests = 0x0E0910;
     const uint T5ms = 0x0E0116, T10ms = 0x0E05C4, T100ms = 0x0E075A, T1s = 0x0E08DA;
+    const uint T10msReturn = 0x0E05C8, SerialTimer = 0xE3AE;                    // the 10 ms timers count down at E39E + 2 × id
+    const int SerialTask = 0x08;
     const int CrankTask = 0x0D;
     const double HighRpm = 2_000;
 
     static readonly byte[] CallDispatcher = { 0xDA, 0x0B, 0xAE, 0xFB };          // CALLS 0Bh, FBAEh
     static readonly byte[] ServiceWatchdog = { 0xA7, 0x58, 0xA7, 0xA7 };         // SRVWDT
+    static readonly byte[] NextTimer = { 0x0D, 0x04 };                            // JMPR cc_UC, 0E:05D2: back from a 10 ms task
 
     /// <summary>R2's periodic tasks: (kind, id) → period in ms.</summary>
     static readonly Dictionary<(string Kind, int Id), int> Periods = Build(
@@ -58,7 +64,8 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         static bool Holds(FirmwareImage image, uint cpu, byte[] bytes) =>
             image.Bytes.Slice((int)(cpu & 0x7FFFF), bytes.Length).SequenceEqual(bytes);
         return new[] { Q1, Q2, Q3, Requests, T5ms, T10ms, T100ms, T1s }.All(site => Holds(image, site, CallDispatcher))
-            && Holds(image, MainLoopService, ServiceWatchdog) && Holds(image, PowerDownService, ServiceWatchdog);
+            && Holds(image, MainLoopService, ServiceWatchdog) && Holds(image, PowerDownService, ServiceWatchdog)
+            && Holds(image, T10msReturn, NextTimer);
     }
 
     protected override void Start(Machine machine, int index)
@@ -70,7 +77,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         }
         if (!Recognises(machine.Image.Image))
         {
-            NotEvaluated("the scheduler's hook sites (0E:0944, 0E:0976, 0E:09A8, 0E:0910, the four timer sites, 0E:0144, 0B:D9AC) are not the car file's");
+            NotEvaluated("the scheduler's hook sites (0E:0944, 0E:0976, 0E:09A8, 0E:0910, the four timer sites, 0E:05C8, 0E:0144, 0B:D9AC) are not the car file's");
             return;
         }
         window = new Window(this, machine, index);
@@ -88,6 +95,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         readonly int index;
         readonly Dictionary<(string Kind, int Id), ulong> lastRun = new();
         readonly Dictionary<(string Kind, int Id), double> rpmAtRun = new();
+        readonly Dictionary<(string Kind, int Id), int> armed = new();          // ms: the period a self-arming task set at its last run
         int fdf2Seen, fd84Seen;
         ulong aboveSince, aboveCycles;
         bool above;
@@ -117,6 +125,11 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             machine.OnInstruction(T10ms, m => Ran("T10ms", m.Cpu.R(6) & 0xFF));
             machine.OnInstruction(T100ms, m => Ran("T100ms", m.Cpu.R(6) & 0xFF));
             machine.OnInstruction(T1s, m => Ran("T1s", m.Cpu.R(6) & 0xFF));
+            machine.OnInstruction(T10msReturn, m =>
+            {
+                if ((m.Cpu.R(6) & 0xFF) == SerialTask)
+                    armed[("T10ms", SerialTask)] = RunState.XramWord(m, SerialTimer) * 10;
+            });
             Poll(5 * Ms);
             Flags(10 * Ms);
         }
@@ -159,7 +172,7 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             var key = (kind, id);
             if (Watching && !powerDown)
             {
-                if (Periods.TryGetValue(key, out var period) && lastRun.TryGetValue(key, out var before)
+                if (Period(key) is > 0 and var period && lastRun.TryGetValue(key, out var before)
                     && now - before > Limit(period) && !overdue.Contains(key) && Judged(key))
                     Late(key, period, before, now);
                 if (kind == "Q1" && id == CrankTask)
@@ -177,9 +190,13 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
 
         static ulong Limit(int period) => (ulong)(2 * period + 5) * Ms;
 
+        /// <summary>A task's period in ms: the one it armed at its last run, for a self-arming task, else its fixed one; 0 for none.</summary>
+        int Period((string Kind, int Id) key) =>
+            armed.TryGetValue(key, out var set) ? set : Periods.GetValueOrDefault(key);
+
         void Late((string Kind, int Id) key, int period, ulong before, ulong now) =>
             check.Find($"R2 {key.Kind}:{key.Id:X2}",
-                $"R2: {key.Kind}:{key.Id:X2}h (every {period} ms) went {(now - before) / (double)Ms:0.0} ms between runs (the limit is {2 * period + 5} ms)",
+                $"R2: {key.Kind}:{key.Id:X2}h ({(armed.ContainsKey(key) ? "armed for" : "every")} {period} ms) went {(now - before) / (double)Ms:0.0} ms between runs (the limit is {2 * period + 5} ms)",
                 check.Context.PowerCycleStart + before, check.Context.PowerCycleStart + now);
 
         void CrankRan(ulong now)
@@ -210,16 +227,17 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             if (Watching && !powerDown)
             {
                 var now = machine.Cycles;
-                foreach (var (key, period) in Periods)
+                foreach (var (key, fixedPeriod) in Periods)
                 {
+                    var period = Period(key);
                     if (lastRun.TryGetValue(key, out var before))
                     {
-                        if (now - before > Limit(period) && Judged(key) && overdue.Add(key))
+                        if (period > 0 && now - before > Limit(period) && Judged(key) && overdue.Add(key))
                             Late(key, period, before, now);
                     }
-                    else if (now > (ulong)(2 * period + 1100) * Ms && missed.Add(key))
+                    else if (now > (ulong)(2 * fixedPeriod + 1100) * Ms && missed.Add(key))
                         check.Find($"R2 {key.Kind}:{key.Id:X2} first",
-                            $"R2: {key.Kind}:{key.Id:X2}h (every {period} ms) had not run {2 * period + 1100} ms after power-on");
+                            $"R2: {key.Kind}:{key.Id:X2}h (every {fixedPeriod} ms) had not run {2 * fixedPeriod + 1100} ms after power-on");
                 }
                 var rpm = check.Context.Shaft?.Rpm ?? 0;
                 Above(now, rpm >= HighRpm);

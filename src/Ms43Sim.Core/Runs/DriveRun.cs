@@ -45,6 +45,12 @@ public sealed record DriveResult(FlashedImage Image, Drive Drive, IReadOnlyList<
     /// <summary>The check called <paramref name="name"/>.</summary>
     public ICheck Check(string name) =>
         Checks.FirstOrDefault(c => c.Name == name) ?? throw new KeyNotFoundException($"no check '{name}' in this run");
+
+    /// <summary>The K-line tester's requests and what came of each, in the drive's time; empty when the drive has no kline line.</summary>
+    public IReadOnlyList<KLineExchange> KLine { get; init; } = Array.Empty<KLineExchange>();
+
+    /// <summary>The bytes the K-line lost (a baud mismatch or a collision), in the drive's time.</summary>
+    public IReadOnlyList<KLineNote> KLineNotes { get; init; } = Array.Empty<KLineNote>();
 }
 
 /// <summary>
@@ -97,13 +103,25 @@ public static class DriveRun
         foreach (var observer in options.Observers ?? Array.Empty<Action<DriveContext>>())
             observer(context);
 
+        // The laptop on the K-line (plan 5 Task 4): one tester for the whole drive, plugged into every power cycle's line.
+        var usesKLine = drive.Segments.Any(s => s.KLine.Count > 0);
+        KLineTester? tester = null;
+        KLineTester? Plug(Machine machine, ulong at)
+        {
+            if (!usesKLine)
+                return null;
+            tester ??= new KLineTester(machine.Scheduler);
+            tester.Plug(machine.KLine, machine.Scheduler, at);
+            return tester;
+        }
+
         var runs = new List<CycleRun>();
         var eeprom = options.Eeprom;
         ulong start = 0;
         while (true)
         {
             var run = new CycleRun(image, drive, machineOptions with { EepromImage = eeprom }, options.CaptureCapacity,
-                context, runs.Count, start);
+                context, runs.Count, start, Plug);
             run.RunTo(total);
             runs.Add(run);
             if (run.NextPowerOn() is not { } next)
@@ -111,10 +129,11 @@ public static class DriveRun
             eeprom = run.Machine.Board.Eeprom.ToImage();
             start = next;
         }
-        return Result(image, drive, options, machineOptions, runs);
+        return Result(image, drive, options, machineOptions, runs, tester);
     }
 
-    static DriveResult Result(FlashedImage image, Drive drive, DriveRunOptions options, MachineOptions machineOptions, List<CycleRun> runs)
+    static DriveResult Result(FlashedImage image, Drive drive, DriveRunOptions options, MachineOptions machineOptions, List<CycleRun> runs,
+        KLineTester? tester)
     {
         var counts = new Dictionary<Type, long>();
         foreach (var run in runs)
@@ -141,9 +160,13 @@ public static class DriveRun
             runs.SelectMany(r => r.Shift(r.Machine.Events.All, (e, d) => e with { Cycle = e.Cycle + d })).ToArray(),
             counts,
             runs.SelectMany(r => r.Machine.Inventory.Records).ToArray(),
-            RunState.Stubs(canPartners: true, engine: true, drive: true),
+            RunState.Stubs(canPartners: true, engine: true, drive: true, klineTester: tester != null),
             Array.Empty<ICheck>(), hash, assumptions,
-            last.Start + last.Machine.Cycles, (ulong)runs.Sum(r => (decimal)r.Machine.Instructions));
+            last.Start + last.Machine.Cycles, (ulong)runs.Sum(r => (decimal)r.Machine.Instructions))
+        {
+            KLine = tester?.Exchanges.ToArray() ?? Array.Empty<KLineExchange>(),
+            KLineNotes = tester?.Notes.ToArray() ?? Array.Empty<KLineNote>(),
+        };
     }
 
     /// <summary>
@@ -172,6 +195,7 @@ public static class DriveRun
         readonly CarControls car;
         readonly CycleWatch watch;
         readonly byte[]? eepromImage;
+        readonly KLineTester? tester;
         readonly List<TraceRow> trace = new();
         CarState state;
         int entered;
@@ -179,7 +203,9 @@ public static class DriveRun
         double? held;
         double lastChange = double.NegativeInfinity;
 
-        public CycleRun(FlashedImage image, Drive drive, MachineOptions options, int capacity, DriveContext context, int index, ulong start)
+        /// <param name="plug">Plugs the drive's K-line tester, if it has one, into this cycle's machine; null when the drive has no kline line.</param>
+        public CycleRun(FlashedImage image, Drive drive, MachineOptions options, int capacity, DriveContext context, int index, ulong start,
+            Func<Machine, ulong, KLineTester?> plug)
         {
             this.image = image;
             this.drive = drive;
@@ -196,6 +222,7 @@ public static class DriveRun
             (context.PowerCycleIndex, context.PowerCycleStart, context.Machine, context.Engine, context.Demand, context.Ended) = (index, start, Machine, null, null, null);
             context.RaiseStarted(Machine, index);
             Machine.PowerOn();
+            tester = plug(Machine, start);
             engine = Engine.Attach(Machine, Scenario);
             context.Engine = engine;
             var first = DriveTimeline.At(drive, Seconds);
@@ -317,6 +344,8 @@ public static class DriveRun
                     held = segment.Mode == DriveMode.Drive && point.RpmFromEngine ? engine.Rpm : null;
                     break;
             }
+            foreach (var action in segment.KLine)
+                tester?.Apply(action);
             context.RaiseSegmentEntered(point);
         }
 

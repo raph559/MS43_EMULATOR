@@ -34,9 +34,10 @@ public interface IKLinePort
 
 /// <summary>
 /// A byte the bus lost: <see cref="Kind"/> is "mismatch" (the device's bit time is more than 3 % from
-/// ASC0's) or "collision" (it overlapped another byte); <see cref="Cycle"/> is when it would have arrived.
+/// ASC0's) or "collision" (it overlapped another byte); <see cref="Cycle"/> is when it would have arrived;
+/// <see cref="From"/> is the end that sent it, "tester" (the device) or "ecu".
 /// </summary>
-public sealed record KLineNote(ulong Cycle, string Kind, byte Value);
+public sealed record KLineNote(ulong Cycle, string Kind, byte Value, string From);
 
 /// <summary>
 /// The car's K-line: one wire between the ECU's ASC0 and a tester (plan 5 C1–C3). A byte from either end
@@ -44,7 +45,7 @@ public sealed record KLineNote(ulong Cycle, string Kind, byte Value);
 /// time) goes into ASC0 with its even parity bit in bit 8, if the two bit times are within 3 %, and back to
 /// the device as its own echo. An ASC0 frame goes to the device and, in the same cycle, back into ASC0's own
 /// receiver, as the wire echoes it, whether or not a device is attached; ASC0 takes a frame or not as S0R
-/// and S0REN decide. Bytes that overlap in time are both lost, whichever began first, and each is noted as a
+/// and S0REN were at its start bit (the firmware turns its receiver off for its replies). Bytes that overlap in time are both lost, whichever began first, and each is noted as a
 /// collision in the cycle it would have arrived. Overlap is judged on exact cycles from ASC0's frame in
 /// progress: a byte that begins where the other ends does not overlap it, whichever event of that cycle runs first.
 /// [assumption] There is no transceiver delay. A byte at a bit time more than 3 % from ASC0's, and bytes
@@ -57,7 +58,7 @@ public sealed class KLineBus : IKLinePort
 {
     const int DeviceFrameBits = 11;          // start bit, 8 data bits, even parity, one stop bit
     const double BitTimeTolerance = 0.03;
-    const string Mismatch = "mismatch", Collision = "collision";
+    const string Mismatch = "mismatch", Collision = "collision", FromTester = "tester", FromEcu = "ecu";
 
     readonly Scheduler scheduler;
     readonly Asc0 ecu;
@@ -124,15 +125,15 @@ public sealed class KLineBus : IKLinePort
             collidedFrameEnd = frame.End;        // and the frame is lost with the byte when it ends
         }
         if (sent.Collided)
-            Note(Collision, sent.Value);
+            Note(Collision, sent.Value, FromTester);
         else if (Math.Abs(sent.BitCycles - ecu.BitCycles) > BitTimeTolerance * ecu.BitCycles)
-            Note(Mismatch, sent.Value);
+            Note(Mismatch, sent.Value, FromTester);
         else
-            ecu.Receive((ushort)(sent.Value | (EvenParityBit(sent.Value) << 8)));
+            ecu.Receive((ushort)(sent.Value | (EvenParityBit(sent.Value) << 8)), sent.Start);
         device?.OnLineByte(sent.Value, own: true, scheduler.Now);
     }
 
-    void OnEcuFrame(ushort frame)
+    void OnEcuFrame(ushort frame, ulong start)
     {
         var now = scheduler.Now;
         var collided = collidedFrameEnd == now;  // a device byte ended while this frame was on the line
@@ -145,14 +146,14 @@ public sealed class KLineBus : IKLinePort
         var value = (byte)frame;
         if (collided)
         {
-            Note(Collision, value);
+            Note(Collision, value, FromEcu);
             return;
         }
-        ecu.Receive(frame);
+        ecu.Receive(frame, start);
         device?.OnLineByte(value, own: false, now);
     }
 
-    void Note(string kind, byte value) => Noted?.Invoke(new KLineNote(scheduler.Now, kind, value));
+    void Note(string kind, byte value, string from) => Noted?.Invoke(new KLineNote(scheduler.Now, kind, value, from));
 
     static int EvenParityBit(byte value) => BitOperations.PopCount(value) & 1;
 

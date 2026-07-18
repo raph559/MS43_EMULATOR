@@ -25,10 +25,10 @@ internal static class RunState
     internal static bool Recognises(FirmwareImage image) =>
         Checkpoints.All(c => image.Bytes.Slice((int)(c.Cpu & 0x7FFFF), c.Bytes.Length).SequenceEqual(c.Bytes));
 
-    internal static StubInfo[] Stubs(bool canPartners, bool engine, bool drive = false)
+    internal static StubInfo[] Stubs(bool canPartners, bool engine, bool drive = false, bool klineTester = false)
     {
         if (drive)
-            return DriveStubs();
+            return DriveStubs(klineTester);
         var stubs = new List<StubInfo>
         {
             new("EEPROM", "blank or from a file", false),
@@ -58,9 +58,10 @@ internal static class RunState
     /// <summary>
     /// A drive's stubs, each on the "not between" side of design §7's line with its reason (plan 4 C1):
     /// the checks read the CPU's own pins upstream of the driver chips, and the rest are inputs or laws
-    /// derived from the CPU's outputs.
+    /// derived from the CPU's outputs. With <paramref name="klineTester"/>, the drive's kline lines play the
+    /// app's DS2 session on the K-line (plan 5 Task 4).
     /// </summary>
-    static StubInfo[] DriveStubs() => new StubInfo[]
+    static StubInfo[] DriveStubs(bool klineTester) => new StubInfo[]
     {
         new("EEPROM", "blank or from the previous power cycle's after-run", false,
             "an input the program reads; no checked output passes through it"),
@@ -75,7 +76,10 @@ internal static class RunState
         new("engine", "the starter and the idle plant at start and idle, the drive's scripted speed off idle, the breathing law's air; no torque model", false,
             "the plant around the ECU: it feeds inputs; the checks judge the CPU's outputs against it"),
         new("steering wheel", "the \"no button\" frame train while the key is on", false, "an input from the car"),
-        new("K-line tester", "none", false, "nothing is connected"),
+        klineTester
+            ? new("K-line tester", "the app's DS2 session (scripted)", false,
+                "it only puts the drive's requests on the K-line and reads the replies; no checked output passes through it")
+            : new("K-line tester", "none", false, "nothing is connected"),
     };
 
     /// <summary>RAM read-outs (plan 2, Reference facts): IRAM through the bus; XRAM and the external RAM from their arrays.</summary>

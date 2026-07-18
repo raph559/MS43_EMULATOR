@@ -22,6 +22,16 @@ public class SchedulerCheckTests
         Assert.Empty(r.Check("scheduler").Findings);
     }
 
+    [Fact] public void TheAppsConnect_PassesTheScheduler()
+    {
+        // The serial-line task T10ms:08h (09:FAAE) holds the connect's reply by arming itself for 40 ms (F910 = 4), and every
+        // 10 ms again once the session runs: R2 judges each gap by the period the task armed, not by 10 ms.
+        var r = DriveRunWithChecks(DriveParser.Parse("drive connect\nstart blank\nset coolant=90 oil=90 intake=33 ambient=20 clock=60\n"
+            + "3 on\n1.5 crank rpm=200\n5 idle\nkline connect\nkline poll\n3 idle\n"));
+        Assert.Contains(r.KLine, e => e.Outcome == KLineOutcome.Replied && e.Request[2] == 0x91);
+        Assert.True(r.Check("scheduler").Status == CheckStatus.Pass, Why(r.Check("scheduler")));
+    }
+
     [Fact] public void StockFile_NotEvaluated_ForTheScheduler()             // the stock program's hook sites differ
     {
         var r = DriveRunWithChecks(DriveBuilder.Named("warm-start"), TestImages.AsFlashed(TestBins.StockBytes));
