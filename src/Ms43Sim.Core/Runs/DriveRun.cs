@@ -336,7 +336,12 @@ public static class DriveRun
                     break;
                 case DriveMode.Crank:
                     Key(true);
+                    engine.Starve(false);
                     engine.StartStarter(point.Values["rpm"]);
+                    break;
+                case DriveMode.Stall:
+                    Key(true);
+                    engine.Starve(true);
                     break;
                 case DriveMode.Idle or DriveMode.Drive:
                     if (previous == DriveMode.Crank)

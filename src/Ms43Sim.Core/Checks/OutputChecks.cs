@@ -258,20 +258,39 @@ public static class OutputChecks
         }
     }
 
+    /// <summary>
+    /// Armed from power-on and again from each stop of the engine inside the power cycle (a stall, plan 5 Task 5), until
+    /// the next crank tooth: no injector or coil may switch while the shaft has not turned.
+    /// </summary>
     sealed class BeforeRotation() : CheckBase("before-rotation")
     {
         protected override void Start(Machine machine, int index)
         {
-            var crank = new CrankClock(machine, Context);
+            var armed = true;
+            var restart = false;
             machine.Scheduler.Schedule(0, "before-rotation", () =>
             {
                 if (Context.Shaft is { } shaft)
-                    shaft.ToothPassed += () => Exercise();
+                    shaft.ToothPassed += () =>
+                    {
+                        Exercise();
+                        armed = false;
+                    };
+                if (Context.Engine is { } engine)
+                    engine.PhaseChanged += phase =>
+                    {
+                        if (phase == EnginePhase.Stopped && !armed)
+                            (armed, restart) = (true, true);
+                    };
             });
             machine.Ports.OutputEdge += (port, bit, level) =>
             {
-                if (port == 2 && bit <= 11 && crank.First is null)
-                    Find($"P2.{bit}", $"an output edge on P2.{bit} ({(bit < 6 ? $"injector, cylinder {bit + 1}" : $"coil, cylinder {bit - 5}")}) in power cycle {index + 1} before its first crank tooth");
+                if (port != 2 || bit > 11 || !armed)
+                    return;
+                var output = bit < 6 ? $"injector, cylinder {bit + 1}" : $"coil, cylinder {bit - 5}";
+                Find($"P2.{bit}", restart
+                    ? $"an output edge on P2.{bit} ({output}) in power cycle {index + 1} while the engine was stopped, before its next crank tooth"
+                    : $"an output edge on P2.{bit} ({output}) in power cycle {index + 1} before its first crank tooth");
             };
         }
     }

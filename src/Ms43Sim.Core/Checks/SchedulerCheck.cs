@@ -22,7 +22,9 @@ namespace Ms43Sim.Core;
 /// below 2,000 rpm; one set at 2,000 rpm or more is a note, not a finding (the car's full-load pull sets
 /// FD84.7 at the ISM's minimum timing, Task 11).</item>
 /// </list>
-/// R1 and R3 are judged at every speed.
+/// R1 and R3 are judged at every speed. On the shaft's first tooth after the engine stopped inside the power cycle (a
+/// stall, plan 5 Task 5), R2 and R3 start again as at power-on: no gap is judged across the stop, and a periodic task's
+/// first run is due by 2 × period + 1.1 s after that tooth. R4's flags are sticky, so one seen before the stop stays seen.
 /// Not evaluated when the program is not MS43X001 or the hook sites do not hold the car file's bytes.
 /// </summary>
 public sealed class SchedulerCheck() : CheckBase("scheduler")
@@ -105,6 +107,8 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
         ulong? lastService, lastCrankTask;
         double crankRpmAtLastRun;
         bool crankOverdue;
+        ulong windowStart;                                                      // power-on, or the restart's first tooth
+        bool engineStopped;
 
         public Window(SchedulerCheck check, Machine machine, int index)
         {
@@ -132,6 +136,29 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
             });
             Poll(5 * Ms);
             Flags(10 * Ms);
+            machine.Scheduler.Schedule(0, "scheduler restart", () =>
+            {
+                if (check.Context.Engine is { } engine)
+                    engine.PhaseChanged += phase => engineStopped |= phase == EnginePhase.Stopped;
+                if (check.Context.Shaft is { } shaft)
+                    shaft.ToothPassed += () =>
+                    {
+                        if (engineStopped)
+                            Restart();
+                    };
+            });
+        }
+
+        /// <summary>The restart's first tooth: R2 and R3 start again as at power-on.</summary>
+        void Restart()
+        {
+            engineStopped = false;
+            windowStart = machine.Cycles;
+            lastRun.Clear();
+            rpmAtRun.Clear();
+            overdue.Clear();
+            missed.Clear();
+            (lastCrankTask, crankOverdue) = (null, false);
         }
 
         bool Watching => open && !closed;
@@ -235,9 +262,9 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
                         if (period > 0 && now - before > Limit(period) && Judged(key) && overdue.Add(key))
                             Late(key, period, before, now);
                     }
-                    else if (now > (ulong)(2 * fixedPeriod + 1100) * Ms && missed.Add(key))
+                    else if (now > windowStart + (ulong)(2 * fixedPeriod + 1100) * Ms && missed.Add(key))
                         check.Find($"R2 {key.Kind}:{key.Id:X2} first",
-                            $"R2: {key.Kind}:{key.Id:X2}h (every {fixedPeriod} ms) had not run {2 * fixedPeriod + 1100} ms after power-on");
+                            $"R2: {key.Kind}:{key.Id:X2}h (every {fixedPeriod} ms) had not run {2 * fixedPeriod + 1100} ms after {(windowStart == 0 ? "power-on" : "the restart's first tooth")}");
                 }
                 var rpm = check.Context.Shaft?.Rpm ?? 0;
                 Above(now, rpm >= HighRpm);

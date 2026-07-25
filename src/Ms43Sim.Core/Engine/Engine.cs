@@ -14,7 +14,7 @@ public sealed record EnginePhaseChange(ulong Cycle, EnginePhase Phase);
 /// least 0.5 ms high (<see cref="MinSparkDwellCycles"/>; an ignition cut's 44–125 µs pulses store no
 /// energy, plan 4 R1) — and a rising edge (a closing) of an output injector pin P2.0–P2.5, each within
 /// the last 0.25 s. Only edges of pins that are outputs before and after count (<see cref="Ports.OutputEdge"/>):
-/// a direction set-up is not an edge.</item>
+/// a direction set-up is not an edge. A starved engine (<see cref="Starve"/>, a drive's stall) never combusts.</item>
 /// <item>Phases [assumption]: Stopped until the scenario's crank time (or until a drive starts the
 /// starter, <see cref="StartStarter"/>); Starter for its starter time (or until <see cref="StopStarter"/>),
 /// 0 → the starter speed in 0.2 s; then Running if combusting, else Stopping. Running without
@@ -54,6 +54,7 @@ public sealed class Engine
     double starterRpm, intakeC, coolantC;
     double? commanded;
     ulong? lastSpark, lastClosing;
+    bool starved;
     readonly ulong?[] coilRise = new ulong?[6];
     long burnEnd = -1;
 
@@ -104,6 +105,9 @@ public sealed class Engine
     /// <summary>Every phase change, starting with (attach cycle, Stopped).</summary>
     public IReadOnlyList<EnginePhaseChange> Phases => phases;
 
+    /// <summary>Raised on each phase change after the attach, with the new phase.</summary>
+    public event Action<EnginePhase>? PhaseChanged;
+
     public double Rpm { get; private set; }
 
     public double AirflowKgPerHour { get; private set; }
@@ -130,6 +134,12 @@ public sealed class Engine
 
     /// <summary>The starter releases at the next step: the engine runs on if it is combusting.</summary>
     public void StopStarter() => releaseAt = machine.Cycles;
+
+    /// <summary>
+    /// While <paramref name="starved"/>, nothing burns, whatever the ECU sparks and injects: the engine runs down and stops
+    /// with the key on (a drive's stall, plan 5 Task 5). A crank feeds it again.
+    /// </summary>
+    public void Starve(bool starved) => this.starved = starved;
 
     /// <summary>The intake air and coolant temperatures the breathing law's density uses (the scenario's until set).</summary>
     public void SetTemperatures(double intakeC, double coolantC) => (this.intakeC, this.coolantC) = (intakeC, coolantC);
@@ -187,7 +197,7 @@ public sealed class Engine
             var command = Math.Min(ValveFlow * d, FullLoad * Rpm / MgPerStroke);
             AirflowKgPerHour += (command - AirflowKgPerHour) * (1 - Math.Exp(-stepSeconds / FlowLag));
         }
-        Combusting = Recent(lastSpark) && Recent(lastClosing);
+        Combusting = !starved && Recent(lastSpark) && Recent(lastClosing);
 
         if (commanded is { } scripted)
         {
@@ -254,5 +264,6 @@ public sealed class Engine
             _ => Scenario.BatteryOff,
         };
         machine.Board.SetInputs(machine.Board.Inputs.WithBattery(battery));
+        PhaseChanged?.Invoke(phase);
     }
 }
