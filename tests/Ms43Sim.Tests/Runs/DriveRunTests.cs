@@ -94,6 +94,13 @@ public class DriveRunTests
     public void ACycleEnds_ByTheRelay_TheDrivesKey_AndTheKeyAsRead(bool dropped, bool driveKeyOn, bool readOn, CycleEnd end) =>
         Assert.Equal(end, DriveRun.EndOf(dropped, driveKeyOn, readOn));
 
+    [Theory]                                                                       // plan 5 Task 6: the firmware's SRST after the drop
+    [InlineData(true, true, true, CycleEnd.Restarted)]
+    [InlineData(true, false, false, CycleEnd.AfterRun)]                            // a drop with the key off powers the ECU off first
+    [InlineData(false, true, true, CycleEnd.DriveEnded)]
+    public void AReset_AfterADropWithTheKeyOn_IsARestart(bool dropped, bool driveKeyOn, bool readOn, CycleEnd end) =>
+        Assert.Equal(end, DriveRun.EndOf(dropped, driveKeyOn, readOn, restarted: dropped && driveKeyOn));
+
     [Fact] public void AnOffWithItsAfterRun_EndsTheCycleNormally()
     {
         var r = DriveRun.RunWithChecks(TestImages.Car, DriveBuilder.Named("key-cycle"));

@@ -146,6 +146,8 @@ public static class DriveReportWriter
             var m = cycle.Milestones;
             s.AppendLine($"- handover {Since(m.Handover)}, main loop {Since(m.MainLoop)}, key-off {Since(m.KeyOff)}, power-off {Since(m.PowerOff)} (from this cycle's power-on)");
             s.AppendLine($"- ended: {Ended(cycle.End)}");
+            if (cycle.KeySwitches.Count > 0)
+                s.AppendLine($"- the key: {string.Join(", ", cycle.KeySwitches.Select(k => $"{(k.On ? "on" : "off")} at {Seconds(k.Cycle)} s"))}");
             if (cycle.Engine is { } engine)
                 s.AppendLine($"- engine: {engine.Describe()}");
             s.AppendLine($"- EEPROM: {cycle.Eeprom.WordsRead:N0} words read, {cycle.Eeprom.WordsWritten:N0} written; E17A (the throttle check) = {cycle.Firmware.ThrottleCheckState}");
@@ -209,6 +211,7 @@ public static class DriveReportWriter
         CycleEnd.DriveEnded => "the drive's end",
         CycleEnd.AfterRun => "the after-run: the main relay dropped after the key-off",
         CycleEnd.RelayDroppedKeyOn => "**the main relay dropped with the key on** (the ECU switched itself off)",
+        CycleEnd.Restarted => "the firmware's restart: the main relay dropped with the key on, then the ECU reset itself (SRST) and booted again",
         _ => "**the main relay dropped while the drive had the key on** (the firmware read it off: AN1 forced)",
     };
 

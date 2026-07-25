@@ -14,9 +14,14 @@ public sealed record DriveRunOptions(MachineOptions? Machine = null, byte[]? Eep
 /// <summary>
 /// Why a power cycle's run stopped (final review I3): the drive's time ran out; the main relay dropped
 /// after the drive turned the key off (the after-run's end); or it dropped while the drive had the key
-/// on, with the firmware reading the key on (the ECU switched itself off) or off (AN1 forced).
+/// on, with the firmware reading the key on (the ECU switched itself off) or off (AN1 forced); or it
+/// dropped with the key on and the firmware reset itself (SRST) and booted again, which starts the next
+/// power cycle (plan 5 Task 6).
 /// </summary>
-public enum CycleEnd { DriveEnded, AfterRun, RelayDroppedKeyOn, RelayDroppedKeyReadOff }
+public enum CycleEnd { DriveEnded, AfterRun, RelayDroppedKeyOn, RelayDroppedKeyReadOff, Restarted }
+
+/// <summary>The drive turned the key off or on, in the drive's time.</summary>
+public sealed record KeySwitch(ulong Cycle, bool On);
 
 /// <summary>
 /// One power cycle of a drive: StartCycle and EndCycle in the drive's time; the milestones, the
@@ -26,7 +31,11 @@ public enum CycleEnd { DriveEnded, AfterRun, RelayDroppedKeyOn, RelayDroppedKeyR
 /// </summary>
 public sealed record PowerCycle(int Index, ulong StartCycle, StartupMilestones Milestones, EngineSummary? Engine,
     FaultMemoryState Faults, IReadOnlyList<FaultEntry> SavedFaults, FirmwareState Firmware, EepromSummary Eeprom,
-    SchedulerHealth Scheduler, ulong EndCycle, FaultContext FaultContext, CycleEnd End);
+    SchedulerHealth Scheduler, ulong EndCycle, FaultContext FaultContext, CycleEnd End)
+{
+    /// <summary>Every time the drive turned the key off or on in this power cycle, in the drive's time (plan 5 Task 6).</summary>
+    public IReadOnlyList<KeySwitch> KeySwitches { get; init; } = Array.Empty<KeySwitch>();
+}
 
 /// <summary>
 /// A whole drive: its power cycles, and every power cycle's outputs, cylinder events, trace and machine
@@ -173,11 +182,15 @@ public static class DriveRun
     /// Why a power cycle's run ended: whether the main relay dropped (after the handover), whether the
     /// drive had the key on then, and whether the firmware read it on (AN1).
     /// </summary>
-    public static CycleEnd EndOf(bool relayDropped, bool driveKeyOn, bool keyReadOn) =>
+    public static CycleEnd EndOf(bool relayDropped, bool driveKeyOn, bool keyReadOn, bool restarted = false) =>
         !relayDropped ? CycleEnd.DriveEnded
         : !driveKeyOn ? CycleEnd.AfterRun
+        : restarted ? CycleEnd.Restarted
         : keyReadOn ? CycleEnd.RelayDroppedKeyOn
         : CycleEnd.RelayDroppedKeyReadOff;
+
+    /// <summary>How long a run goes on after the relay dropped with the key on, waiting for the firmware's reset: 1 s.</summary>
+    const ulong RestartWait = 24_000_000;
 
     static string Source(byte[]? eeprom) =>
         eeprom is null ? "blank" : Convert.ToHexString(SHA256.HashData(eeprom)).ToLowerInvariant();
@@ -200,6 +213,8 @@ public static class DriveRun
         CarState state;
         int entered;
         bool keyOff;
+        readonly List<KeySwitch> keySwitches = new();
+        ulong? restartedAt;                                      // the firmware's reset after the relay dropped with the key on
         double? held;
         double lastChange = double.NegativeInfinity;
 
@@ -222,6 +237,11 @@ public static class DriveRun
             (context.PowerCycleIndex, context.PowerCycleStart, context.Machine, context.Engine, context.Demand, context.Ended) = (index, start, Machine, null, null, null);
             context.RaiseStarted(Machine, index);
             Machine.PowerOn();
+            Machine.Events.Added += e =>
+            {
+                if (e is ResetEvent { Kind: ResetKind.Software } && watch?.PowerOff != null)
+                    restartedAt ??= Machine.Cycles;
+            };
             tester = plug(Machine, start);
             engine = Engine.Attach(Machine, Scenario);
             context.Engine = engine;
@@ -261,17 +281,31 @@ public static class DriveRun
 
         public void RunTo(ulong total)
         {
-            Machine.Run(total - Start, _ => watch.PowerOff != null);
-            End = EndOf(watch.PowerOff != null, !keyOff, CarControls.KeyIsOn(Machine.Board));
+            Machine.Run(total - Start, _ => PoweredOff());
+            End = EndOf(watch.PowerOff != null, !keyOff, CarControls.KeyIsOn(Machine.Board), restartedAt != null);
             context.Ended = End;
             context.RaiseEnded(Machine, index);
         }
 
-        /// <summary>The drive's cycle of the key-on after this cycle's relay drop, or null when no segment turns the key on again.</summary>
+        /// <summary>
+        /// The ECU loses its power when the main relay drops with the key off, or read off. With the key on, KL15 keeps the
+        /// CPU powered [obs: the firmware's loop after its relay drop, 0D:840E-0D:8434, waits about 10 ms, then for the key,
+        /// and resets itself by SRST once it reads on]: the run goes on until that reset, which starts the next power cycle,
+        /// or for <see cref="RestartWait"/> at most (plan 5 Task 6).
+        /// </summary>
+        bool PoweredOff() => watch.PowerOff is { } off
+            && (keyOff || !CarControls.KeyIsOn(Machine.Board) || restartedAt != null || Machine.Cycles - off >= RestartWait);
+
+        /// <summary>
+        /// The drive's cycle of the next power-on: the firmware's own reset after a relay drop with the key on, else the key-on
+        /// after this cycle's relay drop; null when neither comes.
+        /// </summary>
         public ulong? NextPowerOn()
         {
             if (watch.PowerOff is null)
                 return null;
+            if (restartedAt is not null)
+                return Start + Machine.Cycles;                    // where this run stopped: at the firmware's reset
             for (var i = entered + 1; i < drive.Segments.Count; i++)
             {
                 if (drive.Segments[i - 1].Mode == DriveMode.Off && drive.Segments[i].Mode != DriveMode.Off)
@@ -291,10 +325,13 @@ public static class DriveRun
 
         public PowerCycle Result() => new(index, Start, watch.Milestones,
             new EngineSummary(engine.Scenario.Name, engine.Phases.ToArray(), engine.Rpm, engine.AirflowKgPerHour,
-                engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard, EngineSummary.OutcomeOf(engine.Phases, watch.KeyOff)),
+                engine.Vanos.IntakeAdvance, engine.Vanos.ExhaustRetard, EngineSummary.OutcomeOf(engine.Phases, KeyOffAt)),
             FaultMemory.Read(Machine), FaultMemory.SavedInEeprom(image.Image, Machine.Board.Eeprom.ToImage()),
             RunState.ReadFirmwareState(Machine), Eeprom(), watch.Health, Start + Machine.Cycles,
-            new FaultContext(eepromImage is not { } start || start.All(b => b == 0xFF), CanPartners: true), End);
+            new FaultContext(eepromImage is not { } start || start.All(b => b == 0xFF), CanPartners: true), End)
+        {
+            KeySwitches = keySwitches.ToArray(),
+        };
 
         void Every(ulong at) => Machine.Scheduler.Schedule(at, "drive step", () =>
         {
@@ -368,8 +405,12 @@ public static class DriveRun
             if (keyOff == !on)
                 return;
             keyOff = !on;
+            keySwitches.Add(new KeySwitch(Start + Machine.Cycles, on));
             Machine.Board.SetInputs(Machine.Board.Inputs.WithIgnition(on));
         }
+
+        /// <summary>The key was off in <paramref name="cycle"/> of this machine: the last switch at or before it turned it off.</summary>
+        bool KeyOffAt(ulong cycle) => keySwitches.LastOrDefault(k => k.Cycle - Start <= cycle) is { On: false };
 
         static (double Pedal, double Clutch, double Gear) Controls(DrivePoint point) =>
             (point.Values["pedal"], point.Values["clutch"], point.Values["gear"]);

@@ -22,14 +22,18 @@ public sealed record EngineSummary(string Scenario, IReadOnlyList<EnginePhaseCha
     /// after the key-off when its last run-down began at or after the key-off, and stalled when it
     /// began with the key still on.
     /// </summary>
-    public static EngineOutcome OutcomeOf(IReadOnlyList<EnginePhaseChange> phases, ulong? keyOffCycle)
+    public static EngineOutcome OutcomeOf(IReadOnlyList<EnginePhaseChange> phases, ulong? keyOffCycle) =>
+        OutcomeOf(phases, cycle => keyOffCycle is { } k && cycle >= k);
+
+    /// <summary>The outcome, with <paramref name="keyOffAt"/> saying whether the key was off when the last run-down began.</summary>
+    public static EngineOutcome OutcomeOf(IReadOnlyList<EnginePhaseChange> phases, Func<ulong, bool> keyOffAt)
     {
         if (!phases.Any(p => p.Phase == EnginePhase.Running))
             return EngineOutcome.NeverStarted;
         if (phases[^1].Phase == EnginePhase.Running)
             return EngineOutcome.Running;
         var runDown = phases.Last(p => p.Phase == EnginePhase.Stopping).Cycle;
-        return keyOffCycle is { } k && runDown >= k ? EngineOutcome.StoppedAfterKeyOff : EngineOutcome.Stalled;
+        return keyOffAt(runDown) ? EngineOutcome.StoppedAfterKeyOff : EngineOutcome.Stalled;
     }
 
     /// <summary>The outcome in words, for the report and the console.</summary>

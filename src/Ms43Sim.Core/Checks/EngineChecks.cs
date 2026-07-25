@@ -232,7 +232,9 @@ public static class EngineChecks
 
         protected override void End(Machine machine, int index)
         {
-            if (mode == DriveMode.Crank && Context.Engine?.Phase != EnginePhase.Running)
+            // A restart (the firmware's reset after a relay drop with the key on) ends the power cycle, not the crank: it
+            // goes on in the next power cycle and is judged there.
+            if (mode == DriveMode.Crank && Context.Ended != CycleEnd.Restarted && Context.Engine?.Phase != EnginePhase.Running)
                 Find($"crank {line}", $"the crank at line {line} ended with the drive, the engine not running on its own");
         }
 
