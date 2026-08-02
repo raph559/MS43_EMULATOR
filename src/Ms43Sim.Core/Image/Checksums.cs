@@ -30,6 +30,12 @@ public static class Checksums
     const int ProgramCrcStore = 0x6FDE0, ProgramCrcSeedPointer = 0x6ED42;
     const int CalCrcStore = 0x73FE0, CalCrcSeedPointer = 0x6ED5A;
 
+    /// <summary>Where each checksum is stored, as file offsets and lengths (plan 5 R7): what the flasher rewrites.</summary>
+    public static IReadOnlyList<(int Offset, int Bytes)> StoredFields { get; } = new[]
+    {
+        (BootCrcStore, 2), (ProgramSumStore, 4), (ProgramCrcStore, 2), (CalSumStore, 4), (CalCrcStore, 2),
+    };
+
     public static IReadOnlyList<ChecksumResult> Verify(ReadOnlySpan<byte> image) => new[]
     {
         new ChecksumResult(ChecksumKind.ProgramSum, ProgramSumStore, U32(image, ProgramSumStore),
