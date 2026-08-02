@@ -33,6 +33,16 @@ public static class Program
         "      warm-start drive first: its final EEPROM is where the seasoned drives start;\n" +
         "      --jobs N runs the others N at a time; one folder and one line per drive; the\n" +
         "      exit code is the worst verdict\n" +
+        "  ms43sim compare REF CANDIDATE --drive FILE [--eeprom FILE] [--xdf FILE] [--out DIR]\n" +
+        "  ms43sim compare REF CANDIDATE [--drives DIR] [--jobs N] [--xdf FILE] [--out DIR]\n" +
+        "                  [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
+        "      runs both bins (flashed the same way) through one drive, or every *.drive in DIR\n" +
+        "      (default: sim/drives), the warm-start drive first: both seasoned runs start from\n" +
+        "      the reference's warm-start EEPROM; names calibration differences from\n" +
+        "      calmaps_ms43x.csv (found in the current folder or above) and --xdf's constants,\n" +
+        "      lists code differences, and lines the runs up per engine event and per sample;\n" +
+        "      writes compare-report.md, diff.csv and both runs' files (summary.md for a set);\n" +
+        "      the exit code is the worse verdict\n" +
         "  ms43sim decode --listing BIN\n" +
         "      linear-sweep listing of the code regions (offset size mnemonic)";
 
@@ -60,6 +70,7 @@ public static class Program
                 "run" when args.Contains("--drive") => DriveCommand(args[1..], output, error),
                 "run" => RunCommand(args[1..], output, error),
                 "check" => CheckCommand(args[1..], output, error),
+                "compare" => CompareCommand(args[1..], output, error),
                 "decode" => Decode(args[1..], output, error),
                 _ => UsageError(error, $"unknown command '{args[0]}'"),
             };
@@ -229,7 +240,7 @@ public static class Program
         return 0;
     }
 
-    static readonly string[] DriveOutputs = { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin", "verdict.txt" };
+    static readonly string[] DriveOutputs = { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin", "verdict.txt", "kline.csv" };
 
     static int DriveCommand(string[] args, TextWriter output, TextWriter error)
     {
@@ -354,6 +365,108 @@ public static class Program
             : verdicts.Contains(RunVerdict.Incomplete) ? RunVerdict.Incomplete
             : RunVerdict.Pass;
         output.WriteLine($"check: {DriveReportWriter.Word(worst)} ({verdicts.Count} drives; reports in {outDir})");
+        return (int)worst;
+    }
+
+    static int CompareCommand(string[] args, TextWriter output, TextWriter error)
+    {
+        var bins = new List<string>();
+        var image = new ImageArgs();
+        string? outDir = null, driveFile = null, drivesDir = null, eepromFile = null, xdf = null;
+        var jobs = 1;
+        for (var i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--drive" when i + 1 < args.Length: driveFile = args[++i]; break;
+                case "--drives" when i + 1 < args.Length: drivesDir = args[++i]; break;
+                case "--eeprom" when i + 1 < args.Length: eepromFile = args[++i]; break;
+                case "--xdf" when i + 1 < args.Length: xdf = args[++i]; break;
+                case "--out" when i + 1 < args.Length: outDir = args[++i]; break;
+                case "--jobs" when i + 1 < args.Length:
+                    if (!int.TryParse(args[++i], NumberStyles.None, CultureInfo.InvariantCulture, out jobs) || jobs < 1)
+                        return UsageError(error, "--jobs needs a whole number of 1 or more");
+                    break;
+                case "--raw" or "--partial-onto" or "--ecu-boot":
+                    if (!image.Take(args, ref i))
+                        return UsageError(error, $"{args[i]} needs a FILE");
+                    break;
+                default:
+                    if (args[i].StartsWith("--", StringComparison.Ordinal) || bins.Count == 2)
+                        return UsageError(error, $"unexpected argument '{args[i]}'");
+                    bins.Add(args[i]);
+                    break;
+            }
+        }
+        if (bins.Count < 2)
+            return UsageError(error, "compare needs a REF and a CANDIDATE");
+        image.Bin = bins[0];
+        if (image.Problem("compare") is { } problem)
+            return UsageError(error, problem);
+        if (driveFile != null && drivesDir != null)
+            return UsageError(error, "--drive cannot be combined with --drives: one drive, or a folder of them");
+        if (eepromFile != null && driveFile == null)
+            return UsageError(error, "--eeprom goes with --drive: a set starts its seasoned drives from the reference's warm-start EEPROM");
+
+        var drives = new List<Drive>();
+        if (driveFile != null)
+        {
+            if (ReadDrive(driveFile, error) is not { } drive)
+                return 2;
+            if (drive.Start == StartEeprom.Seasoned && eepromFile is null)
+                return UsageError(error, $"the drive {drive.Name} starts seasoned: give --eeprom FILE (the eeprom.bin of a warm-start run)");
+            drives.Add(drive);
+        }
+        else
+        {
+            drivesDir ??= FindStandardDrives();
+            if (drivesDir is null || !Directory.Exists(drivesDir))
+                return UsageError(error, drivesDir is null ? "no --drives DIR, and no sim/drives above the current folder" : $"no folder {drivesDir}");
+            var names = new HashSet<string>();
+            foreach (var file in Directory.GetFiles(drivesDir, "*.drive").Order(StringComparer.Ordinal))
+            {
+                if (ReadDrive(file, error) is not { } drive)
+                    return 2;
+                if (!names.Add(drive.Name))
+                    return UsageError(error, $"two drives in {drivesDir} are called {drive.Name}: a drive's name must be unique");
+                drives.Add(drive);
+            }
+            if (drives.Count == 0)
+                return UsageError(error, $"no *.drive files in {drivesDir}");
+            if (drives.All(d => d.Name != Compare.WarmStart) && drives.Any(d => d.Start == StartEeprom.Seasoned))
+                return UsageError(error, "a seasoned drive needs the warm-start drive in the folder: the reference's final EEPROM there is where it starts (C6)");
+        }
+        var label = driveFile != null ? drives[0].Name : "set";
+        outDir ??= Path.Combine("runs", $"compare-{label}-{Path.GetFileNameWithoutExtension(bins[0])}-vs-{Path.GetFileNameWithoutExtension(bins[1])}");
+        var inputs = bins.Concat(image.Inputs.Skip(1)).Append(eepromFile).Append(driveFile).Append(xdf);
+        if (Overwritten(inputs, outDir, "compare-report.md", "diff.csv", "summary.md") is { } clash)
+            return UsageError(error, $"the compare would write over its input {clash}: choose another --out");
+
+        FlashedImage Build(string bin) => new ImageArgs { Bin = bin, Raw = image.Raw, PartialOnto = image.PartialOnto, EcuBoot = image.EcuBoot }.Build();
+        var reference = Build(bins[0]);
+        var candidate = Build(bins[1]);
+        var csv = CalibrationCatalogue.FindUpwards("calmaps_ms43x.csv", Directory.GetCurrentDirectory());
+        var catalogue = csv is null ? CalibrationCatalogue.Empty : CalibrationCatalogue.Load(csv, xdf);
+        if (csv is null)
+            error.WriteLine("ms43sim: calmaps_ms43x.csv is not in the current folder or above it: every changed calibration range is unnamed");
+        var options = new Ms43Sim.Core.CompareOptions(Eeprom: eepromFile != null ? File.ReadAllBytes(eepromFile) : null, Catalogue: catalogue);
+
+        IReadOnlyList<CompareResult> results;
+        if (driveFile != null)
+        {
+            var one = Compare.Run(reference, candidate, drives[0], options);
+            CompareReportWriter.Write(one, outDir);
+            results = new[] { one };
+        }
+        else
+        {
+            results = Compare.RunSet(reference, candidate, drives, options, jobs);
+            CompareReportWriter.WriteSet(results, outDir);
+        }
+        foreach (var r in results)
+            output.WriteLine($"{r.Drive}: {DriveReportWriter.Word(r.Verdict)} ({r.Calibration.Count} calibration, {r.Code.Count} code, {r.Behaviour.Count} behaviour differences)");
+        var worst = results.Select(r => r.Verdict).Aggregate(RunVerdict.Pass, Compare.Worse);
+        output.WriteLine($"compare: {DriveReportWriter.Word(worst)} (reports in {outDir})");
         return (int)worst;
     }
 

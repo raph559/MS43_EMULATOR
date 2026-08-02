@@ -16,15 +16,22 @@ public sealed record CatalogueEntry(string Name, uint Address, int Bytes);
 /// </summary>
 public sealed class CalibrationCatalogue
 {
-    CalibrationCatalogue(IReadOnlyList<CatalogueEntry> entries) => Entries = entries;
+    CalibrationCatalogue(IReadOnlyList<CatalogueEntry> entries, string source) => (Entries, Source) = (entries, source);
+
+    /// <summary>No names: every changed calibration range is unnamed.</summary>
+    public static CalibrationCatalogue Empty { get; } = new(Array.Empty<CatalogueEntry>(), "none: every changed calibration range is unnamed");
 
     /// <summary>Every entry, by address.</summary>
     public IReadOnlyList<CatalogueEntry> Entries { get; }
+
+    /// <summary>Where the names come from, in words, for a report.</summary>
+    public string Source { get; }
 
     public static CalibrationCatalogue Load(string calmapsCsv, string? xdf = null)
     {
         var entries = new List<CatalogueEntry>();
         var seen = new HashSet<(uint, string)>();
+        var source = $"{Path.GetFileName(calmapsCsv)} (tables and their axes)";
         void Add(string name, uint address, int bytes)
         {
             if (name.Length > 0 && bytes > 0 && seen.Add((address, name)))
@@ -68,9 +75,10 @@ public sealed class CalibrationCatalogue
                 var at = subtract ? baseOffset - Number(address.Value) : baseOffset + Number(address.Value);
                 Add(constant.Element("title")?.Value.Trim() ?? "", at, Math.Max(1, bits / 8));
             }
+            source += $" and {Path.GetFileName(xdf)} (constants)";
         }
 
-        return new CalibrationCatalogue(entries.OrderBy(e => e.Address).ThenBy(e => e.Name, StringComparer.Ordinal).ToList());
+        return new CalibrationCatalogue(entries.OrderBy(e => e.Address).ThenBy(e => e.Name, StringComparer.Ordinal).ToList(), source);
     }
 
     /// <summary>The full path of <paramref name="fileName"/> (it may name a sub-folder) in <paramref name="from"/> or a folder above it; null when none holds it.</summary>
