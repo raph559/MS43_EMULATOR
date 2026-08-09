@@ -6,14 +6,15 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
 - Design: `docs/superpowers/specs/2026-10-20-ms43-emulator-design.md`
 - Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md`,
   `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`,
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md` and
-  `docs/superpowers/plans/2026-10-21-ms43-emulator-plan4-checks-drives.md`; their records
+  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md`,
+  `docs/superpowers/plans/2026-10-21-ms43-emulator-plan4-checks-drives.md` and
+  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan5-kline-compare.md`; their records
   (rulings, review findings, open items) beside them
 - Devices and what is modelled: `HARDWARE.md`
-- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up), §9.8 (warm idle) and §9.9
-  (checks and drives)
+- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up), §9.8 (warm idle), §9.9
+  (checks and drives) and §9.10 (the K-line, restarts and the compare)
 
-**Status:** plan 4 done (2026-10-21).
+**Status:** plan 5 done (2026-10-22).
 - Plan 1 gave the CPU, bus, traps, interrupts, PEC, watchdog, timing and the boot runner.
 - Plan 2 added:
   - the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0 and CAN;
@@ -36,6 +37,13 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
   - the engine off idle at the drive's speed, breathing from the car's throttle-air table;
   - 16 checks, a verdict with design §7's coverage, `run --drive` and `check`;
   - the seven standard drives in `drives/`.
+- Plan 5 adds:
+  - the K-line: one wire between ASC0 and a tester, and the MS43 logger app's DS2 session scripted
+    by a drive's `kline` lines (kline.csv, the report's K-line section);
+  - a `stall` drive mode, and restarts inside one power cycle (after a stall, or a quick key cycle
+    in the after-run, as the firmware does it);
+  - `ms43sim compare`: two bins through the same drives, with their calibration, code and
+    behaviour differences.
 
 The car file starts up with the key on and the engine stopped: its CRC and monitor-sum tasks
 pass, the monitoring handshake completes, and its scheduler runs. A key-off runs the after-run,
@@ -48,7 +56,9 @@ With `--engine warm-idle` the car file starts warm and idles on its 900 rpm targ
 - every detected fault code is explained, and none is stored.
 
 `ms43sim check` passes the car file and the release file on all seven standard drives, and fails
-three known-bad bins (REPORT.md §9.9).
+three known-bad bins (REPORT.md §9.9). The car file answers the app's DS2 session on the K-line,
+restarts after a stall or a quick key cycle, and `compare` shows an ignition edit exactly where its
+cells are read (REPORT.md §9.10).
 
 ## Run it
 
@@ -123,7 +133,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--drives DIR` | `sim/drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
 | `--jobs N` | 1 | `check` only: how many drives run at once after the warm start; each run is deterministic |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` |
-| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the verdict and its reasons, the drive, the power cycles and why each ended, the checks and their findings, design §7's coverage with what did not run and what the checks did not judge), `events.csv`, `trace.csv`, `eeprom.bin` and `verdict.txt` (one word) |
+| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the verdict and its reasons, the drive, the power cycles with why each ended and every key switch, the checks and their findings, design §7's coverage with what did not run and what the checks did not judge, and the K-line), `events.csv`, `trace.csv`, `eeprom.bin`, `verdict.txt` (one word) and `kline.csv` (the tester's requests, what came of each, and the bytes the line lost) |
 
 The exit code is the verdict (the worst one for `check`): **0 pass, 1 fail, 4 incomplete**; 2 is a
 usage error (a mistake in a drive file is reported with its line), 3 an unreadable or wrong-size
@@ -149,8 +159,11 @@ set coolant=90 oil=90 intake=33 ambient=20
 ```
 
 - **Modes:** `on` (key on, engine stopped), `crank` (the starter at `rpm=`), `idle` (plan 3's idle
-  plant, in neutral at a standstill), `drive` (the shaft at the drive's speed, like a dyno), `off`
-  (key off; the after-run runs; a later `on` powers the ECU again from the EEPROM it wrote).
+  plant, in neutral at a standstill), `drive` (the shaft at the drive's speed, like a dyno), `stall`
+  (the engine burns nothing, whatever the ECU does, and runs down with the key on; it follows an idle
+  or a drive that ends at a standstill, and a `crank` starts the engine again in the same power
+  cycle), `off` (key off; the after-run runs; a later `on` powers the ECU again from the EEPROM it
+  wrote; a key-on inside the after-run is what the firmware makes of it, REPORT.md §9.10).
 - **Kept keys** (they hold until changed): `coolant`, `oil`, `intake` (−30…140 °C), `ambient`
   (−40…50 °C), `clock` (0…1439 min), `ac`, `pedal` (0…95 %), `gear` (`N` or 1–5), `clutch`, `brake`
   (0 or 1).
@@ -160,7 +173,23 @@ set coolant=90 oil=90 intake=33 ambient=20
   clutch out, the gear ratio gives the other; otherwise the missing one holds.
 - **Mistakes are errors with their line:** an unknown key, a value out of range, a ramp on a key that
   cannot ramp, a pedal in a crank or idle, an off while moving or twice, an idle or drive before a
-  crank, an on or crank while the engine may run.
+  crank, an on or crank while the engine may run, a stall without a running engine.
+- **K-line lines** (`kline VERB ...`) script the MS43 logger app's DS2 session on the K-line. They
+  act at the start of the next segment, in order:
+  - `kline connect`: the app's `12 08 91 01 E8 48 00 2A` at 9,600 baud; an answer with status A0
+    moves the tester to 125,000;
+  - `kline disconnect`: `12 08 91 00 25 80 00 2E` at the current baud; A0 moves it to 9,600;
+  - `kline poll`: the app's `12 05 0B B0 AC`, again and again until `kline quiet`, which drops what
+    is queued (a request on the line still finishes);
+  - `kline send BYTES`: one DS2 frame with these payload bytes; `kline raw BYTES`: these exact bytes,
+    unframed; `kline every SECONDS BYTES`: that frame every SECONDS (above 0, at most 60). The first
+    token after `every` is always the period, so `kline every 12 05 0B B0` is every 12 s with
+    payload `05 0B B0`.
+
+  The tester works like the app: one request at a time, each byte when its echo comes back. It
+  listens 500 ms after a 0x91 command and 400 ms after anything else. The next request goes 20 ms
+  after a reply (the app's pause after each sample) and 1 ms after a timeout. A byte at a baud rate
+  more than 3 % from ASC0's, or overlapping another, is lost and noted in kline.csv.
 
 **The checks** (plan 4 R16) watch the machine's events, never the output capture: `traps`,
 `resets` (and a main-relay drop with the key read on), `execution` (erased flash, code outside
@@ -173,6 +202,60 @@ engine cycle; no opening with the crank stopped), `throttle` (the bridge drive),
 notes, what the checks declare they did not judge (the scheduler's periodic tasks above 2,000 rpm);
 the verdict does not count it.
 
+## Compare two bins: `compare`
+
+`ms43sim compare REF CANDIDATE` runs both bins, flashed the same way, through one drive or the
+standard set, and reports how they differ (design §6.3):
+
+```bash
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare ../../../bins/MS43X001_release_E46_M54B25.bin ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --xdf ../../../defs/Siemens_MS43_MS43X001_512K_v1.0.0.xdf --out sim/runs/compare-release-car
+dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare REF.bin CANDIDATE.bin --drive sim/drives/full-load.drive --eeprom sim/runs/check-car/warm-start/eeprom.bin --out sim/runs/compare-full-load
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `--drive FILE` | | One drive. A drive that starts `seasoned` needs `--eeprom`; both bins start from it |
+| `--drives DIR` | `sim/drives` above the current folder | A set: the warm-start drive first on both bins from a blank EEPROM, then the others, each seasoned one on both bins from the **reference's** warm-start EEPROM, so a seasoned drive's differences come from the bins (C6) |
+| `--jobs N` | 1 | A set only: how many drives run at once after the warm start |
+| `--xdf FILE` | | The MS43X001 XDF (local only): names its single constants |
+| `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot`, for both bins |
+| `--out DIR` | `runs/compare-<drive or set>-<ref>-vs-<candidate>` | `compare-report.md`, `diff.csv`, and each run's own drive files under `reference/` and `candidate/`; a set writes one such folder per drive and `summary.md` |
+
+The report gives both bins' SHA-256 and the drive, both verdicts, and three kinds of difference:
+- **calibration** (0x70000–0x7FFFF): every table, axis and constant with changed bytes, named from
+  `calmaps_ms43x.csv` (found in the current folder or above) and the XDF's constants; changed bytes
+  nothing names are unnamed ranges;
+- **code** (0x00000–0x6FFFF): the changed byte ranges, those less than 16 bytes apart together,
+  each with the candidate's listing;
+- **behaviour:** where the two runs part, per cylinder for sparks and injections, per 100 ms sample
+  for the trace and the PWM shares, and whole for the fault memory, the power-cycle ends and the end
+  EEPROM. Each range is given with its largest difference and the reference's operating point
+  there (rpm, air mass, coolant, road speed, the drive's line).
+
+The checksum fields the flasher rewrites are left out of both image diffs, and the EEPROM's copy of
+them (words 1EEh–1F0h) out of the behaviour diff. The tolerances (R6, amended in Task 10) are printed
+in every report:
+- the ECU's decisions exact;
+- the spark as fired within 0.1° and its dwell within 2 %;
+- an injection as driven within 1 CAPCOM tick, and its angle within 0.1°;
+- the firmware's trace columns exact, the plant's within a stated step;
+- the PWM shares within 1 ‰.
+
+Two bins drift by cycles, so the same behaviour can come a moment earlier or later:
+- a value differs only beyond the reference's range within 100 ms and the neighbouring events or
+  samples, and only two or more in a row;
+- a PWM share is its average over each sample's 100 ms.
+
+The exit code is the worse of the two runs' verdicts (0, 1 or 4), 2 a usage error, 3 an unreadable
+input. Compare reports; the owner judges (design §6.3).
+
+**Read a code change on part load, full load or overrun against a baseline.** On those drives any
+change of the program's timing drifts the runs apart: a transparent stub anywhere, which changes no
+value, shifts the phase of rotating cut patterns and the VANOS and throttle controllers. On the steady
+drives (warm start, cold start, idle, key cycle) two runs agree. A calibration-only change does not
+move the code, but its own effect can still ripple through the controllers. See the plan 5 record's
+open items.
+
 ## Build and test
 
 Needs the .NET 10 SDK. The test packages (xUnit 2.5.3, Microsoft.NET.Test.Sdk 17.8.0) are the
@@ -182,7 +265,7 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 687 tests (about 5 minutes in all):
+Run it from the repository root. 921 tests (about 8 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
@@ -190,15 +273,36 @@ Run it from the repository root. 687 tests (about 5 minutes in all):
 - the drive parser and the runner; every check passing, and failing on a known-bad, raw or
   synthetic run, except `scheduler` and `boot` (no bin trips them yet) and the `rev-limit`, `power`
   and `spark-window` rules, which fail as pure rules only (the plan 4 record);
-- in the `StandardDrives` category (20 tests): the car and release files on all seven standard
-  drives, and the three known-bad bins.
+- the K-line (the bus, the tester, the car file on the app's session), stalls and restarts, a quick
+  key cycle, and the compare's parts and command;
+- in the `StandardDrives` category (24 tests): the car and release files on all seven standard
+  drives, the three known-bad bins, and the compare's acceptance (the car against itself, the
+  transparent stub, an ignition edit, the release).
 
 `dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
-(667 tests, about 3 minutes).
+(897 tests, about 4 minutes).
 
-**Speed:** 95–111 M emulated cycles per second on this PC (Release, the warm-start drive with every
-check; it varies with the PC's load), 4.0–4.6× real time; `check` of the car's seven drives takes
-about 41 s with `--jobs 6`. Plan 3's 60 s warm-idle run, without checks, ran at 132.2 M.
+**Speed:** 122 M emulated cycles per second on this PC (Release, the warm-start drive with every
+check, plan 5; plan 4 measured 95–111 M; it varies with the PC's load), 5.1× real time; `check` of
+the car's seven drives takes about 32 s with `--jobs 6`. Plan 3's 60 s warm-idle run, without checks, ran at 132.2 M.
+
+## Assumptions and simplifications in plan 5
+
+A drive run with `kline` lines lists these too (`MachineAssumptions.ForDrive`):
+- the K-line: one wire between ASC0 and a tester with no transceiver delay. A byte reaches both ends
+  at the end of its stop bit, and ASC0 hears its own frames back. Its receiver takes a frame only if
+  S0R and S0REN were set at the frame's start bit (UM §11.1.2) [obs]. A tester byte more than 3 %
+  from ASC0's bit time, or overlapping another byte, is lost and noted; a real UART would take garbage
+  and raise errors, which is not exercised [assumption];
+- the tester: the app's DS2 session frame for frame. The 20 ms pause after a reply is the app's
+  [obs]; after a connect it stands for the serial cable's latency, and the 1 ms after a timeout for
+  the app's immediate retry [assumption];
+- a stall: the engine plant burns nothing until a crank feeds it again [call];
+- power after a relay drop: with the key off the ECU is off. With the key on, KL15 keeps the CPU
+  powered until the firmware resets itself, which starts the next power cycle on a fresh machine (a
+  real SRST keeps the RAM; the boot sets it up again) [obs; assumption].
+
+The rulings behind them are in the plan 5 record.
 
 ## Assumptions and simplifications in plan 4
 
@@ -334,7 +438,7 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 
 | Path | Content |
 |---|---|
-| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners |
+| `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`, the K-line and its tester), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners, and the compare (`Compare/`) |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
 | `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build (the assembler's output only, applied in memory) |
 | `drives/` | the seven standard drive files |
