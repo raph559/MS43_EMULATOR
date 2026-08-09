@@ -50,11 +50,12 @@ public sealed record CompareTolerances(double SparkAdvanceDeg, double SparkDwell
         yield return "spark.decided_advance, spark.decided_dwell, injection.ticks (the ECU's decisions): exact";
         yield return $"spark.advance (as fired): {N(SparkAdvanceDeg)}°; spark.dwell (as fired): {N(SparkDwellShare * 100)} % of the reference's";
         yield return $"injection.duration (as driven): {N(InjectionTicks)} CAPCOM tick(s); injection.angle: {N(InjectionAngleDeg)}°";
-        yield return $"sparks and injections pair per cylinder with the other run's nearest, within half an engine cycle at the reference's speed; an unpaired one is spark.missing or injection.missing";
+        yield return "sparks and injections pair per cylinder with the other run's nearest, within half an engine cycle at the reference's speed";
+        yield return "two bins drift by cycles, so the same behaviour may come a moment earlier or later: a paired event differs only beyond the range of the reference's values at that event and the events either side; unpaired events are spark.missing or injection.missing only two or more in a row";
         foreach (var group in TraceColumns.GroupBy(c => c.Value).OrderBy(g => g.Key))
-            yield return $"trace {string.Join(", ", group.Select(c => c.Key))}: {(group.Key == 0 ? "exact" : $"±{N(group.Key)}")}, for {Samples} samples in a row";
-        yield return $"pwm.vanos_in, pwm.vanos_ex, pwm.throttle (shares): ±{N(PwmPerMille)} ‰, for {Samples} samples in a row";
-        yield return "faults (stored at the end of each power cycle), power_cycles (how each ended), eeprom (at the end): exact";
+            yield return $"trace {string.Join(", ", group.Select(c => c.Key))}: {(group.Key == 0 ? "exact" : $"±{N(group.Key)}")}, beyond the reference's range at that sample and the samples either side, for {Samples} samples in a row";
+        yield return $"pwm.vanos_in, pwm.vanos_ex, pwm.throttle (shares, averaged over each sample's 100 ms): ±{N(PwmPerMille)} ‰, as the trace columns are judged";
+        yield return "faults (stored at the end of each power cycle), power_cycles (how each ended), eeprom (at the end, without its copy of the flash checksums, words 1EEh-1F0h): exact";
         yield return "differences of one signal and cylinder less than 0.5 s apart are one range";
     }
 }

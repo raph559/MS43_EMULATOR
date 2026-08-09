@@ -97,11 +97,68 @@ public class BehaviourDiffTests
 
     [Fact] public void AMissingSpark_IsADifference_NotAnException()
     {
-        var gone = FirstSpark + 6 * EngineCycle + 2 * EngineCycle / 6;   // cylinder 3 in the seventh engine cycle
-        var diffs = Diff(Track(), Track(s => s.Fire == gone ? null : s));
+        // Cylinder 3 in the seventh and eighth engine cycles: two in a row.
+        var gone = new[] { FirstSpark + 6 * EngineCycle + 2 * EngineCycle / 6, FirstSpark + 7 * EngineCycle + 2 * EngineCycle / 6 };
+        var diffs = Diff(Track(), Track(s => gone.Contains(s.Fire) ? null : s));
         var missing = Assert.Single(diffs);
-        Assert.Equal(("spark.missing", (int?)3, 1, gone, gone), (missing.Signal, missing.Cylinder, missing.Count, missing.FromCycle, missing.ToCycle));
+        Assert.Equal(("spark.missing", (int?)3, 2, gone[0], gone[1]), (missing.Signal, missing.Cylinder, missing.Count, missing.FromCycle, missing.ToCycle));
         Assert.Equal((1.0, 0.0), (missing.Reference, missing.Candidate));
+    }
+
+    [Fact] public void OneMissingSpark_IsATimeShiftAtACutsEdge_NotADifference()
+    {
+        // A cut that begins or ends one event earlier in one run leaves one event of a cylinder unpaired (R5 drift).
+        var gone = FirstSpark + 6 * EngineCycle + 2 * EngineCycle / 6;
+        Assert.Empty(Diff(Track(), Track(s => s.Fire == gone ? null : s)));
+    }
+
+    [Fact] public void ADecisionChangeOneEventEarlier_IsNoDifference_ButOneThatLasts_Is()
+    {
+        // The reference's advance steps from 10.5° to 15° at 6.0 s; the candidate's one event of each cylinder earlier.
+        var step = 6.0 * Second;
+        var reference = Track(s => s.Fire >= step ? s with { Advance = 15, DecidedAdvance = 15 } : s);
+        Assert.Empty(Diff(reference, Track(s => s.Fire + EngineCycle >= step ? s with { Advance = 15, DecidedAdvance = 15 } : s)));
+        var lasting = Diff(reference, Track(s => s.Fire >= step ? s with { Advance = 15.75, DecidedAdvance = 15.75 } : s));
+        Assert.Equal(6, lasting.Count(d => d.Signal == "spark.decided_advance"));
+    }
+
+    [Fact] public void ADecisionThatFlickersOneStepAtOneEvent_IsNoDifference_ButTwoEventsInARowAre()
+    {
+        // An input on a breakpoint, sampled a few cycles later, tips one decision one step (0.375°).
+        var cylinder3 = Enumerable.Range(0, 20).Select(k => FirstSpark + (ulong)k * EngineCycle + 2 * EngineCycle / 6).ToArray();
+        Assert.Empty(Diff(Track(), Track(s => s.Fire == cylinder3[6] ? s with { DecidedAdvance = 10.875 } : s)));
+        var two = Diff(Track(), Track(s => s.Fire == cylinder3[6] || s.Fire == cylinder3[7] ? s with { DecidedAdvance = 10.875 } : s));
+        Assert.Equal(("spark.decided_advance", (int?)3, 2), (Assert.Single(two).Signal, two[0].Cylinder, two[0].Count));
+    }
+
+    [Fact] public void ATraceStepOneSampleLater_IsNoDifference()
+    {
+        // ti1_ms steps from 2 to 3 ms at 6.0 s in the reference, at 6.1 s in the candidate: a value a few cycles later.
+        Assert.Empty(Diff(Track(trace: (c, t, v) => c == "ti1_ms" ? (t >= 5.95 ? 3 : 2) : v),
+            Track(trace: (c, t, v) => c == "ti1_ms" ? (t >= 6.05 ? 3 : 2) : v)));
+    }
+
+    [Fact] public void APwmShare_IsAveragedOverEachSample_SoADitherOutOfPhase_IsNoDifference()
+    {
+        // The throttle's drive dithers every 5 ms between 1000 and 340 ‰; the candidate's dither is 2.5 ms later.
+        static RunTrack Dither(ulong phase)
+        {
+            var track = Track();
+            var events = Enumerable.Range(0, 1000).Select(k => new OutputEvent(5 * Second + phase + (ulong)k * 60_000,
+                OutputKind.Pwm, "PWM2", k % 2 == 0 ? 1000 : 340, null));
+            return track with { Outputs = track.Outputs.Concat(events).ToList() };
+        }
+        Assert.Empty(Diff(Dither(0), Dither(60_000)));
+    }
+
+    [Fact] public void TheEepromCopyOfTheFlashChecksums_IsLeftOut()
+    {
+        // Words 1EEh-1F0h: the program CRC, the calibration CRC and the record's CRC-16/ARC — any code change moves them.
+        var copy = new byte[2048];
+        copy[0x3DC] = 0x9F; copy[0x3E0] = 0xC3;
+        Assert.Empty(Diff(Track(), Track() with { Eeprom = copy }));
+        copy[0x3E2] = 0x01;
+        Assert.Equal("eeprom", Assert.Single(Diff(Track(), Track() with { Eeprom = copy })).Signal);
     }
 
     [Fact] public void ATraceDifferenceOfOneSample_IsNotADifference_ButTwoSamplesAre()

@@ -10,8 +10,9 @@ public sealed record CatalogueEntry(string Name, uint Address, int Bytes);
 /// <summary>
 /// The names the compare gives calibration bytes (plan 5 C8). The tables come from <c>calmaps_ms43x.csv</c>, which is
 /// tracked: rows × cols × the element's size from its data address. Their axes come from the same rows, where an axis has
-/// an address and a name: as many elements as the table has rows (the row axis) or columns (the column axis), each axis
-/// once [call]. The single constants come from the MS43X001 XDF's XDFCONSTANT entries when it is given (it is local
+/// an address and a name: a count element, then as many breakpoints as the table has rows (the row axis) or columns (the
+/// column axis), all of the axis's element type, each axis once [call; obs: all 598 of the car file's axes begin with their
+/// count]. The single constants come from the MS43X001 XDF's XDFCONSTANT entries when it is given (it is local
 /// only): their EMBEDDEDDATA address plus the XDF's BASEOFFSET, as <c>tools/xdf_import.py</c> reads them.
 /// </summary>
 public sealed class CalibrationCatalogue
@@ -53,9 +54,9 @@ public sealed class CalibrationCatalogue
                 var (r, c) = (int.Parse(f[rows], CultureInfo.InvariantCulture), int.Parse(f[cols], CultureInfo.InvariantCulture));
                 Add(f[name], Number(f[data]), r * c * Size(f[elem]));
                 if (f[rowAxis].Length > 0)
-                    Add(f[rowName], Number(f[rowAxis]), r * Size(f[rowElem]));
+                    Add(f[rowName], Number(f[rowAxis]), (r + 1) * Size(f[rowElem]));
                 if (f[colAxis].Length > 0)
-                    Add(f[colName], Number(f[colAxis]), c * Size(f[colElem]));
+                    Add(f[colName], Number(f[colAxis]), (c + 1) * Size(f[colElem]));
             }
         }
 

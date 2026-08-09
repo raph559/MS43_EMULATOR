@@ -54,6 +54,14 @@ public class ImageDiffTests
         Assert.Equal(new CalibrationDifference("unnamed", 0x70E14, 1, 1), Assert.Single(CalibrationDiff.Of(Car, edited, Tables.Value)));
     }
 
+    [Fact] public void AnAxis_IsNamed_ItsCountAndEveryBreakpoint()
+    {
+        // ldpm_n_14, the RON98 ignition map's rpm axis at 0x7501A: its count (20) then 20 breakpoints, 800 to 6990 rpm.
+        Assert.Equal(20, BitConverter.ToUInt16(TestBins.CarBytes, 0x7501A));
+        var edited = Flashed(CarWith(0x75042, 0x60, 0x1B));             // the last breakpoint, 6990 → 7008 rpm
+        Assert.Equal(new CalibrationDifference("ldpm_n_14", 0x7501A, 42, 1), Assert.Single(CalibrationDiff.Of(Car, edited, Tables.Value)));
+    }
+
     [Fact] public void ChecksumFields_AreLeftOut()
     {
         // One cell of the RON98 ignition map edited; both as flashed, so the flasher's corrected calibration CRC differs too.

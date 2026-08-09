@@ -15,24 +15,43 @@ public sealed record BehaviourDifference(string Signal, int? Cylinder, ulong Fro
     double MaxDifference, double Reference, double Candidate, OperatingPoint At);
 
 /// <summary>
-/// The compare's behaviour diff (plan 5 Task 7, C5). Sparks and injections pair per cylinder: each reference event with the
-/// candidate's nearest of that cylinder within half an engine cycle at the reference's speed (taken from its trace, at least
-/// 100 rpm); the rest are spark.missing or injection.missing (1 where a run has the event, 0 where it has not). Paired, they
-/// compare by <see cref="CompareTolerances"/>. Trace columns compare at the same 100 ms samples and PWM shares at those
-/// times (the last value set by then); either counts in runs of at least <see cref="CompareTolerances.Samples"/> samples.
-/// The fault memory, how each power cycle ended and the end EEPROM compare whole, at the end of the reference's trace.
-/// Differences of one signal and cylinder less than 0.5 s apart make one range.
+/// The compare's behaviour diff (plan 5 Task 7, C5; the time-shift rules of Task 10). Sparks and injections pair per
+/// cylinder: each reference event with the candidate's nearest of that cylinder within half an engine cycle at the
+/// reference's speed (taken from its trace, at least 100 rpm). Two bins drift by cycles (R5), so the same behaviour can
+/// come a moment earlier or later in one run, and the compare does not count that as a difference:
+/// <list type="bullet">
+/// <item>a paired event's value differs only when it leaves the range of the reference's values at that cylinder's events
+/// within 100 ms of it, and the events either side, by more than <see cref="CompareTolerances"/> allows, and only at two or
+/// more of that cylinder's events in a row: a decision on a breakpoint, sampled a few cycles later, can tip one step at one
+/// event;</item>
+/// <item>events of a cylinder one run has and the other has not are spark.missing or injection.missing (1 where a run has
+/// the event, 0 where it has not) only two or more in a row: one alone is a cut that began or ended an event earlier;</item>
+/// <item>trace columns compare at the same 100 ms samples and PWM shares as their average over each sample's 100 ms; a
+/// sample differs when it leaves the range of the reference's at that sample and the samples either side, and only in
+/// runs of at least <see cref="CompareTolerances.Samples"/> samples.</item>
+/// </list>
+/// The fault memory, how each power cycle ended and the end EEPROM compare whole, at the end of the reference's trace; the
+/// EEPROM without its copy of the flash checksums (words 1EEh-1F0h: the program CRC, the calibration CRC and the record's
+/// CRC-16/ARC from 000Fh), which any code change moves as it moves the image's own checksum fields (R7). Differences of
+/// one signal and cylinder less than 0.5 s apart make one range.
 /// </summary>
 public static class BehaviourDiff
 {
     const double CpuHz = 24e6;
     const ulong MergeGap = 12_000_000;                                  // 0.5 s
+    const ulong SampleCycles = 2_400_000;                               // 100 ms
     const double SlowestRpm = 100;                                      // for the pairing window at a near standstill
+
+    /// <summary>The EEPROM's copy of the flash checksums: bytes 0x3DC-0x3E1 (words 1EEh-1F0h).</summary>
+    public const int ChecksumCopyStart = 0x3DC, ChecksumCopyEnd = 0x3E2;
 
     static readonly (string Source, string Signal)[] PwmSignals = { ("PWM0", "pwm.vanos_in"), ("PWM1", "pwm.vanos_ex"), ("PWM2", "pwm.throttle") };
 
     /// <summary>A single differing event or sample.</summary>
     sealed record Seen(string Signal, int? Cylinder, ulong Cycle, double Difference, double Reference, double Candidate);
+
+    /// <summary>A value an event carries, and how far the candidate's may stray from the reference's.</summary>
+    sealed record Signal<T>(string Name, Func<T, double> Value, Func<T, double> Tolerance);
 
     public static IReadOnlyList<BehaviourDifference> Of(RunTrack reference, RunTrack candidate, Drive drive, CompareTolerances tolerances)
     {
@@ -41,29 +60,19 @@ public static class BehaviourDiff
         var rpmColumn = columns.IndexOf("rpm_fed") is >= 0 and var fed ? fed : columns.IndexOf("rpm_ecu");
         ulong Window(ulong cycle) => (ulong)(60 / Math.Max(SlowestRpm, Value(reference.Trace, rpmColumn, cycle)) * CpuHz);
 
-        foreach (var (r, c) in Pair(reference.Sparks, candidate.Sparks, s => s.Cylinder, s => s.Fire, Window))
+        Events(seen, reference.Sparks, candidate.Sparks, s => s.Cylinder, s => s.Fire, Window, "spark.missing", new Signal<Spark>[]
         {
-            if (r is null || c is null)
-            {
-                seen.Add(Missing("spark.missing", r?.Cylinder ?? c!.Cylinder, r?.Fire ?? c!.Fire, r is not null));
-                continue;
-            }
-            Compare(seen, "spark.decided_advance", r.Cylinder, r.Fire, r.DecidedAdvance, c.DecidedAdvance, 0);
-            Compare(seen, "spark.decided_dwell", r.Cylinder, r.Fire, r.DecidedDwellTicks, c.DecidedDwellTicks, 0);
-            Compare(seen, "spark.advance", r.Cylinder, r.Fire, r.Advance, c.Advance, tolerances.SparkAdvanceDeg);
-            Compare(seen, "spark.dwell", r.Cylinder, r.Fire, r.DwellMs, c.DwellMs, tolerances.SparkDwellShare * r.DwellMs);
-        }
-        foreach (var (r, c) in Pair(reference.Injections, candidate.Injections, i => i.Cylinder, i => i.Open, Window))
+            new("spark.decided_advance", s => s.DecidedAdvance, _ => 0),
+            new("spark.decided_dwell", s => s.DecidedDwellTicks, _ => 0),
+            new("spark.advance", s => s.Advance, _ => tolerances.SparkAdvanceDeg),
+            new("spark.dwell", s => s.DwellMs, s => tolerances.SparkDwellShare * s.DwellMs),
+        });
+        Events(seen, reference.Injections, candidate.Injections, i => i.Cylinder, i => i.Open, Window, "injection.missing", new Signal<Injection>[]
         {
-            if (r is null || c is null)
-            {
-                seen.Add(Missing("injection.missing", r?.Cylinder ?? c!.Cylinder, r?.Open ?? c!.Open, r is not null));
-                continue;
-            }
-            Compare(seen, "injection.ticks", r.Cylinder, r.Open, r.ExpectedTicks, c.ExpectedTicks, 0);
-            Compare(seen, "injection.duration", r.Cylinder, r.Open, r.Ticks, c.Ticks, tolerances.InjectionTicks);
-            Compare(seen, "injection.angle", r.Cylinder, r.Open, r.OpenAngle, c.OpenAngle, tolerances.InjectionAngleDeg);
-        }
+            new("injection.ticks", i => i.ExpectedTicks, _ => 0),
+            new("injection.duration", i => i.Ticks, _ => tolerances.InjectionTicks),
+            new("injection.angle", i => i.OpenAngle, _ => tolerances.InjectionAngleDeg),
+        });
 
         var samples = Math.Min(reference.Trace.Count, candidate.Trace.Count);
         for (var k = 0; k < columns.Count; k++)
@@ -76,10 +85,9 @@ public static class BehaviourDiff
         }
         foreach (var (source, signal) in PwmSignals)
         {
-            var r = Shares(reference.Outputs, source);
-            var c = Shares(candidate.Outputs, source);
-            Sampled(seen, signal, samples, tolerances.Samples, i => ShareAt(r, Cycle(reference.Trace[i])), i => ShareAt(c, Cycle(candidate.Trace[i])),
-                i => Cycle(reference.Trace[i]), tolerances.PwmPerMille);
+            var r = Averages(Shares(reference.Outputs, source), reference.Trace, samples);
+            var c = Averages(Shares(candidate.Outputs, source), reference.Trace, samples);
+            Sampled(seen, signal, samples, tolerances.Samples, i => r[i], i => c[i], i => Cycle(reference.Trace[i]), tolerances.PwmPerMille);
         }
 
         var end = reference.Trace.Count > 0 ? Cycle(reference.Trace[^1]) : 0;
@@ -95,69 +103,120 @@ public static class BehaviourDiff
             var apart = reference.Ends.Zip(candidate.Ends).Count(p => p.First != p.Second) + Math.Abs(reference.Ends.Count - candidate.Ends.Count);
             seen.Add(new Seen("power_cycles", null, end, apart, reference.Ends.Count, candidate.Ends.Count));
         }
-        if (!reference.Eeprom.AsSpan().SequenceEqual(candidate.Eeprom))
-        {
-            var length = Math.Max(reference.Eeprom.Length, candidate.Eeprom.Length);
-            int At(byte[] image, int i) => i < image.Length ? image[i] : -1;
-            var apart = Enumerable.Range(0, length).Where(i => At(reference.Eeprom, i) != At(candidate.Eeprom, i)).ToList();
-            seen.Add(new Seen("eeprom", null, end, apart.Count, At(reference.Eeprom, apart[0]), At(candidate.Eeprom, apart[0])));
-        }
+        int At(byte[] image, int i) => i < image.Length ? image[i] : -1;
+        var eeprom = Enumerable.Range(0, Math.Max(reference.Eeprom.Length, candidate.Eeprom.Length))
+            .Where(i => i is < ChecksumCopyStart or >= ChecksumCopyEnd && At(reference.Eeprom, i) != At(candidate.Eeprom, i)).ToList();
+        if (eeprom.Count > 0)
+            seen.Add(new Seen("eeprom", null, end, eeprom.Count, At(reference.Eeprom, eeprom[0]), At(candidate.Eeprom, eeprom[0])));
 
         return Ranges(seen, reference, drive);
     }
 
     /// <summary>
-    /// Pairs each cylinder's events in time order: each reference event with the nearest unused candidate event within its
-    /// window; the candidate events it passes over, and those left at the end, are unpaired.
+    /// One kind of event: per cylinder, the unpaired ones in runs of two or more, and the paired ones whose values leave the
+    /// reference's range at that event and the events either side of it.
     /// </summary>
-    static IEnumerable<(T? Reference, T? Candidate)> Pair<T>(IReadOnlyList<T> reference, IReadOnlyList<T> candidate,
-        Func<T, int> cylinder, Func<T, ulong> at, Func<ulong, ulong> window) where T : class
+    static void Events<T>(List<Seen> seen, IReadOnlyList<T> reference, IReadOnlyList<T> candidate, Func<T, int> cylinder, Func<T, ulong> at,
+        Func<ulong, ulong> window, string missing, IReadOnlyList<Signal<T>> signals) where T : class
     {
         foreach (var number in reference.Select(cylinder).Concat(candidate.Select(cylinder)).Distinct().Order())
         {
             var references = reference.Where(e => cylinder(e) == number).OrderBy(at).ToList();
             var candidates = candidate.Where(e => cylinder(e) == number).OrderBy(at).ToList();
-            var next = 0;
-            foreach (var r in references)
+            var pairs = Pair(references, candidates, at, window).ToList();
+            foreach (var run in InRuns(pairs.Where(p => p.Candidate is null).Select(p => p.Reference!.Value)))
+                seen.AddRange(run.Select(i => new Seen(missing, number, at(references[i]), 1, 1, 0)));
+            foreach (var run in InRuns(pairs.Where(p => p.Reference is null).Select(p => p.Candidate!.Value)))
+                seen.AddRange(run.Select(i => new Seen(missing, number, at(candidates[i]), 1, 0, 1)));
+            foreach (var signal in signals)
             {
-                var t = at(r);
-                var w = window(t);
-                while (next < candidates.Count && at(candidates[next]) + w < t)
-                    yield return (null, candidates[next++]);
-                var best = -1;
-                var nearest = ulong.MaxValue;
-                for (var k = next; k < candidates.Count && at(candidates[k]) <= t + w; k++)
+                var differing = new Dictionary<int, Seen>();             // by the reference event's index
+                foreach (var (r, c) in pairs)
                 {
-                    var distance = at(candidates[k]) > t ? at(candidates[k]) - t : t - at(candidates[k]);
-                    if (distance < nearest)
-                        (best, nearest) = (k, distance);
+                    if (r is not { } ri || c is not { } ci)
+                        continue;
+                    var (value, mine) = (signal.Value(candidates[ci]), signal.Value(references[ri]));
+                    var neighbours = Near(references, ri, at).Select(j => signal.Value(references[j])).ToList();
+                    var tolerance = signal.Tolerance(references[ri]);
+                    if (value < neighbours.Min() - tolerance || value > neighbours.Max() + tolerance)
+                        differing[ri] = new Seen(signal.Name, number, at(references[ri]), Math.Abs(value - mine), mine, value);
                 }
-                if (best < 0)
-                {
-                    yield return (r, null);
-                    continue;
-                }
-                while (next < best)
-                    yield return (null, candidates[next++]);
-                yield return (r, candidates[best]);
-                next = best + 1;
+                foreach (var run in InRuns(differing.Keys.Order()))
+                    seen.AddRange(run.Select(i => differing[i]));
             }
-            while (next < candidates.Count)
-                yield return (null, candidates[next++]);
         }
     }
 
-    static Seen Missing(string signal, int cylinder, ulong cycle, bool inReference) =>
-        new(signal, cylinder, cycle, 1, inReference ? 1 : 0, inReference ? 0 : 1);
-
-    static void Compare(List<Seen> seen, string signal, int cylinder, ulong cycle, double reference, double candidate, double tolerance)
+    /// <summary>
+    /// Pairs one cylinder's events in time order: each reference event with the nearest unused candidate event within its
+    /// window; the candidate events it passes over, and those left at the end, are unpaired. Indices into the two lists.
+    /// </summary>
+    static IEnumerable<(int? Reference, int? Candidate)> Pair<T>(List<T> references, List<T> candidates, Func<T, ulong> at, Func<ulong, ulong> window)
     {
-        var difference = Math.Abs(candidate - reference);
-        if (difference > tolerance)
-            seen.Add(new Seen(signal, cylinder, cycle, difference, reference, candidate));
+        var next = 0;
+        for (var ri = 0; ri < references.Count; ri++)
+        {
+            var t = at(references[ri]);
+            var w = window(t);
+            while (next < candidates.Count && at(candidates[next]) + w < t)
+                yield return (null, next++);
+            var best = -1;
+            var nearest = ulong.MaxValue;
+            for (var k = next; k < candidates.Count && at(candidates[k]) <= t + w; k++)
+            {
+                var distance = at(candidates[k]) > t ? at(candidates[k]) - t : t - at(candidates[k]);
+                if (distance < nearest)
+                    (best, nearest) = (k, distance);
+            }
+            if (best < 0)
+            {
+                yield return (ri, null);
+                continue;
+            }
+            while (next < best)
+                yield return (null, next++);
+            yield return (ri, best);
+            next = best + 1;
+        }
+        while (next < candidates.Count)
+            yield return (null, next++);
     }
 
-    /// <summary>A sampled signal: the samples that differ beyond the tolerance, kept only in runs of at least <paramref name="run"/>.</summary>
+    /// <summary>The indices of the events either side of <paramref name="i"/> and of every event within 100 ms of it, itself included.</summary>
+    static IEnumerable<int> Near<T>(List<T> events, int i, Func<T, ulong> at)
+    {
+        var t = at(events[i]);
+        var (low, high) = (Math.Max(0, i - 1), Math.Min(events.Count - 1, i + 1));
+        while (low > 0 && t - at(events[low - 1]) <= SampleCycles)
+            low--;
+        while (high < events.Count - 1 && at(events[high + 1]) - t <= SampleCycles)
+            high++;
+        return Enumerable.Range(low, high - low + 1);
+    }
+
+    /// <summary>The runs of two or more consecutive indices among <paramref name="indices"/> (in order).</summary>
+    static IEnumerable<List<int>> InRuns(IEnumerable<int> indices)
+    {
+        var run = new List<int>();
+        foreach (var i in indices)
+        {
+            if (run.Count > 0 && i != run[^1] + 1)
+            {
+                if (run.Count >= 2)
+                    yield return run;
+                run = new List<int>();
+            }
+            run.Add(i);
+        }
+        if (run.Count >= 2)
+            yield return run;
+    }
+
+    /// <summary>
+    /// A sampled signal: the samples whose candidate value leaves the reference's range at that sample and the samples either
+    /// side by more than the tolerance (or has a value where the reference has none, or none where it has one), kept only in
+    /// runs of at least <paramref name="run"/>.
+    /// </summary>
     static void Sampled(List<Seen> seen, string signal, int samples, int run, Func<int, double?> reference, Func<int, double?> candidate,
         Func<int, ulong> cycle, double tolerance)
     {
@@ -171,14 +230,20 @@ public static class BehaviourDiff
         for (var i = 0; i < samples; i++)
         {
             var (r, c) = (reference(i), candidate(i));
-            var apart = r is { } a && c is { } b ? Math.Abs(b - a) > tolerance : r.HasValue != c.HasValue;
+            bool apart;
+            if (r is { } a && c is { } b)
+            {
+                var neighbours = Enumerable.Range(i - 1, 3).Where(j => j >= 0 && j < samples).Select(reference).OfType<double>().ToList();
+                apart = b < neighbours.Min() - tolerance || b > neighbours.Max() + tolerance;
+            }
+            else
+                apart = r.HasValue != c.HasValue;
             if (!apart)
             {
                 Flush();
                 continue;
             }
-            differing.Add(new Seen(signal, null, cycle(i), r is { } x && c is { } y ? Math.Abs(y - x) : double.NaN,
-                r ?? double.NaN, c ?? double.NaN));
+            differing.Add(new Seen(signal, null, cycle(i), r is { } x && c is { } y ? Math.Abs(y - x) : double.NaN, r ?? double.NaN, c ?? double.NaN));
         }
         Flush();
     }
@@ -186,17 +251,40 @@ public static class BehaviourDiff
     static List<OutputEvent> Shares(IReadOnlyList<OutputEvent> outputs, string source) =>
         outputs.Where(e => e.Kind == OutputKind.Pwm && e.Source == source).OrderBy(e => e.Cycle).ToList();
 
-    /// <summary>The share set last at or before <paramref name="cycle"/>; null before the first.</summary>
-    static double? ShareAt(List<OutputEvent> shares, ulong cycle)
+    /// <summary>
+    /// For each of the reference's first <paramref name="samples"/> trace samples, the share's time average over the 100 ms
+    /// from it, the last share set before it standing until the next; null while no share has been set.
+    /// </summary>
+    static double?[] Averages(List<OutputEvent> shares, IReadOnlyList<TraceRow> trace, int samples)
     {
-        double? value = null;
-        foreach (var e in shares)
+        var averages = new double?[samples];
+        var next = 0;                                                    // the first event after the window's start
+        double? current = null;                                          // the share in force at the window's start
+        for (var i = 0; i < samples; i++)
         {
-            if (e.Cycle > cycle)
-                break;
-            value = e.Value;
+            var (from, to) = (Cycle(trace[i]), Cycle(trace[i]) + SampleCycles);
+            while (next < shares.Count && shares[next].Cycle <= from)
+                current = shares[next++].Value;
+            double sum = 0;
+            ulong covered = 0;
+            var (at, value) = (from, current);
+            for (var k = next; k < shares.Count && shares[k].Cycle < to; k++)
+            {
+                if (value is { } v)
+                {
+                    sum += v * (shares[k].Cycle - at);
+                    covered += shares[k].Cycle - at;
+                }
+                (at, value) = (shares[k].Cycle, shares[k].Value);
+            }
+            if (value is { } last)
+            {
+                sum += last * (to - at);
+                covered += to - at;
+            }
+            averages[i] = covered > 0 ? sum / covered : null;
         }
-        return value;
+        return averages;
     }
 
     static string Key(FaultEntry f) => string.Create(CultureInfo.InvariantCulture,

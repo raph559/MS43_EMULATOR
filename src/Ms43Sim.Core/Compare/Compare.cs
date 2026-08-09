@@ -32,8 +32,14 @@ public static class Compare
     {
         options ??= new CompareOptions();
         var run = new DriveRunOptions(Machine: options.Machine, Eeprom: options.Eeprom);
-        var r = DriveRun.RunWithChecks(reference, drive, run);
-        var c = DriveRun.RunWithChecks(candidate, drive, run);
+        return Of(reference, candidate, drive, DriveRun.RunWithChecks(reference, drive, run), DriveRun.RunWithChecks(candidate, drive, run), options);
+    }
+
+    /// <summary>What differs between two runs already made of <paramref name="drive"/>, one on each bin, from the same EEPROM.</summary>
+    public static CompareResult Of(FlashedImage reference, FlashedImage candidate, Drive drive, DriveResult r, DriveResult c,
+        CompareOptions? options = null)
+    {
+        options ??= new CompareOptions();
         var tolerances = options.Tolerances ?? CompareTolerances.Default;
         var catalogue = options.Catalogue ?? CalibrationCatalogue.Empty;
         return new CompareResult(drive.Name, r, c, CalibrationDiff.Of(reference.Image, candidate.Image, catalogue),
