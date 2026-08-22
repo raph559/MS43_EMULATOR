@@ -12,11 +12,12 @@ public sealed record DriveRunOptions(MachineOptions? Machine = null, byte[]? Eep
     Action<DriveContext>[]? Observers = null, int CaptureCapacity = OutputCapture.Capacity);
 
 /// <summary>
-/// Why a power cycle's run stopped (final review I3): the drive's time ran out; the main relay dropped
-/// after the drive turned the key off (the after-run's end); or it dropped while the drive had the key
-/// on, with the firmware reading the key on (the ECU switched itself off) or off (AN1 forced); or it
-/// dropped with the key on and the firmware reset itself (SRST) and booted again, which starts the next
-/// power cycle (plan 5 Task 6).
+/// Why a power cycle's run stopped, judged when the main relay dropped (final review I3; plan 5 Task 6 and
+/// its final review I1): the drive's time ran out; the relay dropped after the drive turned the key off
+/// (the after-run's end); or it dropped while the drive had the key on, with the firmware reading the key on
+/// (the ECU switched itself off) or off (AN1 forced); or it dropped with the key on at the end of a
+/// power-down write the key-off began, and the firmware reset itself (SRST) and booted again, which starts
+/// the next power cycle (Restarted).
 /// </summary>
 public enum CycleEnd { DriveEnded, AfterRun, RelayDroppedKeyOn, RelayDroppedKeyReadOff, Restarted }
 
@@ -179,15 +180,34 @@ public static class DriveRun
     }
 
     /// <summary>
-    /// Why a power cycle's run ended: whether the main relay dropped (after the handover), whether the
-    /// drive had the key on then, and whether the firmware read it on (AN1).
+    /// Why a power cycle's run ended. At the main relay's drop (after the handover): whether the drive had the
+    /// key on, whether the firmware read it on (AN1), and whether the drop ended a power-down write
+    /// (<see cref="PowerDownWriteAfter"/>). After it: whether the firmware reset itself (SRST) and whether the
+    /// key went off first. A drop with the key on and read on is the firmware's own only at the end of a
+    /// power-down write [obs: the car file finishes a write once begun and drops the relay, then resets itself
+    /// once it reads the key on; before the write it takes the key back]; any other is the ECU switching
+    /// itself off, whatever comes after it (plan 5 final review I1).
     /// </summary>
-    public static CycleEnd EndOf(bool relayDropped, bool driveKeyOn, bool keyReadOn, bool restarted = false) =>
+    public static CycleEnd EndOf(bool relayDropped, bool driveKeyOn, bool keyReadOn, bool restarted = false,
+        bool powerDownWrite = false, bool keyOffSince = false) =>
         !relayDropped ? CycleEnd.DriveEnded
         : !driveKeyOn ? CycleEnd.AfterRun
+        : !keyReadOn ? CycleEnd.RelayDroppedKeyReadOff
+        : !powerDownWrite ? CycleEnd.RelayDroppedKeyOn
         : restarted ? CycleEnd.Restarted
-        : keyReadOn ? CycleEnd.RelayDroppedKeyOn
-        : CycleEnd.RelayDroppedKeyReadOff;
+        : keyOffSince ? CycleEnd.AfterRun
+        : CycleEnd.RelayDroppedKeyOn;
+
+    /// <summary>
+    /// Whether the firmware's power-down write is under way after an SRVWDT at <paramref name="address"/>: it begins at
+    /// the write's own SRVWDT (0B:D9AC) serviced with the key read off, so the after-run reached it, and it is over
+    /// once the main loop's SRVWDT (0E:0144) is serviced again (the after-run given up) [obs: the car file services
+    /// only 0B:D9AC during its write]. A write begun with the key read on is no after-run's (plan 5 final review I1).
+    /// </summary>
+    public static bool PowerDownWriteAfter(bool underWay, uint address, bool keyReadOn) =>
+        address == RunState.PowerDownService ? underWay || !keyReadOn
+        : address == RunState.MainLoopService ? false
+        : underWay;
 
     /// <summary>How long a run goes on after the relay dropped with the key on, waiting for the firmware's reset: 1 s.</summary>
     const ulong RestartWait = 24_000_000;
@@ -215,6 +235,8 @@ public static class DriveRun
         bool keyOff;
         readonly List<KeySwitch> keySwitches = new();
         ulong? restartedAt;                                      // the firmware's reset after the relay dropped with the key on
+        bool powerDownWrite;                                     // the firmware's power-down write under way (PowerDownWriteAfter)
+        (bool DriveKeyOn, bool KeyReadOn, bool PowerDownWrite)? drop;   // as they were when the main relay dropped
         double? held;
         double lastChange = double.NegativeInfinity;
 
@@ -252,6 +274,13 @@ public static class DriveRun
             Capture = new OutputCapture(Machine, () => engine.Shaft.Angle, capacity);
             Cylinders = new CylinderEvents(Machine, () => engine.Shaft.Angle);
             watch = new CycleWatch(Machine);
+            Machine.WatchdogServiced += address =>
+                powerDownWrite = PowerDownWriteAfter(powerDownWrite, address, CarControls.KeyIsOn(Machine.Board));
+            Machine.Board.Latch.Changed += (_, _) =>
+            {
+                if (watch.PowerOff != null)
+                    drop ??= (!keyOff, CarControls.KeyIsOn(Machine.Board), powerDownWrite);   // after the watch saw the drop
+            };
             for (var i = first.SegmentIndex + 1; i < drive.Segments.Count; i++)
             {
                 var segment = i;
@@ -282,7 +311,9 @@ public static class DriveRun
         public void RunTo(ulong total)
         {
             Machine.Run(total - Start, _ => PoweredOff());
-            End = EndOf(watch.PowerOff != null, !keyOff, CarControls.KeyIsOn(Machine.Board), restartedAt != null);
+            End = drop is { } d
+                ? EndOf(true, d.DriveKeyOn, d.KeyReadOn, restartedAt != null, d.PowerDownWrite, keyOff || !CarControls.KeyIsOn(Machine.Board))
+                : CycleEnd.DriveEnded;
             context.Ended = End;
             context.RaiseEnded(Machine, index);
         }

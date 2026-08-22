@@ -91,6 +91,47 @@ public class CompareTests
         Assert.Equal((referenceWarm, referenceWarm), (s.Reference.Eeprom.Source, s.Candidate.Eeprom.Source));
     }
 
+    /// <summary>
+    /// The car against the R8 stub (a code change that changes no value) as two results of one short key-on run: the run
+    /// stands for both bins, so only the images and the drive differ.
+    /// </summary>
+    static (CompareResult Steady, CompareResult Loaded, CompareResult CalibrationOnly) CodeChangeResults()
+    {
+        var run = DriveRun.Run(TestImages.Car, DriveParser.Parse("drive keyed\n3 on\n"));
+        var stub = InMemoryBin.With(TestBins.CarBytes, CompareAcceptance.Stub);
+        var steady = DriveParser.Parse("drive steady\n" + Warm + "3 on\n1.5 crank rpm=200\n3 idle\n2 drive gear=N rpm=2500 speed=0\n");
+        var loaded = DriveParser.Parse("drive pull\n" + Warm + "3 on\n1.5 crank rpm=200\n3 idle\n4 drive gear=3 speed=20..60 pedal=50\n");
+        CompareResult Of(FlashedImage candidate, Drive drive) =>
+            Core.Compare.Of(TestImages.Car, candidate, drive, run with { Drive = drive }, run with { Drive = drive });
+        return (Of(stub, steady), Of(stub, loaded), Of(MoreIdleAdvance(), loaded));
+    }
+
+    [Fact] public void ACodeChange_GetsTheSpecsAdvice_AndTheDriftNoteWhereTheDriveLoadsTheEngine()   // plan 5 final review I4
+    {
+        var (steady, loaded, calibrationOnly) = CodeChangeResults();
+        Assert.NotEmpty(steady.Code);
+        Assert.Contains("Code changes need extra scrutiny", CompareReportWriter.Report(steady));
+        Assert.DoesNotContain("loads the engine", CompareReportWriter.Report(steady));   // a blip in neutral holds it steady
+        Assert.Contains("loads the engine", CompareReportWriter.Report(loaded));
+        Assert.Contains("baseline", CompareReportWriter.Report(loaded));
+        Assert.DoesNotContain("scrutiny", CompareReportWriter.Report(calibrationOnly));
+        Assert.DoesNotContain("loads the engine", CompareReportWriter.Report(calibrationOnly));
+    }
+
+    [Fact] public void ACodeChange_IsFlaggedInTheSummary_AndOnTheConsole()
+    {
+        var (steady, loaded, _) = CodeChangeResults();
+        using var dir = new TempDirectory();
+        CompareReportWriter.WriteSet(new[] { steady, loaded }, dir.Path);
+        var summary = File.ReadAllText(dir.File("summary.md"));
+        Assert.Contains("Code changes need extra scrutiny", summary);
+        Assert.Matches(@"loads? the engine[^\n]*\bpull\b", summary);
+        Assert.Contains("extra scrutiny", CompareReportWriter.Line(steady));
+        Assert.DoesNotContain("baseline", CompareReportWriter.Line(steady));
+        Assert.Contains("baseline", CompareReportWriter.Line(loaded));
+        Assert.StartsWith("pull: ", CompareReportWriter.Line(loaded));
+    }
+
     [Fact] public void CompareSet_WritesAFolderPerDrive_AndASummary()
     {
         var results = new[] { Core.Compare.Run(TestImages.Car, TestImages.Car, Short, Options) };

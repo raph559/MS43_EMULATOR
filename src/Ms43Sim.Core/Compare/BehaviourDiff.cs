@@ -9,7 +9,8 @@ public sealed record OperatingPoint(double Seconds, double Rpm, double MafKgh, d
 /// One range over which two runs part on one signal (and cylinder): its first and last cycle in the drive's time, how many
 /// events or samples differ in it, the largest difference, the two runs' values there and the reference's operating point
 /// there. For the end-of-drive signals (faults, power_cycles, eeprom) the count is of differing entries and the values are
-/// counts (faults, power_cycles) or the first differing byte (eeprom).
+/// counts (faults, power_cycles) or the first differing byte (eeprom); power_cycles.start and power_cycles.end give the
+/// times in seconds.
 /// </summary>
 public sealed record BehaviourDifference(string Signal, int? Cylinder, ulong FromCycle, ulong ToCycle, int Count,
     double MaxDifference, double Reference, double Candidate, OperatingPoint At);
@@ -21,16 +22,20 @@ public sealed record BehaviourDifference(string Signal, int? Cylinder, ulong Fro
 /// come a moment earlier or later in one run, and the compare does not count that as a difference:
 /// <list type="bullet">
 /// <item>a paired event's value differs only when it leaves the range of the reference's values at that cylinder's events
-/// within 100 ms of it, and the events either side, by more than <see cref="CompareTolerances"/> allows, and only at two or
-/// more of that cylinder's events in a row: a decision on a breakpoint, sampled a few cycles later, can tip one step at one
-/// event;</item>
+/// within 100 ms of it, and the events either side, by more than <see cref="CompareTolerances"/> allows. Alone, at one event
+/// of that cylinder with its neighbours agreeing, it differs only beyond one step of the decision more (plan 5 final review
+/// I3): a decision on a breakpoint, sampled a few cycles later, can tip one step at one event;</item>
 /// <item>events of a cylinder one run has and the other has not are spark.missing or injection.missing (1 where a run has
-/// the event, 0 where it has not) only two or more in a row: one alone is a cut that began or ended an event earlier;</item>
-/// <item>trace columns compare at the same 100 ms samples and PWM shares as their average over each sample's 100 ms; a
-/// sample differs when it leaves the range of the reference's at that sample and the samples either side, and only in
-/// runs of at least <see cref="CompareTolerances.Samples"/> samples.</item>
+/// the event, 0 where it has not). One alone, beside a gap of that cylinder's events in its own run, is a cut that began or
+/// ended an event earlier, not a difference (I3).</item>
+/// <item>trace columns compare at the same drive time, each reference sample with the candidate's within 50 ms, and PWM
+/// shares as their average over each sample's 100 ms; a sample differs when it leaves the range of the reference's at that
+/// sample and the samples either side, and only in runs of at least <see cref="CompareTolerances.Samples"/> samples. A
+/// sample of the reference while the candidate's ECU is off is not compared (final review I5).</item>
 /// </list>
-/// The fault memory, how each power cycle ended and the end EEPROM compare whole, at the end of the reference's trace; the
+/// Each power cycle's start and end compare in drive time, within <see cref="CompareTolerances.PowerCycleSeconds"/>, at the
+/// reference's time (power_cycles.start, power_cycles.end). The fault memory, how each power cycle ended and the end EEPROM
+/// compare whole, at the end of the reference's trace; the
 /// EEPROM without its copy of the flash checksums (words 1EEh-1F0h: the program CRC, the calibration CRC and the record's
 /// CRC-16/ARC from 000Fh), which any code change moves as it moves the image's own checksum fields (R7). Differences of
 /// one signal and cylinder less than 0.5 s apart make one range.
@@ -50,8 +55,11 @@ public static class BehaviourDiff
     /// <summary>A single differing event or sample.</summary>
     sealed record Seen(string Signal, int? Cylinder, ulong Cycle, double Difference, double Reference, double Candidate);
 
-    /// <summary>A value an event carries, and how far the candidate's may stray from the reference's.</summary>
-    sealed record Signal<T>(string Name, Func<T, double> Value, Func<T, double> Tolerance);
+    /// <summary>
+    /// A value an event carries, how far the candidate's may stray from the reference's, and how much further a lone
+    /// event's may stray and still be drift: one step of the decision behind it.
+    /// </summary>
+    sealed record Signal<T>(string Name, Func<T, double> Value, Func<T, double> Tolerance, Func<T, double> Lone);
 
     public static IReadOnlyList<BehaviourDifference> Of(RunTrack reference, RunTrack candidate, Drive drive, CompareTolerances tolerances)
     {
@@ -62,32 +70,43 @@ public static class BehaviourDiff
 
         Events(seen, reference.Sparks, candidate.Sparks, s => s.Cylinder, s => s.Fire, Window, "spark.missing", new Signal<Spark>[]
         {
-            new("spark.decided_advance", s => s.DecidedAdvance, _ => 0),
-            new("spark.decided_dwell", s => s.DecidedDwellTicks, _ => 0),
-            new("spark.advance", s => s.Advance, _ => tolerances.SparkAdvanceDeg),
-            new("spark.dwell", s => s.DwellMs, s => tolerances.SparkDwellShare * s.DwellMs),
+            new("spark.decided_advance", s => s.DecidedAdvance, _ => 0, _ => tolerances.LoneAdvanceDeg),
+            new("spark.decided_dwell", s => s.DecidedDwellTicks, _ => 0, s => tolerances.LoneShare * s.DecidedDwellTicks),
+            new("spark.advance", s => s.Advance, _ => tolerances.SparkAdvanceDeg, _ => tolerances.LoneAdvanceDeg),
+            new("spark.dwell", s => s.DwellMs, s => tolerances.SparkDwellShare * s.DwellMs, s => tolerances.LoneShare * s.DwellMs),
         });
         Events(seen, reference.Injections, candidate.Injections, i => i.Cylinder, i => i.Open, Window, "injection.missing", new Signal<Injection>[]
         {
-            new("injection.ticks", i => i.ExpectedTicks, _ => 0),
-            new("injection.duration", i => i.Ticks, _ => tolerances.InjectionTicks),
-            new("injection.angle", i => i.OpenAngle, _ => tolerances.InjectionAngleDeg),
+            new("injection.ticks", i => i.ExpectedTicks, _ => 0, i => tolerances.LoneShare * i.ExpectedTicks),
+            new("injection.duration", i => i.Ticks, _ => tolerances.InjectionTicks, i => tolerances.LoneShare * i.Ticks),
+            new("injection.angle", i => i.OpenAngle, _ => tolerances.InjectionAngleDeg, _ => tolerances.LoneAngleDeg),
         });
 
-        var samples = Math.Min(reference.Trace.Count, candidate.Trace.Count);
+        var partners = Partners(reference.Trace, candidate.Trace);
+        var samples = reference.Trace.Count;
+        bool Paired(int i) => partners[i] is not null;
         for (var k = 0; k < columns.Count; k++)
         {
             if (!tolerances.TraceColumns.TryGetValue(columns[k], out var tolerance))
                 continue;
             var column = k;
-            Sampled(seen, columns[k], samples, tolerances.Samples, i => reference.Trace[i].Values[column], i => candidate.Trace[i].Values[column],
-                i => Cycle(reference.Trace[i]), tolerance);
+            Sampled(seen, columns[k], samples, tolerances.Samples, i => reference.Trace[i].Values[column],
+                i => candidate.Trace[partners[i]!.Value].Values[column], Paired, i => Cycle(reference.Trace[i]), tolerance);
         }
         foreach (var (source, signal) in PwmSignals)
         {
             var r = Averages(Shares(reference.Outputs, source), reference.Trace, samples);
             var c = Averages(Shares(candidate.Outputs, source), reference.Trace, samples);
-            Sampled(seen, signal, samples, tolerances.Samples, i => r[i], i => c[i], i => Cycle(reference.Trace[i]), tolerances.PwmPerMille);
+            Sampled(seen, signal, samples, tolerances.Samples, i => r[i], i => c[i], Paired, i => Cycle(reference.Trace[i]), tolerances.PwmPerMille);
+        }
+
+        var apartBy = (ulong)Math.Round(tolerances.PowerCycleSeconds * CpuHz);
+        foreach (var ((rs, re), (cs, ce)) in reference.Cycles.Zip(candidate.Cycles))
+        {
+            if (Distance(rs, cs) > apartBy)
+                seen.Add(new Seen("power_cycles.start", null, rs, Distance(rs, cs) / CpuHz, rs / CpuHz, cs / CpuHz));
+            if (Distance(re, ce) > apartBy)
+                seen.Add(new Seen("power_cycles.end", null, re, Distance(re, ce) / CpuHz, re / CpuHz, ce / CpuHz));
         }
 
         var end = reference.Trace.Count > 0 ? Cycle(reference.Trace[^1]) : 0;
@@ -113,8 +132,8 @@ public static class BehaviourDiff
     }
 
     /// <summary>
-    /// One kind of event: per cylinder, the unpaired ones in runs of two or more, and the paired ones whose values leave the
-    /// reference's range at that event and the events either side of it.
+    /// One kind of event: per cylinder, the unpaired ones (<see cref="Unpaired"/>), and the paired ones whose values leave
+    /// the reference's range at that event and the events either side of it, alone only beyond one step more.
     /// </summary>
     static void Events<T>(List<Seen> seen, IReadOnlyList<T> reference, IReadOnlyList<T> candidate, Func<T, int> cylinder, Func<T, ulong> at,
         Func<ulong, ulong> window, string missing, IReadOnlyList<Signal<T>> signals) where T : class
@@ -124,25 +143,28 @@ public static class BehaviourDiff
             var references = reference.Where(e => cylinder(e) == number).OrderBy(at).ToList();
             var candidates = candidate.Where(e => cylinder(e) == number).OrderBy(at).ToList();
             var pairs = Pair(references, candidates, at, window).ToList();
-            foreach (var run in InRuns(pairs.Where(p => p.Candidate is null).Select(p => p.Reference!.Value)))
-                seen.AddRange(run.Select(i => new Seen(missing, number, at(references[i]), 1, 1, 0)));
-            foreach (var run in InRuns(pairs.Where(p => p.Reference is null).Select(p => p.Candidate!.Value)))
-                seen.AddRange(run.Select(i => new Seen(missing, number, at(candidates[i]), 1, 0, 1)));
+            Unpaired(seen, missing, number, references, pairs.Where(p => p.Candidate is null).Select(p => p.Reference!.Value), at, window, 1, 0);
+            Unpaired(seen, missing, number, candidates, pairs.Where(p => p.Reference is null).Select(p => p.Candidate!.Value), at, window, 0, 1);
             foreach (var signal in signals)
             {
-                var differing = new Dictionary<int, Seen>();             // by the reference event's index
+                var differing = new Dictionary<int, (Seen Seen, bool Drift)>();    // by the reference event's index
                 foreach (var (r, c) in pairs)
                 {
                     if (r is not { } ri || c is not { } ci)
                         continue;
                     var (value, mine) = (signal.Value(candidates[ci]), signal.Value(references[ri]));
                     var neighbours = Near(references, ri, at).Select(j => signal.Value(references[j])).ToList();
+                    var beyond = Math.Max(neighbours.Min() - value, value - neighbours.Max());
                     var tolerance = signal.Tolerance(references[ri]);
-                    if (value < neighbours.Min() - tolerance || value > neighbours.Max() + tolerance)
-                        differing[ri] = new Seen(signal.Name, number, at(references[ri]), Math.Abs(value - mine), mine, value);
+                    if (beyond > tolerance)
+                        differing[ri] = (new Seen(signal.Name, number, at(references[ri]), Math.Abs(value - mine), mine, value),
+                            beyond <= tolerance + signal.Lone(references[ri]));
                 }
-                foreach (var run in InRuns(differing.Keys.Order()))
-                    seen.AddRange(run.Select(i => differing[i]));
+                foreach (var run in Runs(differing.Keys.Order()))
+                {
+                    if (run.Count >= 2 || !differing[run[0]].Drift)
+                        seen.AddRange(run.Select(i => differing[i].Seen));
+                }
             }
         }
     }
@@ -194,31 +216,82 @@ public static class BehaviourDiff
         return Enumerable.Range(low, high - low + 1);
     }
 
-    /// <summary>The runs of two or more consecutive indices among <paramref name="indices"/> (in order).</summary>
-    static IEnumerable<List<int>> InRuns(IEnumerable<int> indices)
+    /// <summary>
+    /// One run's events of a cylinder that the other run has not, as spark.missing or injection.missing: two or more in a row,
+    /// or one alone away from a cut's edge. A cut that begins or ends one event earlier in one run leaves one event unpaired
+    /// beside the cut (R5); one gone from steady running is a dropped spark or injection (plan 5 final review I3).
+    /// </summary>
+    static void Unpaired<T>(List<Seen> seen, string missing, int cylinder, List<T> events, IEnumerable<int> unpaired, Func<T, ulong> at,
+        Func<ulong, ulong> window, double reference, double candidate)
+    {
+        foreach (var run in Runs(unpaired))
+        {
+            if (run.Count >= 2 || !AtACutsEdge(events, run[0], at, window))
+                seen.AddRange(run.Select(i => new Seen(missing, cylinder, at(events[i]), 1, reference, candidate)));
+        }
+    }
+
+    /// <summary>
+    /// Whether event <paramref name="i"/> of a cylinder borders a gap in its own run: none of that cylinder's events within 1.5
+    /// engine cycles before or after it (the window is half an engine cycle), or none at all on that side.
+    /// </summary>
+    static bool AtACutsEdge<T>(List<T> events, int i, Func<T, ulong> at, Func<ulong, ulong> window)
+    {
+        var t = at(events[i]);
+        var gap = 3 * window(t);
+        return i == 0 || t - at(events[i - 1]) > gap || i == events.Count - 1 || at(events[i + 1]) - t > gap;
+    }
+
+    /// <summary>The runs of consecutive indices among <paramref name="indices"/> (in order), a lone index a run of one.</summary>
+    static IEnumerable<List<int>> Runs(IEnumerable<int> indices)
     {
         var run = new List<int>();
         foreach (var i in indices)
         {
             if (run.Count > 0 && i != run[^1] + 1)
             {
-                if (run.Count >= 2)
-                    yield return run;
+                yield return run;
                 run = new List<int>();
             }
             run.Add(i);
         }
-        if (run.Count >= 2)
+        if (run.Count > 0)
             yield return run;
     }
 
     /// <summary>
+    /// For each of the reference's samples, the candidate's at the same drive time (the nearest within half a sample's
+    /// 100 ms), or null where the candidate has none: its ECU was off then (final review I5). Both traces are in time order.
+    /// </summary>
+    static int?[] Partners(IReadOnlyList<TraceRow> reference, IReadOnlyList<TraceRow> candidate)
+    {
+        var partners = new int?[reference.Count];
+        var k = 0;
+        for (var i = 0; i < reference.Count; i++)
+        {
+            var t = Cycle(reference[i]);
+            while (k + 1 < candidate.Count && Cycle(candidate[k + 1]) <= t)
+                k++;
+            var nearest = ulong.MaxValue;
+            for (var j = k; j <= k + 1 && j < candidate.Count; j++)
+            {
+                var apart = Distance(Cycle(candidate[j]), t);
+                if (apart <= SampleCycles / 2 && apart < nearest)
+                    (partners[i], nearest) = (j, apart);
+            }
+        }
+        return partners;
+    }
+
+    static ulong Distance(ulong a, ulong b) => a > b ? a - b : b - a;
+
+    /// <summary>
     /// A sampled signal: the samples whose candidate value leaves the reference's range at that sample and the samples either
     /// side by more than the tolerance (or has a value where the reference has none, or none where it has one), kept only in
-    /// runs of at least <paramref name="run"/>.
+    /// runs of at least <paramref name="run"/>. A sample without a <paramref name="paired"/> one in the candidate ends a run.
     /// </summary>
     static void Sampled(List<Seen> seen, string signal, int samples, int run, Func<int, double?> reference, Func<int, double?> candidate,
-        Func<int, ulong> cycle, double tolerance)
+        Func<int, bool> paired, Func<int, ulong> cycle, double tolerance)
     {
         var differing = new List<Seen>();
         void Flush()
@@ -229,6 +302,11 @@ public static class BehaviourDiff
         }
         for (var i = 0; i < samples; i++)
         {
+            if (!paired(i))
+            {
+                Flush();
+                continue;
+            }
             var (r, c) = (reference(i), candidate(i));
             bool apart;
             if (r is { } a && c is { } b)

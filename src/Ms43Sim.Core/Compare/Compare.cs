@@ -27,6 +27,24 @@ public static class Compare
 {
     public const string WarmStart = "warm-start";
 
+    /// <summary>
+    /// Whether <paramref name="drive"/> loads the engine: a drive segment in gear, at the dyno's speed. There any change of
+    /// the program's timing drifts two runs apart, so a code change's behaviour differences mix its own effect with that
+    /// drift (plan 5 Task 10's open item; final review I4). A start, an idle, a blip in neutral or a key cycle holds the
+    /// engine steady, and two runs agree there.
+    /// </summary>
+    public static bool LoadsTheEngine(Drive drive)
+    {
+        var start = 0.0;
+        foreach (var segment in drive.Segments)
+        {
+            if (segment.Mode == DriveMode.Drive && DriveTimeline.At(drive, start).Values["gear"] != 0)
+                return true;
+            start += segment.Seconds;
+        }
+        return false;
+    }
+
     /// <summary>Both bins through <paramref name="drive"/>, from the same EEPROM, then what differs.</summary>
     public static CompareResult Run(FlashedImage reference, FlashedImage candidate, Drive drive, CompareOptions? options = null)
     {

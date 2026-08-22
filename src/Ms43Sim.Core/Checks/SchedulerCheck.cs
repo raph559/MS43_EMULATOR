@@ -30,7 +30,7 @@ namespace Ms43Sim.Core;
 public sealed class SchedulerCheck() : CheckBase("scheduler")
 {
     const ulong Ms = 24_000;
-    const uint MainLoopService = 0x0E0144, PowerDownService = 0x0BD9AC;
+    const uint MainLoopService = RunState.MainLoopService, PowerDownService = RunState.PowerDownService;
     const uint Q1 = 0x0E0944, Q2 = 0x0E0976, Q3 = 0x0E09A8, Requests = 0x0E0910;
     const uint T5ms = 0x0E0116, T10ms = 0x0E05C4, T100ms = 0x0E075A, T1s = 0x0E08DA;
     const uint T10msReturn = 0x0E05C8, SerialTimer = 0xE3AE;                    // the 10 ms timers count down at E39E + 2 × id

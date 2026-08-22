@@ -94,12 +94,29 @@ public class DriveRunTests
     public void ACycleEnds_ByTheRelay_TheDrivesKey_AndTheKeyAsRead(bool dropped, bool driveKeyOn, bool readOn, CycleEnd end) =>
         Assert.Equal(end, DriveRun.EndOf(dropped, driveKeyOn, readOn));
 
-    [Theory]                                                                       // plan 5 Task 6: the firmware's SRST after the drop
-    [InlineData(true, true, true, CycleEnd.Restarted)]
-    [InlineData(true, false, false, CycleEnd.AfterRun)]                            // a drop with the key off powers the ECU off first
-    [InlineData(false, true, true, CycleEnd.DriveEnded)]
-    public void AReset_AfterADropWithTheKeyOn_IsARestart(bool dropped, bool driveKeyOn, bool readOn, CycleEnd end) =>
-        Assert.Equal(end, DriveRun.EndOf(dropped, driveKeyOn, readOn, restarted: dropped && driveKeyOn));
+    [Theory]                                                                       // plan 5 final review I1: the firmware's SRST after the drop
+    [InlineData(true, true, CycleEnd.Restarted)]                                   // the key back on during its power-down write
+    [InlineData(false, true, CycleEnd.RelayDroppedKeyOn)]                          // a drop outside the write, though the ECU then reset itself
+    [InlineData(true, false, CycleEnd.RelayDroppedKeyOn)]                          // the write's drop, and no reset in 1 s with the key on
+    public void ADropWithTheKeyOn_IsTheFirmwaresOwn_OnlyAtTheEndOfItsPowerDownWrite(bool write, bool restarted, CycleEnd end) =>
+        Assert.Equal(end, DriveRun.EndOf(true, true, true, restarted, powerDownWrite: write));
+
+    [Theory]
+    [InlineData(true, CycleEnd.AfterRun)]                                          // the write's drop, then the key off before the reset: the power goes
+    [InlineData(false, CycleEnd.RelayDroppedKeyOn)]                                // a drop is judged at the drop, whatever the key does after it
+    public void TheKeyGoingOff_AfterADropWithTheKeyOn_EndsAnAfterRun_OnlyAtItsPowerDownWrite(bool write, CycleEnd end) =>
+        Assert.Equal(end, DriveRun.EndOf(true, true, true, restarted: false, powerDownWrite: write, keyOffSince: true));
+
+    [Fact] public void ThePowerDownWrite_BeginsAtItsSrvwdtWithTheKeyReadOff_AndEndsInTheMainLoop()
+    {
+        const uint Write = 0x0BD9AC, MainLoop = 0x0E0144, AfterTheDrop = 0x0D842A;
+        static bool After(params (uint Address, bool KeyReadOn)[] services) =>
+            services.Aggregate(false, (underWay, s) => DriveRun.PowerDownWriteAfter(underWay, s.Address, s.KeyReadOn));
+        Assert.True(After((MainLoop, false), (Write, false)));                     // the after-run reaches its write
+        Assert.True(After((Write, false), (Write, true), (AfterTheDrop, true)));    // the key back on during the write
+        Assert.False(After((MainLoop, true), (Write, true)));                      // a write begun with the key read on is no after-run's
+        Assert.False(After((Write, false), (MainLoop, true)));                     // back in the main loop: the write was given up
+    }
 
     [Fact] public void AnOffWithItsAfterRun_EndsTheCycleNormally()
     {

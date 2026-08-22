@@ -128,6 +128,8 @@ internal static class DriveCoverage
                 continue;
             var next = i + 1 < r.PowerCycles.Count;
             var resumed = next ? r.PowerCycles[i + 1].StartCycle : end;
+            if (resumed == cycle.EndCycle)
+                continue;                                    // the firmware reset itself and the drive went on there: nothing was left unrun
             var read = cycle.End == CycleEnd.RelayDroppedKeyOn ? "the firmware read the key on" : "the firmware read the key off: AN1 forced";
             lines.Add(string.Create(CultureInfo.InvariantCulture,
                 $"{cycle.EndCycle / 24e6:0.000}–{resumed / 24e6:0.000} s: the main relay dropped while the drive had the key on ({read}); the drive {(next ? "ran again from its next key-on" : "did not run again")}"));

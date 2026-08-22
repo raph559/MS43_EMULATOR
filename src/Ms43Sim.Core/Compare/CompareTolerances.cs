@@ -16,6 +16,21 @@ public sealed record CompareTolerances(double SparkAdvanceDeg, double SparkDwell
     double InjectionAngleDeg, double PwmPerMille, int Samples, IReadOnlyDictionary<string, double> TraceColumns)
 {
     /// <summary>
+    /// How much further than its tolerance a spark's advance, decided or as fired, may stray at one event alone and still be
+    /// drift (plan 5 final review I3): one step of the ignition maps, 0.375°.
+    /// </summary>
+    public double LoneAdvanceDeg { get; init; } = 0.375;
+
+    /// <summary>The same for a dwell or an injection's ticks, decided or as driven: a share of the reference's value.</summary>
+    public double LoneShare { get; init; } = 0.02;
+
+    /// <summary>The same for an injection's angle as driven, in degrees.</summary>
+    public double LoneAngleDeg { get; init; } = 0.75;
+
+    /// <summary>How far apart in time a power cycle may start or end in the two runs: one trace sample (final review I5).</summary>
+    public double PowerCycleSeconds { get; init; } = 0.1;
+
+    /// <summary>
     /// R6's values. The trace columns: the firmware's (setpoints, F900, flags, ti, iga, dwell) exact; the plant's as R6 has
     /// them (rpm 5, temperatures 0.5 °C, angles 0.5°, the throttle 0.2°, shares 1 point, the battery 0.05 V); and, where R6
     /// is silent [call], the air mass 0.5 kg/h (two of its steps) and the raw cam counts 1.
@@ -51,11 +66,13 @@ public sealed record CompareTolerances(double SparkAdvanceDeg, double SparkDwell
         yield return $"spark.advance (as fired): {N(SparkAdvanceDeg)}°; spark.dwell (as fired): {N(SparkDwellShare * 100)} % of the reference's";
         yield return $"injection.duration (as driven): {N(InjectionTicks)} CAPCOM tick(s); injection.angle: {N(InjectionAngleDeg)}°";
         yield return "sparks and injections pair per cylinder with the other run's nearest, within half an engine cycle at the reference's speed";
-        yield return "two bins drift by cycles, so the same behaviour may come a moment earlier or later: a paired event differs only beyond the range of the reference's values at that event and the events either side; unpaired events are spark.missing or injection.missing only two or more in a row";
+        yield return "two bins drift by cycles, so the same behaviour may come a moment earlier or later: a paired event differs only beyond the range of the reference's values at that event and the events either side";
+        yield return $"one event alone, its neighbours agreeing, differs only beyond one step more: {N(LoneAdvanceDeg)}° for the advance, {N(LoneShare * 100)} % of the reference's value for the dwell and the ticks, {N(LoneAngleDeg)}° for the injection angle; an event one run has and the other has not is spark.missing or injection.missing, except one alone beside a gap of that cylinder's events (a cut that began or ended an event earlier)";
         foreach (var group in TraceColumns.GroupBy(c => c.Value).OrderBy(g => g.Key))
             yield return $"trace {string.Join(", ", group.Select(c => c.Key))}: {(group.Key == 0 ? "exact" : $"±{N(group.Key)}")}, beyond the reference's range at that sample and the samples either side, for {Samples} samples in a row";
         yield return $"pwm.vanos_in, pwm.vanos_ex, pwm.throttle (shares, averaged over each sample's 100 ms): ±{N(PwmPerMille)} ‰, as the trace columns are judged";
         yield return "faults (stored at the end of each power cycle), power_cycles (how each ended), eeprom (at the end, without its copy of the flash checksums, words 1EEh-1F0h): exact";
+        yield return $"power_cycles.start, power_cycles.end (each power cycle's start and end in drive time): ±{N(PowerCycleSeconds)} s; the trace samples pair by drive time, and a sample of one run while the other's ECU is off is not compared";
         yield return "differences of one signal and cylinder less than 0.5 s apart are one range";
     }
 }

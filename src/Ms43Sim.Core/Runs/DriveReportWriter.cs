@@ -211,7 +211,7 @@ public static class DriveReportWriter
         CycleEnd.DriveEnded => "the drive's end",
         CycleEnd.AfterRun => "the after-run: the main relay dropped after the key-off",
         CycleEnd.RelayDroppedKeyOn => "**the main relay dropped with the key on** (the ECU switched itself off)",
-        CycleEnd.Restarted => "the firmware's restart: the main relay dropped with the key on, then the ECU reset itself (SRST) and booted again",
+        CycleEnd.Restarted => "the firmware's restart: the main relay dropped with the key on at the end of its power-down write, then the ECU reset itself (SRST) and booted again",
         _ => "**the main relay dropped while the drive had the key on** (the firmware read it off: AN1 forced)",
     };
 

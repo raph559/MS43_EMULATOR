@@ -99,6 +99,8 @@ public class CompareAcceptanceTests(CompareAcceptance f) : IClassFixture<Compare
         Assert.True(found.Count == 0, string.Join(" | ", found));
     }
 
+    const double Step = 0.375;                                          // one step of the ignition maps
+
     [Fact] public void IgnitionEdit_ChangesTheSparkOnlyWhereItsCellsAreRead()
     {
         // The block's cells reach from the row below it to the row above (3750 to 5000 rpm) as the map interpolates; the
@@ -106,27 +108,79 @@ public class CompareAcceptanceTests(CompareAcceptance f) : IClassFixture<Compare
         // so the edit moves a decision by 3 steps (1.125°) at most; measured against the reference at the same event, a
         // decision on a breakpoint can also sit one step (0.375°) apart. Elsewhere the drift any change brings (the stub's
         // on this drive) moves a decision by one step at most, as the idle controller settles after a pull with more advance.
-        const double Step = 0.375;
         var r = f.Against("ignition", "full-load");
         Assert.Contains(r.Calibration, d => d.Name == "ip_iga_ron98_pl__n__maf" && d.Changed == 16);
-        var decided = r.Behaviour.Where(d => d.Signal == "spark.decided_advance").ToList();
-        var edit = decided.Where(d => d.MaxDifference > Step + 1e-6).ToList();
         var drive = f.Drives["full-load"];
         var rpm = VariableTrace.Columns.ToList().IndexOf("rpm_fed");
         double RpmAt(ulong cycle) => r.Reference.Trace.MinBy(t => Math.Abs(t.Seconds - cycle / 24e6))!.Values[rpm] ?? 0;
+        bool InTheBlock(BehaviourDifference d) => new[] { d.FromCycle, d.ToCycle }.All(cycle =>
+            RpmAt(cycle) is >= 3750 - 100 and <= 5000 + 100 && DriveTimeline.At(drive, cycle / 24e6).Values["pedal"] >= 90);
+
+        var decided = r.Behaviour.Where(d => d.Signal == "spark.decided_advance").ToList();
+        var edit = decided.Where(d => d.MaxDifference > Step + 1e-6).ToList();
         Assert.All(edit, d =>
         {
-            foreach (var cycle in new[] { d.FromCycle, d.ToCycle })
-            {
-                Assert.InRange(RpmAt(cycle), 3750 - 100, 5000 + 100);
-                Assert.True(DriveTimeline.At(drive, cycle / 24e6).Values["pedal"] >= 90, $"{Describe(new[] { d })}: the pedal was not down");
-            }
+            Assert.True(InTheBlock(d), $"{Describe(new[] { d })}: outside the block, or the pedal was not down");
             Assert.True(d.Candidate > d.Reference, Describe(new[] { d }));
             Assert.InRange(d.MaxDifference, 3 * Step - 1e-6, 4 * Step + 1e-6);
         });
         Assert.All(Enumerable.Range(1, 6), cylinder =>
             Assert.True(edit.Where(d => d.Cylinder == cylinder).Sum(d => d.Count) >= 50, $"cylinder {cylinder}: {Describe(edit)}"));
         Assert.All(decided.Except(edit), d => Assert.True(d.MaxDifference <= Step + 1e-6, Describe(new[] { d })));
+
+        // As fired (plan 5 final review I6): in the block, the edit and the dwell's fall within the 0.1° tolerance; elsewhere
+        // no more than the drift the stub's code change brings on this drive (the gear change's cut, the pull's top).
+        var asFired = r.Behaviour.Where(d => d.Signal == "spark.advance").ToList();
+        var inBlock = asFired.Where(InTheBlock).ToList();
+        Assert.All(inBlock, d =>
+        {
+            Assert.True(d.Candidate > d.Reference, Describe(new[] { d }));
+            Assert.InRange(d.MaxDifference, 3 * Step - 0.1, 4 * Step + 0.1);
+        });
+        Assert.All(Enumerable.Range(1, 6), cylinder =>
+            Assert.True(inBlock.Where(d => d.Cylinder == cylinder).Sum(d => d.Count) >= 50, $"cylinder {cylinder}: {Describe(inBlock)}"));
+        var drift = f.Against("stub", "full-load").Behaviour.Where(d => d.Signal == "spark.advance").Max(d => d.MaxDifference);
+        Assert.All(asFired.Except(inBlock), d => Assert.True(d.MaxDifference <= drift, $"{Describe(new[] { d })}: beyond the stub's {drift}°"));
+    }
+
+    /// <summary>The RON98 ignition map's 16 cells (°) at <paramref name="rpm"/> along its rpm axis (a count, then u16 breakpoints), clamped at its ends.</summary>
+    static double[] IgnitionRow(byte[] bin, double rpm)
+    {
+        int U16(int offset) => bin[offset] | bin[offset + 1] << 8;
+        var axis = Enumerable.Range(1, U16(0x7501A)).Select(i => (double)U16(0x7501A + 2 * i)).ToArray();
+        double Cell(int row, int column) => 0.375 * bin[CompareAcceptance.Map + row * CompareAcceptance.Columns + column] - 23.625;
+        var below = Array.FindLastIndex(axis, x => x <= rpm);
+        return Enumerable.Range(0, CompareAcceptance.Columns).Select(c =>
+            below < 0 ? Cell(0, c)
+            : below >= axis.Length - 1 ? Cell(axis.Length - 1, c)
+            : Cell(below, c) + (rpm - axis[below]) / (axis[below + 1] - axis[below]) * (Cell(below + 1, c) - Cell(below, c))).ToArray();
+    }
+
+    /// <summary>
+    /// Why <paramref name="r"/> does not show the release's tune in full-load's steady 6,900 rpm segment (line 10, 18.5 to
+    /// 20.5 s), or null where it does: on every cylinder a decided-advance difference over the segment, each run's decisions
+    /// there (from 19 s, settled) within its own RON98 row at 6,900 rpm and one step, and at least 16 steps apart. The release
+    /// is past its own rev limit there (its rpm axis ends at 6,400): it closes the throttle and reads low-load cells.
+    /// </summary>
+    static string? TuneAt6900(CompareResult r)
+    {
+        const ulong From = 456_000_000, Settled = 456_000_000 + 12_000_000, To = 492_000_000;    // 19.0 s, 19.5 s, 20.5 s
+        var rows = (Reference: IgnitionRow(TestBins.CarBytes, 6900), Candidate: IgnitionRow(TestBins.ReleaseBytes, 6900));
+        foreach (var cylinder in Enumerable.Range(1, 6))
+        {
+            if (!r.Behaviour.Any(d => d.Signal == "spark.decided_advance" && d.Cylinder == cylinder && d.FromCycle <= To && d.ToCycle >= From))
+                return $"cylinder {cylinder}: no decided-advance difference at 6,900 rpm";
+            double Decided(DriveResult run) =>
+                run.Sparks.Where(s => s.Cylinder == cylinder && s.Fire >= Settled && s.Fire < To).Select(s => s.DecidedAdvance).DefaultIfEmpty(double.NaN).Average();
+            var (reference, candidate) = (Decided(r.Reference), Decided(r.Candidate));
+            if (!(reference >= rows.Reference.Min() - Step - 1e-6 && reference <= rows.Reference.Max() + Step + 1e-6))
+                return $"cylinder {cylinder}: the reference decided {reference}°, not from the car's row";
+            if (!(candidate >= rows.Candidate.Min() - Step - 1e-6 && candidate <= rows.Candidate.Max() + Step + 1e-6))
+                return $"cylinder {cylinder}: the candidate decided {candidate}°, not from the release's row";
+            if (candidate - reference < 16 * Step)
+                return $"cylinder {cylinder}: {reference}° against {candidate}°, under 16 steps apart";
+        }
+        return null;
     }
 
     [Fact] public void CarAgainstRelease_ShowsTheTune()
@@ -136,6 +190,7 @@ public class CompareAcceptanceTests(CompareAcceptance f) : IClassFixture<Compare
         var names = r.Calibration.Select(d => d.Name).ToList();
         Assert.Contains("ip_iga_ron98_pl__n__maf", names);
         Assert.Contains("ip_af_target_ron98__maf__n", names);
-        Assert.Contains(r.Behaviour, d => d.Signal.StartsWith("spark.", StringComparison.Ordinal) && d.At.Rpm >= 6900);
+        Assert.Null(TuneAt6900(r));
+        Assert.NotNull(TuneAt6900(f.Against("stub", "full-load")));          // plan 5 final review I6: drift alone does not pass it
     }
 }

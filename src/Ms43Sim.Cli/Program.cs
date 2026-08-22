@@ -464,7 +464,7 @@ public static class Program
             CompareReportWriter.WriteSet(results, outDir);
         }
         foreach (var r in results)
-            output.WriteLine($"{r.Drive}: {DriveReportWriter.Word(r.Verdict)} ({r.Calibration.Count} calibration, {r.Code.Count} code, {r.Behaviour.Count} behaviour differences)");
+            output.WriteLine(CompareReportWriter.Line(r));
         var worst = results.Select(r => r.Verdict).Aggregate(RunVerdict.Pass, Compare.Worse);
         output.WriteLine($"compare: {DriveReportWriter.Word(worst)} (reports in {outDir})");
         return (int)worst;

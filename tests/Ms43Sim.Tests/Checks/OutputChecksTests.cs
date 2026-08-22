@@ -60,6 +60,18 @@ public class OutputChecksTests
         Assert.Equal(CheckStatus.NotEvaluated, r.Check("stuck").Status);       // not the MS43X001 program
     }
 
+    [Fact] public void BeforeRotation_ReArmsWhenTheEngineStops_UntilItsNextCrankTooth()      // plan 5 final review I2
+    {
+        // A synthetic program, not a poke into a car-file run: the starter turns the engine from 1 s to 2 s, and it runs
+        // down and stops at about 2.9 s; at about 4.5 s the program opens and closes injector 1.
+        var r = DriveRunWithChecks(DriveParser.Parse("drive x\n1 on\n1 crank rpm=200\n4 idle"),
+            SyntheticPrograms.Image(handover: false, SyntheticPrograms.Wait(39), SyntheticPrograms.PulseInjector1, SyntheticPrograms.Hold));
+        var finding = Assert.Single(r.Check("before-rotation").Findings);
+        Assert.Contains("P2.0", finding.Message);
+        Assert.Contains("while the engine was stopped, before its next crank tooth", finding.Message);
+        Assert.InRange(finding.FirstCycle / 24e6, 4.0, 5.0);
+    }
+
     const ulong Ms = 24_000;
 
     /// <summary>

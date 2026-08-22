@@ -10,6 +10,9 @@ internal static class RunState
     internal const uint BootServiced = 0x002EFC, Handover = 0x0E366A, InterruptsEnabled = 0x0E36BC;
     internal const uint EepromLoaded = 0x0E3700, MainLoop = 0x0E0094, MainLoopService = 0x0E0144;
 
+    /// <summary>The power-down write's SRVWDT (plan 4's scheduler check; plan 5 final review I1).</summary>
+    internal const uint PowerDownService = 0x0BD9AC;
+
     static readonly (uint Cpu, byte[] Bytes)[] Checkpoints =
     {
         (BootServiced, new byte[] { 0xA7, 0x58, 0xA7, 0xA7 }),

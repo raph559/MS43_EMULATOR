@@ -57,8 +57,8 @@ With `--engine warm-idle` the car file starts warm and idles on its 900 rpm targ
 
 `ms43sim check` passes the car file and the release file on all seven standard drives, and fails
 three known-bad bins (REPORT.md §9.9). The car file answers the app's DS2 session on the K-line,
-restarts after a stall or a quick key cycle, and `compare` shows an ignition edit exactly where its
-cells are read (REPORT.md §9.10).
+restarts after a stall or a quick key cycle, and `compare` shows an ignition edit's decided advance
+exactly where its cells are read (REPORT.md §9.10).
 
 ## Run it
 
@@ -243,7 +243,14 @@ in every report:
 
 Two bins drift by cycles, so the same behaviour can come a moment earlier or later:
 - a value differs only beyond the reference's range within 100 ms and the neighbouring events or
-  samples, and only two or more in a row;
+  samples;
+- an event alone, its neighbours agreeing, differs only beyond one step more: 0.375° of advance, 2 %
+  of a dwell or of the ticks, 0.75° of injection angle. A sample alone never differs: samples count
+  two or more in a row;
+- an event one run has and the other has not is a difference, except one alone beside a gap of that
+  cylinder's events in its own run (a cut that began or ended an event earlier);
+- the trace samples pair by drive time, and a sample taken while the other run's ECU is off is not
+  compared; each power cycle's start and end compare within 0.1 s;
 - a PWM share is its average over each sample's 100 ms.
 
 The exit code is the worse of the two runs' verdicts (0, 1 or 4), 2 a usage error, 3 an unreadable
@@ -253,8 +260,9 @@ input. Compare reports; the owner judges (design §6.3).
 change of the program's timing drifts the runs apart: a transparent stub anywhere, which changes no
 value, shifts the phase of rotating cut patterns and the VANOS and throttle controllers. On the steady
 drives (warm start, cold start, idle, key cycle) two runs agree. A calibration-only change does not
-move the code, but its own effect can still ripple through the controllers. See the plan 5 record's
-open items.
+move the code, but its own effect can still ripple through the controllers. For a code change,
+compare-report.md gives design §6.3's advice, and on a drive in gear the drift note; summary.md and the
+console say so too. See the plan 5 record's open items.
 
 ## Build and test
 
@@ -265,7 +273,7 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 921 tests (about 8 minutes in all):
+Run it from the repository root. 936 tests (about 8 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
@@ -280,7 +288,7 @@ Run it from the repository root. 921 tests (about 8 minutes in all):
   transparent stub, an ignition edit, the release).
 
 `dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
-(897 tests, about 4 minutes).
+(912 tests, about 4 minutes).
 
 **Speed:** 122 M emulated cycles per second on this PC (Release, the warm-start drive with every
 check, plan 5; plan 4 measured 95–111 M; it varies with the PC's load), 5.1× real time; `check` of

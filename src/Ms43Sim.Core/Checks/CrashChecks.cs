@@ -5,9 +5,10 @@ namespace Ms43Sim.Core;
 /// <list type="bullet">
 /// <item>traps: any trap; a stack overflow or underflow is named;</item>
 /// <item>resets: any watchdog or software reset (repeats are the reset loop), or the main relay dropped
-/// while the drive had the key on and the firmware read it on (the ECU switched itself off). The software
-/// reset that follows a relay drop with the key on is the firmware's restart (plan 5 Task 6): it is judged by
-/// how the power cycle ended, a finding only with no key-off in that power cycle;</item>
+/// while the drive had the key on and the firmware read it on (the ECU switched itself off). Only the
+/// software reset that ends a Restarted power cycle is the firmware's restart, not a finding: the relay
+/// dropped with the key on at the end of a power-down write the key-off began, and the run stops at that
+/// reset (plan 5 Task 6 and its final review I1);</item>
 /// <item>execution: an instruction fetched from erased flash, or from outside flash;</item>
 /// <item>boot: a power cycle with the key on that has not reached the handover (0E:366A) 1 s after power-on;</item>
 /// <item>checksums: read 10 s after the main loop started with the key on and at the power cycle's
@@ -50,35 +51,30 @@ public static class CrashChecks
 
     sealed class Resets() : CheckBase("resets")
     {
-        bool keyWentOff, released;
-
-        protected override void Attached() => Context.SegmentEntered += point => keyWentOff |= point.Mode == DriveMode.Off;
+        readonly List<(ulong At, uint Pc)> software = new();       // judged at the power cycle's end
 
         protected override void Start(Machine machine, int index)
         {
-            (keyWentOff, released) = (false, false);
+            software.Clear();
             Exercise();
             machine.Events.Added += Reset;
-            machine.Board.Latch.Changed += (before, after) =>
-                released |= (before & 0x20) != 0 && (after & 0x20) == 0 && CarControls.KeyIsOn(machine.Board);
         }
 
         void Reset(SimEvent e)
         {
-            if (e is ResetEvent { Kind: ResetKind.Software } && released)
-                return;                                        // the firmware's restart: End judges the relay drop
-            if (e is ResetEvent { Kind: ResetKind.Watchdog or ResetKind.Software } reset)
-                Find($"{reset.Kind}", reset.Kind == ResetKind.Watchdog
-                    ? $"a watchdog reset, first at {Address(reset.Pc)} (repeats are a reset loop)"
-                    : $"a software reset (SRST), first at {Address(reset.Pc)}");
+            if (e is ResetEvent { Kind: ResetKind.Watchdog } watchdog)
+                Find($"{watchdog.Kind}", $"a watchdog reset, first at {Address(watchdog.Pc)} (repeats are a reset loop)");
+            else if (e is ResetEvent { Kind: ResetKind.Software } srst)
+                software.Add((Now, srst.Pc));
         }
 
         protected override void End(Machine machine, int index)
         {
+            // a Restarted power cycle stops at the firmware's own SRST, its last: that one is the restart
+            foreach (var (at, pc) in Context.Ended == CycleEnd.Restarted ? software.SkipLast(1) : software)
+                Find($"{ResetKind.Software}", $"a software reset (SRST), first at {Address(pc)}", at, at);
             if (Context.Ended == CycleEnd.RelayDroppedKeyOn)
                 Find($"relay {index}", $"power cycle {index + 1}: the main relay dropped with the key on (the ECU switched itself off)");
-            else if (Context.Ended == CycleEnd.Restarted && !keyWentOff)
-                Find($"relay {index}", $"power cycle {index + 1}: the main relay dropped with the key on and no key-off in this power cycle; the ECU reset itself (SRST) and booted again");
         }
     }
 

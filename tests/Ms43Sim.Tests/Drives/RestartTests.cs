@@ -93,18 +93,6 @@ public class RestartTests : IClassFixture<RestartRuns>
         Assert.True(check.Findings.Count == 0, string.Join("; ", check.Findings.Select(f => f.Message)));
     }
 
-    [Fact] public void BeforeRotation_ReArmsWhileTheEngineIsStopped_UntilTheRestartsFirstTooth()
-    {
-        // During the stall, with the engine stopped, the test opens injector 1 (P2.0 low) for 1 ms.
-        const uint P2 = 0xFFC0;
-        var r = RestartRuns.Run(RestartRuns.Body,
-            At(12.0, (machine, _) => machine.Sfrs.Write16(P2, (ushort)(machine.Sfrs.Peek(P2) & ~1))),
-            At(12.001, (machine, _) => machine.Sfrs.Write16(P2, (ushort)(machine.Sfrs.Peek(P2) | 1))));
-        var check = r.Check("before-rotation");
-        Assert.Equal(CheckStatus.Fail, check.Status);
-        var finding = Assert.Single(check.Findings);
-        Assert.Contains("P2.0", finding.Message);
-        Assert.Contains("stopped", finding.Message);
-        Assert.Equal(12.0, Seconds(finding.FirstCycle), 3);
-    }
+    // before-rotation's re-arm at a stop has its failing side on a synthetic program (OutputChecksTests): no test writes a
+    // pin while the car file runs (plan 5 final review I2).
 }
