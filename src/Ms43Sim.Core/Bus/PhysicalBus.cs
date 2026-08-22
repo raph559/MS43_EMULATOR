@@ -45,6 +45,13 @@ public sealed class PhysicalBus
     /// <summary>SYSCON.XPEN: when set, XRAM and the CAN module answer in segment 0.</summary>
     public bool XperipheralsEnabled { get; set; }
 
+    /// <summary>
+    /// An observer of every data access (plan 6): the physical address, and whether it writes. Instruction fetches and
+    /// <see cref="Peek16"/>/<see cref="Poke16"/> are not reported. It may read anything and must change nothing; null, the
+    /// default, costs one check per access.
+    /// </summary>
+    public Action<uint, bool>? DataWatch { get; set; }
+
     public void AttachDevice(int chipSelect, IExternalDevice device) => devices[chipSelect] = device;
 
     /// <summary>The on-chip CAN module that answers at 00'EF00-00'EFFF while XPEN is set.</summary>
@@ -80,6 +87,8 @@ public sealed class PhysicalBus
     public ushort Read16(uint a, AccessKind kind = AccessKind.Read)
     {
         a &= 0xFFFFFF;
+        if (kind != AccessKind.Fetch)
+            DataWatch?.Invoke(a, false);
         switch (Decode(a))
         {
             case Region.Flash: return Word(flash, (int)(a & 0x7FFFF));
@@ -100,6 +109,8 @@ public sealed class PhysicalBus
     public byte Read8(uint a, AccessKind kind = AccessKind.Read)
     {
         a &= 0xFFFFFF;
+        if (kind != AccessKind.Fetch)
+            DataWatch?.Invoke(a, false);
         switch (Decode(a))
         {
             case Region.Flash: return flash[a & 0x7FFFF];
@@ -123,6 +134,7 @@ public sealed class PhysicalBus
     public void Write16(uint a, ushort value)
     {
         a &= 0xFFFFFF;
+        DataWatch?.Invoke(a, true);
         switch (Decode(a))
         {
             case Region.Flash:
@@ -148,6 +160,7 @@ public sealed class PhysicalBus
     public void Write8(uint a, byte value)
     {
         a &= 0xFFFFFF;
+        DataWatch?.Invoke(a, true);
         switch (Decode(a))
         {
             case Region.Flash:
