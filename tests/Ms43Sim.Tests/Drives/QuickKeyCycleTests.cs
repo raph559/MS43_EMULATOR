@@ -37,6 +37,19 @@ public class QuickKeyCycleTests : IClassFixture<QuickKeyCycleRuns>
 
     static string Why(DriveResult r) => string.Join("; ", r.Checks.SelectMany(c => c.Findings.Select(f => $"{c.Name}: {f.Message}")));
 
+    [Fact, Trait("Category", "StandardDrives")] public void ARestart_AppliesTheSegmentsKLineLinesOnce()   // plan 5 review M1
+    {
+        // The key comes back during the power-down write: the crank segment begins in the first power cycle, and the
+        // firmware's reset starts the second inside it. Its kline lines were applied once, at the segment's start.
+        var r = runs.Run("11 off\nkline connect\nkline every 1 6D 00\n3 crank rpm=200\n5 idle\n");
+        Assert.Equal(CycleEnd.Restarted, r.PowerCycles[0].End);
+        Assert.Single(r.KLine, e => e.Request.SequenceEqual(Hex.Bytes("12 08 91 01 E8 48 00 2A")));
+        var restart = r.PowerCycles[1].StartCycle;
+        var keepAlives = r.KLine.Count(e => e.Request.SequenceEqual(Hex.Bytes("12 05 6D 00 7A"))
+            && e.SentAt >= restart && e.SentAt < restart + 4 * 24_000_000UL);
+        Assert.InRange(keepAlives, 3, 5);                                // one a second: applied twice, they came two a second
+    }
+
     [Theory]
     [InlineData(1.0)]
     [InlineData(3.0)]

@@ -28,8 +28,9 @@ public static class DriveReportWriter
 
     /// <summary>
     /// The K-line in the drive's time (plan 5 Task 4), sorted by cycle: each request (tester); its reply, malformed
-    /// answer or timeout (ecu), the timeout when the tester gave up, with no bytes; and each byte the line lost
-    /// (mismatch or collision), with the end that sent it. The bytes are spaced hex.
+    /// answer or timeout (ecu), the timeout when the tester gave up, with the bytes of an unfinished frame (plan 6, M3);
+    /// and each byte the line lost (mismatch or collision) or the tester took for no reply (stray), with the end that
+    /// sent it. The bytes are spaced hex.
     /// </summary>
     public static string KLineCsv(DriveResult r)
     {
@@ -39,7 +40,7 @@ public static class DriveReportWriter
         foreach (var e in r.KLine)
         {
             Add(e.SentAt, "tester", "request", e.Request);
-            Add(e.EndedAt, "ecu", Outcome(e.Outcome), e.Reply ?? Array.Empty<byte>());
+            Add(e.EndedAt, "ecu", Outcome(e.Outcome), e.Reply ?? e.Partial);
         }
         foreach (var n in r.KLineNotes)
             Add(n.Cycle, n.From, n.Kind, new[] { n.Value });
@@ -74,14 +75,15 @@ public static class DriveReportWriter
         int Count(KLineOutcome o) => r.KLine.Count(e => e.Outcome == o);
         s.AppendLine($"K-line tester: {tester}. Its requests and the bytes the line lost, in the drive's time, are all in kline.csv.").AppendLine();
         s.AppendLine($"- requests: {r.KLine.Count}; replies: {Count(KLineOutcome.Replied)}; timeouts: {Count(KLineOutcome.TimedOut)}; malformed: {Count(KLineOutcome.Malformed)}");
-        s.AppendLine($"- bytes lost: {r.KLineNotes.Count(n => n.Kind == "mismatch")} to a baud rate more than 3 % from the ECU's, {r.KLineNotes.Count(n => n.Kind == "collision")} in collisions");
+        s.AppendLine($"- bytes lost: {r.KLineNotes.Count(n => n.Kind == "mismatch")} to a baud rate more than 3 % from the other end's, {r.KLineNotes.Count(n => n.Kind == "collision")} in collisions");
+        s.AppendLine($"- stray ECU bytes, no part of any reply: {r.KLineNotes.Count(n => n.Kind == "stray")}; timeouts with part of a frame: {r.KLine.Count(e => e.Partial.Count > 0)}");
         var problems = r.KLine.Where(e => e.Outcome != KLineOutcome.Replied).Select(e => (Cycle: e.EndedAt, Text: Problem(e)))
             .Concat(r.KLineNotes.Select(n => (n.Cycle, Text: Problem(n))))
             .OrderBy(p => p.Cycle).ToList();
         s.AppendLine();
         if (problems.Count == 0)
         {
-            s.AppendLine("No problems: every request was answered and the line lost no byte.").AppendLine();
+            s.AppendLine("No problems: every request was answered, the line lost no byte, and the ECU sent nothing unasked.").AppendLine();
             return;
         }
         s.AppendLine("First problems:").AppendLine();
@@ -94,10 +96,13 @@ public static class DriveReportWriter
 
     static string Problem(KLineExchange e) => e.Outcome == KLineOutcome.Malformed
         ? $"a malformed reply to {Hex(e.Request)}, sent at {Seconds(e.SentAt)} s at {e.Baud.ToString("N0", Inv)} baud: {Hex(e.Reply!)}"
-        : $"no reply to {Hex(e.Request)}, sent at {Seconds(e.SentAt)} s at {e.Baud.ToString("N0", Inv)} baud";
+        : $"no reply to {Hex(e.Request)}, sent at {Seconds(e.SentAt)} s at {e.Baud.ToString("N0", Inv)} baud"
+          + (e.Partial.Count > 0 ? $"; part of a frame came: {Hex(e.Partial)}" : "");
 
-    static string Problem(KLineNote n) => (n.From == "ecu" ? "the ECU's" : "the tester's") + $" byte {n.Value:X2} was lost: " +
-        (n.Kind == "collision" ? "it collided with another" : "its baud rate is more than 3 % from the ECU's");
+    static string Problem(KLineNote n) => n.Kind == "stray"
+        ? $"the ECU's byte {n.Value:X2} came while no reply was awaited"
+        : (n.From == "ecu" ? "the ECU's" : "the tester's") + $" byte {n.Value:X2} was lost: " +
+          (n.Kind == "collision" ? "it collided with another" : "its baud rate is more than 3 % from the other end's");
 
     /// <summary>pass, fail or incomplete.</summary>
     public static string Word(RunVerdict verdict) => verdict.ToString().ToLowerInvariant();

@@ -49,6 +49,12 @@ public sealed class DriveContext
     /// <summary>Why the power cycle under way stopped, set before <see cref="PowerCycleEnded"/>; null while it runs.</summary>
     public CycleEnd? Ended { get; internal set; }
 
+    /// <summary>
+    /// The last segment whose <c>kline</c> lines were applied, across the drive's power cycles: a power cycle that starts
+    /// inside a segment (the firmware's restart) applies them no second time (plan 6, M1).
+    /// </summary>
+    internal int KLineAppliedThrough { get; set; } = -1;
+
     public event Action<Machine, int>? PowerCycleStarted;
 
     public event Action<Machine, int>? PowerCycleEnded;

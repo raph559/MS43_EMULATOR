@@ -351,7 +351,7 @@ public class KLineTesterTests
         Assert.Equal(arrives + Gap, ecu.Heard[5].Start);
     }
 
-    [Fact] public void ACutOffReply_TimesOut_AndKeepsNoPartialFrame()
+    [Fact] public void ATimeoutsPartialFrame_IsKept()                    // plan 5 review M3
     {
         var (s, ecu, tester) = Rig();
         ecu.Reply("12 4D A0", delay: 10_000);                            // the length byte promises 77 bytes, 3 come
@@ -359,6 +359,8 @@ public class KLineTesterTests
         s.Advance(9_737_500);
         var exchange = Assert.Single(tester.Exchanges);
         Assert.Equal((KLineOutcome.TimedOut, null, null), (exchange.Outcome, exchange.Reply, exchange.RepliedAt));
+        Assert.Equal(Hex.Bytes("12 4D A0"), exchange.Partial);
+        Assert.Empty(tester.Notes);                                      // a partial frame is the exchange's, not stray
         Assert.Equal(5, ecu.Heard.Count);
     }
 
@@ -372,20 +374,22 @@ public class KLineTesterTests
         var exchange = Assert.Single(tester.Exchanges);
         Assert.Equal((KLineOutcome.Replied, 257_324UL), (exchange.Outcome, exchange.RepliedAt));
         Assert.Equal(Hex.Bytes(Ack), exchange.Reply);
+        Assert.Equal(new[] { new KLineNote(50_000, "stray", 0x55, "ecu") }, tester.Notes);   // plan 5 review M3
     }
 
-    [Fact] public void BytesFromTheEcu_WhileNothingIsAsked_AreNobodys()
+    [Fact] public void BytesWhileNothingIsAsked_AreStray()               // plan 5 review M3
     {
-        // A whole frame from the ECU with no request out is not the answer to a request sent afterwards.
+        // A whole frame from the ECU with no request out is not the answer to a request sent afterwards: it is noted.
         var (s, _, tester) = Rig();
         foreach (var b in Hex.Bytes(Ack))
             tester.OnLineByte(b, own: false, 0);
         tester.Apply(Do(KLineVerb.Send, "0B B0"));
         s.Advance(9_737_500);
         Assert.Equal(KLineOutcome.TimedOut, Assert.Single(tester.Exchanges).Outcome);
+        Assert.Equal(Hex.Bytes(Ack).Select(b => new KLineNote(0, "stray", b, "ecu")), tester.Notes);
     }
 
-    [Fact] public void AByteAfterTheFrame_ComesWhileNothingIsInFlight_AndIsIgnored()
+    [Fact] public void BytesAfterAWholeFrame_AreStray()                  // plan 5 review M3
     {
         var (s, ecu, tester) = Rig();
         ecu.Reply("12 04 A0 B6 55", delay: 10_000);                      // the frame ends at 257,324; a stray 55h follows at 284,780
@@ -397,6 +401,19 @@ public class KLineTesterTests
         Assert.Equal(2, tester.Exchanges.Count);
         Assert.Equal(Hex.Bytes(Ack), tester.Exchanges[0].Reply);
         Assert.Equal(Hex.Bytes("12 05 A0 00 B7"), tester.Exchanges[1].Reply);   // not 55 12 05 A0 00
+        Assert.Equal(new[] { new KLineNote(284_780, "stray", 0x55, "ecu") }, tester.Notes);
+    }
+
+    [Fact] public void AByteAtTheDeadline_IsStray()                       // plan 5 review M3
+    {
+        var (s, ecu, tester) = Rig();
+        tester.Apply(Do(KLineVerb.Send, "0B B0"));                       // out by 137,500: the deadline is 9,737,500
+        ecu.Say(0x12, at: 9_737_500);
+        s.Advance(9_737_501);
+        var exchange = Assert.Single(tester.Exchanges);
+        Assert.Equal(KLineOutcome.TimedOut, exchange.Outcome);
+        Assert.Empty(exchange.Partial);
+        Assert.Equal(new[] { new KLineNote(9_737_500, "stray", 0x12, "ecu") }, tester.Notes);
     }
 
     [Fact] public void AReplyThatEndsOneCycleBeforeTheDeadline_IsTaken()

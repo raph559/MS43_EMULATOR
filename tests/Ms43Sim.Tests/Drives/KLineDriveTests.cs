@@ -57,6 +57,26 @@ public class KLineDriveTests : IClassFixture<KLineRuns>
         return exchanges.Skip(connect + 1).Take((disconnect < 0 ? exchanges.Count : disconnect) - connect - 1).ToList();
     }
 
+    [Fact] public void KLineCsv_HasThePartialAndStrayRows()             // plan 5 review M3
+    {
+        var r = KLineRuns.Run("3 on\n") with
+        {
+            KLine = new[]
+            {
+                new KLineExchange(24_000, Hex.Bytes("12 05 0B B0 AC"), 125_000, null, null, KLineOutcome.TimedOut, 9_800_000)
+                    { Partial = Hex.Bytes("12 4D A0") },
+            },
+            KLineNotes = new[] { new KLineNote(48_000, "stray", 0x55, "ecu") },
+        };
+        Assert.Equal(new[]
+        {
+            "cycle,time_ms,direction,outcome,bytes",
+            "24000,1.000,tester,request,12 05 0B B0 AC",
+            "48000,2.000,ecu,stray,55",
+            "9800000,408.333,ecu,timeout,12 4D A0",
+        }, DriveReportWriter.KLineCsv(r).Split('\n', StringSplitOptions.RemoveEmptyEntries));
+    }
+
     [Fact] public void Car_AnswersTheAppsConnect_AndItsPolls_AsTheAppsRetryNeeds()
     {
         // The app gives each sample two attempts (Ds2Session.PollRetryCount): a poll the ECU misses must be followed by one
@@ -179,13 +199,14 @@ public class KLineDriveTests : IClassFixture<KLineRuns>
         section = section[..section.IndexOf("\n## ", StringComparison.Ordinal)];
         int Count(KLineOutcome o) => r.KLine.Count(e => e.Outcome == o);
         Assert.Contains($"- requests: {r.KLine.Count}; replies: {Count(KLineOutcome.Replied)}; timeouts: {Count(KLineOutcome.TimedOut)}; malformed: {Count(KLineOutcome.Malformed)}", section);
-        Assert.Contains($"- bytes lost: {r.KLineNotes.Count(n => n.Kind == "mismatch")} to a baud rate more than 3 % from the ECU's, {r.KLineNotes.Count(n => n.Kind == "collision")} in collisions", section);
+        Assert.Contains($"- bytes lost: {r.KLineNotes.Count(n => n.Kind == "mismatch")} to a baud rate more than 3 % from the other end's, {r.KLineNotes.Count(n => n.Kind == "collision")} in collisions", section);
+        Assert.Contains($"- stray ECU bytes, no part of any reply: {r.KLineNotes.Count(n => n.Kind == "stray")}; timeouts with part of a frame: {r.KLine.Count(e => e.Partial.Count > 0)}", section);
         var problems = section.Split('\n').Select(l => l.TrimEnd('\r'))
             .Where(l => l.StartsWith("- ", StringComparison.Ordinal) && l.Contains(" s: ", StringComparison.Ordinal)).ToList();
         Assert.Equal(10, problems.Count);
         string T(ulong cycle) => (cycle / 24e6).ToString("0.000", CultureInfo.InvariantCulture);
         var first = r.KLine[0];
-        Assert.Equal($"- {T(first.SentAt + 27_500)} s: the tester's byte 12 was lost: its baud rate is more than 3 % from the ECU's", problems[0]);
+        Assert.Equal($"- {T(first.SentAt + 27_500)} s: the tester's byte 12 was lost: its baud rate is more than 3 % from the other end's", problems[0]);
         Assert.Contains($"- {T(first.EndedAt)} s: no reply to 12 08 91 01 E8 48 00 2A, sent at {T(first.SentAt)} s at 9,600 baud", problems);
         Assert.Contains("more in kline.csv", section);
     }

@@ -16,12 +16,16 @@ public enum KLineOutcome
 /// <summary>
 /// One request and what came of it. <see cref="SentAt"/> is the cycle its first byte went on the line, at
 /// <see cref="Baud"/>. <see cref="RepliedAt"/> is the cycle the last byte of the ECU's frame arrived and
-/// <see cref="Reply"/> the frame's bytes: both null when it <see cref="KLineOutcome.TimedOut"/>, whatever part of a
-/// frame may have come. <see cref="EndedAt"/> is the cycle it ended: the reply's, or the end of the listen time, or
-/// the unplugging (a power cycle) for a request that went with its machine.
+/// <see cref="Reply"/> the frame's bytes: both null when it <see cref="KLineOutcome.TimedOut"/>, and then
+/// <see cref="Partial"/> holds whatever part of a frame came. <see cref="EndedAt"/> is the cycle it ended: the reply's, or
+/// the end of the listen time, or the unplugging (a power cycle) for a request that went with its machine.
 /// </summary>
 public sealed record KLineExchange(ulong SentAt, IReadOnlyList<byte> Request, int Baud, ulong? RepliedAt,
-    IReadOnlyList<byte>? Reply, KLineOutcome Outcome, ulong EndedAt);
+    IReadOnlyList<byte>? Reply, KLineOutcome Outcome, ulong EndedAt)
+{
+    /// <summary>The bytes of a frame that never became whole (plan 6, M3): empty unless the request timed out.</summary>
+    public IReadOnlyList<byte> Partial { get; init; } = Array.Empty<byte>();
+}
 
 /// <summary>
 /// The scripted K-line tester: the MS43 logger app's DS2 session on the line, frame for frame (plan 5 C4). It only puts
@@ -36,7 +40,9 @@ public sealed record KLineExchange(ulong SentAt, IReadOnlyList<byte> Request, in
 /// <c>every</c> that is due, in the order told, then the poll while polling.</item>
 /// <item>The reply is the first whole frame from the ECU (<c>own: false</c>) after the request's last byte has come back.
 /// A frame is whole when its length byte, the second, says so; it is malformed if its address is not 12h, its length byte is
-/// under 3, or its length or xor is wrong. The tester's own echo is never taken for a reply.</item>
+/// under 3, or its length or xor is wrong. The tester's own echo is never taken for a reply. An ECU byte that is no part
+/// of a reply (nothing asked, the request still going out, the listen time over, the reply already whole) is noted
+/// "stray" (plan 6, M3), and a timed-out request keeps the bytes of its unfinished frame.</item>
 /// <item>The listen time runs from the end of the request: 400 ms, or 500 ms for a request whose command byte is 0x91 [obs: the
 /// ADX's listen timeouts]. A reply that ends in the deadline's cycle is late, whichever event of that cycle runs first.</item>
 /// <item><c>connect</c> sends <c>91 01 E8 48 00</c> at 9,600 baud, and on a reply with status A0 the tester moves to 125,000.
@@ -57,6 +63,7 @@ public sealed class KLineTester : IKLineDevice
     const ulong SpeedSwitchListenCycles = 12_000_000;            // 500 ms
     const double LongestPeriodSeconds = 60;
     const byte SpeedSwitch = 0x91, Acknowledged = 0xA0;
+    const string Stray = "stray", FromEcu = "ecu";
 
     static readonly Request ConnectRequest = new(Ds2.Frame(new byte[] { 0x91, 0x01, 0xE8, 0x48, 0x00 }), RequestKind.Connect, LowBaud);
     static readonly Request DisconnectRequest = new(Ds2.Frame(new byte[] { 0x91, 0x00, 0x25, 0x80, 0x00 }), RequestKind.Disconnect);
@@ -80,6 +87,9 @@ public sealed class KLineTester : IKLineDevice
 
     /// <summary>The rate the tester's next request leaves at, in baud: 9,600 until a connect is answered with A0.</summary>
     public int Baud { get; private set; } = LowBaud;
+
+    /// <summary>The bit time it listens at: <see cref="Baud"/>'s (plan 6, M4).</summary>
+    public double BitCycles => CpuHz / Baud;
 
     /// <summary>Every request that has ended, in order: the cycles are the drive's (see <c>origin</c> of <see cref="Plug"/>).</summary>
     public IReadOnlyList<KLineExchange> Exchanges => exchanges;
@@ -162,12 +172,13 @@ public sealed class KLineTester : IKLineDevice
     /// <summary>A byte reached the tester: its own echo, which paces the request, or one the ECU sent, which may be the reply.</summary>
     public void OnLineByte(byte value, bool own, ulong cycle)
     {
-        if (flight is not { } f)
-            return;                                              // nothing was asked: whatever is on the line is nobody's reply
         if (own)
-            Echoed(f);
-        else
-            Heard(f, value, cycle);
+        {
+            if (flight is { } f)
+                Echoed(f);
+        }
+        else if (flight is not { } f || !Heard(f, value, cycle))
+            notes.Add(new KLineNote(origin + cycle, Stray, value, FromEcu));   // nothing asked, or no part of the reply
     }
 
     void Quiet()
@@ -251,15 +262,17 @@ public sealed class KLineTester : IKLineDevice
         scheduler.Schedule(deadline, "K-line tester listen time", () => TimeOut(f));
     }
 
-    void Heard(Flight f, byte value, ulong cycle)
+    /// <summary>An ECU byte while <paramref name="f"/> is out: false when it is no part of the reply.</summary>
+    bool Heard(Flight f, byte value, ulong cycle)
     {
         if (f.Deadline is not { } deadline || cycle >= deadline)
-            return;                                              // the request is not out yet, or the time is up
+            return false;                                        // the request is not out yet, or the time is up
         f.Reply.Add(value);
         if (f.Reply.Count < 2 || f.Reply.Count < f.Reply[1])
-            return;                                              // the length byte says when the frame is whole
+            return true;                                         // the length byte says when the frame is whole
         var frame = f.Reply.ToArray();
         Complete(f, Ds2.IsFrame(frame) && frame[0] == Ds2.EcuAddress ? KLineOutcome.Replied : KLineOutcome.Malformed, cycle, frame);
+        return true;
     }
 
     void TimeOut(Flight f)
@@ -279,7 +292,10 @@ public sealed class KLineTester : IKLineDevice
     }
 
     void Log(Flight f, KLineOutcome outcome, ulong? at, byte[]? reply) =>
-        exchanges.Add(new KLineExchange(origin + f.SentAt, f.Request.Bytes, f.Baud, at + origin, reply, outcome, origin + scheduler.Now));
+        exchanges.Add(new KLineExchange(origin + f.SentAt, f.Request.Bytes, f.Baud, at + origin, reply, outcome, origin + scheduler.Now)
+        {
+            Partial = outcome == KLineOutcome.TimedOut ? f.Reply.ToArray() : Array.Empty<byte>(),
+        });
 
     void OnNote(KLineNote note) => notes.Add(note with { Cycle = note.Cycle + origin });
 

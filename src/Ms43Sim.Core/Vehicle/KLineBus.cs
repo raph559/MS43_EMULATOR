@@ -10,6 +10,9 @@ public interface IKLineDevice
     /// byte coming back (<paramref name="own"/>), or one the ECU sent.
     /// </summary>
     void OnLineByte(byte value, bool own, ulong cycle);
+
+    /// <summary>The bit time, in CPU cycles, the device listens at now: an ECU byte at another rate does not reach it (plan 6, M4).</summary>
+    double BitCycles { get; }
 }
 
 /// <summary>What a device needs of the line. <see cref="KLineBus"/> is the car's; a test can stand in for the ECU end.</summary>
@@ -33,9 +36,10 @@ public interface IKLinePort
 }
 
 /// <summary>
-/// A byte the bus lost: <see cref="Kind"/> is "mismatch" (the device's bit time is more than 3 % from
-/// ASC0's) or "collision" (it overlapped another byte); <see cref="Cycle"/> is when it would have arrived;
-/// <see cref="From"/> is the end that sent it, "tester" (the device) or "ecu".
+/// A byte the line or the tester did not take: <see cref="Kind"/> is "mismatch" (the two ends' bit times are more than
+/// 3 % apart), "collision" (it overlapped another byte) or "stray" (an ECU byte that reached the tester but was no part of
+/// a reply, plan 6 M3); <see cref="Cycle"/> is when it arrived or would have; <see cref="From"/> is the end that sent it,
+/// "tester" (the device) or "ecu".
 /// </summary>
 public sealed record KLineNote(ulong Cycle, string Kind, byte Value, string From);
 
@@ -43,14 +47,15 @@ public sealed record KLineNote(ulong Cycle, string Kind, byte Value, string From
 /// The car's K-line: one wire between the ECU's ASC0 and a tester (plan 5 C1–C3). A byte from either end
 /// reaches both ends at the end of its stop bit. A device byte (8E1: 11 bit times at the device's bit
 /// time) goes into ASC0 with its even parity bit in bit 8, if the two bit times are within 3 %, and back to
-/// the device as its own echo. An ASC0 frame goes to the device and, in the same cycle, back into ASC0's own
-/// receiver, as the wire echoes it, whether or not a device is attached; ASC0 takes a frame or not as S0R
+/// the device as its own echo. An ASC0 frame goes back into ASC0's own receiver, as the wire echoes it, whether or not a
+/// device is attached, and in the same cycle to the device if the two bit times are within 3 % (plan 6 M4: else it is
+/// lost to the device and noted); ASC0 takes a frame or not as S0R
 /// and S0REN were at its start bit (the firmware turns its receiver off for its replies). Bytes that overlap in time are both lost, whichever began first, and each is noted as a
 /// collision in the cycle it would have arrived. Overlap is judged on exact cycles from ASC0's frame in
 /// progress: a byte that begins where the other ends does not overlap it, whichever event of that cycle runs first.
 /// [assumption] There is no transceiver delay. A byte at a bit time more than 3 % from ASC0's, and bytes
 /// that collide, are lost and noted; a real UART would receive garbage and run the firmware's error path,
-/// which is not exercised here. ECU bytes reach the device whatever its baud rate. The echo is not combined
+/// which is not exercised here. The echo is not combined
 /// with S0LB, which would deliver each ECU frame twice: neither of the firmware's set-ups uses it
 /// (S0CON = 80F7h for DS2, 80D1h for KWP).
 /// </summary>
@@ -150,7 +155,12 @@ public sealed class KLineBus : IKLinePort
             return;
         }
         ecu.Receive(frame, start);
-        device?.OnLineByte(value, own: false, now);
+        if (device is null)
+            return;
+        if (Math.Abs(device.BitCycles - ecu.BitCycles) > BitTimeTolerance * ecu.BitCycles)
+            Note(Mismatch, value, FromEcu);
+        else
+            device.OnLineByte(value, own: false, now);
     }
 
     void Note(string kind, byte value, string from) => Noted?.Invoke(new KLineNote(scheduler.Now, kind, value, from));

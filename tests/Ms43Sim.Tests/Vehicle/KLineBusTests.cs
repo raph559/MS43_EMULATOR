@@ -16,11 +16,12 @@ public class KLineBusTests
 
     sealed record Seen(byte Value, bool Own, ulong Cycle);
 
-    /// <summary>A device on the line: it writes down what it hears, and may answer each byte.</summary>
+    /// <summary>A device on the line: it writes down what it hears, and may answer each byte. It listens at 9,600 baud unless told.</summary>
     sealed class Device : IKLineDevice
     {
         public List<Seen> Heard { get; } = new();
         public Action<bool>? Answer { get; set; }
+        public double BitCycles { get; set; } = 2_500;
 
         public void OnLineByte(byte value, bool own, ulong cycle)
         {
@@ -286,6 +287,34 @@ public class KLineBusTests
         Assert.True(port.Busy);
         t.M.Scheduler.Advance(27_500);
         Assert.False(port.Busy);
+    }
+
+    [Fact] public void EcuByteAtAnotherBaud_IsLostAndNoted()                 // plan 5 review M4
+    {
+        var (t, device, notes) = Rig();
+        device.BitCycles = 192;                                              // the device listens at 125,000 baud
+        t.WriteSfr(S0Tbuf, 0x0057);                                          // ASC0 sends at 2,496 cycles a bit
+        t.M.Scheduler.Advance(27_456);
+        Assert.Empty(device.Heard);
+        Assert.Equal(new[] { new KLineNote(27_456, "mismatch", 0x57, "ecu") }, notes);
+        Assert.Equal((0x157, 0x80), (t.Sfr(S0Rbuf), t.Sfr(S0Ric) & 0x80));   // its own receiver still hears it
+    }
+
+    [Fact] public void AnEcuThatMovesBeforeItsReply_TimesOut()               // plan 5 review M4: such an ECU must not look healthy
+    {
+        var t = Dsl();
+        t.M.Watchdog.Disable();                                              // nothing here services it, and at 131,072 cycles it would reset ASC0
+        var tester = new KLineTester(t.M.Scheduler);
+        tester.Plug(t.M.KLine);
+        tester.Apply(new KLineAction(KLineVerb.Send, new byte[] { 0x0B, 0xB0 }, 0, 1));   // 5 bytes at 9,600: out by 137,500
+        t.M.Scheduler.Advance(140_000);
+        t.WriteSfr(0xFEB4, 0x0005);                                          // S0BG 5: the ECU moves to 125,000 baud …
+        t.WriteSfr(S0Tbuf, 0x0012);                                          // … and answers there: 11 × 192 = 2,112 cycles
+        t.M.Scheduler.Advance(137_500 + 9_600_000 + 1);                      // past the 400 ms listen time
+        var exchange = Assert.Single(tester.Exchanges);
+        Assert.Equal(KLineOutcome.TimedOut, exchange.Outcome);
+        Assert.Empty(exchange.Partial);
+        Assert.Equal(new[] { new KLineNote(142_112, "mismatch", 0x12, "ecu") }, tester.Notes);
     }
 
     [Theory]

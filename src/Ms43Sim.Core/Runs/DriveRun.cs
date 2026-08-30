@@ -417,9 +417,13 @@ public static class DriveRun
                     held = segment.Mode == DriveMode.Drive && point.RpmFromEngine ? engine.Rpm : null;
                     break;
             }
-            foreach (var action in segment.KLine)
-                tester?.Apply(action);
-            context.RaiseSegmentEntered(point);
+            if (i > context.KLineAppliedThrough)                    // a restart inside the segment applied them already (plan 6, M1)
+            {
+                context.KLineAppliedThrough = i;
+                foreach (var action in segment.KLine)
+                    tester?.Apply(action);
+            }
+            context.RaiseSegmentEntered(point);                     // this machine's observers start on the segment under way
         }
 
         void Follow(DrivePoint point)
