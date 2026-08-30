@@ -25,7 +25,7 @@ namespace Ms43Sim.Core;
 /// R1 and R3 are judged at every speed. On the shaft's first tooth after the engine stopped inside the power cycle (a
 /// stall, plan 5 Task 5), R2 and R3 start again as at power-on: no gap is judged across the stop, and a periodic task's
 /// first run is due by 2 × period + 1.1 s after that tooth. R4's flags are sticky, so one seen before the stop stays seen.
-/// Not evaluated when the program is not MS43X001 or the hook sites do not hold the car file's bytes.
+/// Not evaluated when the program is not MS43X001 nor a known build on it, or the hook sites do not hold the car file's bytes.
 /// </summary>
 public sealed class SchedulerCheck() : CheckBase("scheduler")
 {
@@ -72,9 +72,9 @@ public sealed class SchedulerCheck() : CheckBase("scheduler")
 
     protected override void Start(Machine machine, int index)
     {
-        if (!ProgramIdentity.IsMs43X001(machine.Image.Image))
+        if (!ProgramIdentity.HasMs43X001Ram(machine.Image.Image))
         {
-            NotEvaluated("the program is not MS43X001 (R15)");
+            NotEvaluated("the program is not MS43X001 nor a known build on it (R15)");
             return;
         }
         if (!Recognises(machine.Image.Image))

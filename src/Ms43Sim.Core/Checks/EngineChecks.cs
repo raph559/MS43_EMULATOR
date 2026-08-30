@@ -171,9 +171,9 @@ public static class EngineChecks
     {
         protected override void Start(Machine machine, int index)
         {
-            if (!ProgramIdentity.IsMs43X001(machine.Image.Image))
+            if (!ProgramIdentity.HasMs43X001Ram(machine.Image.Image))
             {
-                NotEvaluated("the program is not MS43X001 (R15): the limit is in its RAM");
+                NotEvaluated("the program is not MS43X001 nor a known build on it (R15): the limit is in its RAM");
                 return;
             }
             var rule = new RevLimitRule();
@@ -250,9 +250,9 @@ public static class EngineChecks
     {
         protected override void Start(Machine machine, int index)
         {
-            if (!ProgramIdentity.IsMs43X001(machine.Image.Image))
+            if (!ProgramIdentity.HasMs43X001Ram(machine.Image.Image))
             {
-                NotEvaluated("the program is not MS43X001 (R15): the speed window reads its rev limit");
+                NotEvaluated("the program is not MS43X001 nor a known build on it (R15): the speed window reads its rev limit");
                 return;
             }
             var rule = new PowerRule();

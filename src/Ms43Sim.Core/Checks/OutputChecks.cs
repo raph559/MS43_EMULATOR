@@ -304,9 +304,9 @@ public static class OutputChecks
 
         protected override void Start(Machine machine, int index)
         {
-            if (!ProgramIdentity.IsMs43X001(machine.Image.Image))
+            if (!ProgramIdentity.HasMs43X001Ram(machine.Image.Image))
             {
-                NotEvaluated("the program is not MS43X001 (R15): the predicates read its RAM");
+                NotEvaluated("the program is not MS43X001 nor a known build on it (R15): the predicates read its RAM");
                 return;
             }
             var rules = Enumerable.Range(0, 14).Select(_ => new StuckRule()).ToArray();   // P2.0–P2.11 by bit, then the idle valve and the purge valve

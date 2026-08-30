@@ -113,7 +113,7 @@ public static class DriveReportWriter
         var coverage = r.Coverage;
         s.AppendLine($"# Drive {r.Drive.Name}: {Word(r.Verdict)}").AppendLine();
         s.AppendLine($"Image: {r.Image.Mode}, source SHA-256 {r.Image.SourceSha256}; program identity {ProgramIdentity.Of(r.Image.Image)}" +
-                     (ProgramIdentity.IsMs43X001(r.Image.Image) ? " (MS43X001)." : " (not MS43X001: the checks that read its RAM are not evaluated)."));
+                     (ProgramIdentity.Name(r.Image.Image) is { } name ? $" ({name})." : " (not a known program: the checks that read its RAM are not evaluated)."));
         s.AppendLine($"EEPROM at the first key-on: {r.Eeprom.Source} (the drive expects {r.Drive.Start.ToString().ToLowerInvariant()}).").AppendLine();
 
         s.AppendLine("## Verdict").AppendLine();

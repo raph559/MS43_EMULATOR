@@ -130,10 +130,10 @@ public static class CrashChecks
 
         protected override void Start(Machine machine, int index)
         {
-            readable = ProgramIdentity.IsMs43X001(machine.Image.Image);
+            readable = ProgramIdentity.HasMs43X001Ram(machine.Image.Image);
             if (!readable)
             {
-                NotEvaluated("the program is not MS43X001 (R15), so its RAM is not the car file's");
+                NotEvaluated("the program is not MS43X001 nor a known build on it (R15), so its RAM is not the car file's");
                 return;
             }
             var mainLoop = false;
