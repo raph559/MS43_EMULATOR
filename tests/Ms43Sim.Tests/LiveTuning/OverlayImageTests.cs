@@ -165,9 +165,6 @@ public class OverlayImageTests
         Assert.Equal(692, s.FreeBytes);
     }
 
-    [Fact] public void AnyOtherSub_IsRefused_ForNow() =>                                        // Tasks 5–8 replace it
-        Assert.Equal(OverlayReason.Sub, LiveOverlay.Refusal(OneReply(LiveOverlayBin.Image, "6D 01 00 00 00")));
-
     [Fact, Trait("Category", "StandardDrives")] public void TheOverlayOff_PassesTheWarmStart()
     {
         var r = DriveRun.RunWithChecks(LiveOverlayBin.Image, StandardDrives.Load("warm-start"));

@@ -25,6 +25,12 @@ public sealed record TableRead(ulong Cycle, uint Reader, ushort R12, ushort R13,
 public sealed record OverlayRun(DriveResult Result, IReadOnlyList<TableRead> Reads, IReadOnlyList<(ulong Cycle, ushort K)> KReads,
     IReadOnlyList<(ulong Cycle, OverlayWindow Window)> Windows)
 {
+    /// <summary>
+    /// With <c>watchWindow</c>: every byte a reader (0D:029A, 0D:0168) read from the window, as its offset in the copy area,
+    /// with the table whose site called it (the last reader entry before it).
+    /// </summary>
+    public IReadOnlyList<(ulong Cycle, int Offset, OverlayTable Table)> WindowReads { get; init; } = Array.Empty<(ulong, int, OverlayTable)>();
+
     /// <summary>The 0x6D exchanges, in order.</summary>
     public IReadOnlyList<KLineExchange> Overlay =>
         Result.KLine.Where(e => e.Request.Count > 2 && e.Request[2] == LiveOverlay.Command).ToList();
@@ -42,8 +48,9 @@ public static class OverlayRuns
 
     const uint KCall = 0x0CAB34;                                          // CALLS 0Bh, FCBAh: R14 holds the K the computation uses
 
-    public static OverlayRun Run(FlashedImage image, string driveText, byte[]? eeprom = null, bool checks = false)
+    public static OverlayRun Run(FlashedImage image, string driveText, byte[]? eeprom = null, bool checks = false, bool watchWindow = false)
     {
+        var windowReads = new List<(ulong, int, OverlayTable)>();
         var reads = new List<TableRead>();
         var kReads = new List<(ulong, ushort)>();
         var windows = new List<(ulong, OverlayWindow)>();
@@ -60,6 +67,16 @@ public static class OverlayRuns
                 });
             }
             machine.OnInstruction(KCall, m => kReads.Add((origin + m.Cycles, m.Cpu.R(14))));
+            if (watchWindow)
+            {
+                machine.Bus.DataWatch = (address, write) =>
+                {
+                    var pc = machine.Cpu.InstructionAddress;
+                    if (!write && (pc is >= 0x0D029A and < 0x0D0358 or >= 0x0D0168 and < 0x0D022A)
+                        && machine.Bus.Decode(address) == Region.ExternalRam && reads.Count > 0)
+                        windowReads.Add((origin + machine.Cycles, (int)(address & 0x1FFF) - (LiveOverlay.CopyAddress - 0x8000), reads[^1].Table));
+                };
+            }
             foreach (var back in new uint[] { 0x09FAD6, 0x09FB04 })                 // the serial-line task, back from the dispatcher
             {
                 machine.OnInstruction(back, m =>
@@ -72,6 +89,6 @@ public static class OverlayRuns
         var drive = DriveParser.Parse(driveText);
         var options = new DriveRunOptions(Eeprom: eeprom, Observers: new Action<DriveContext>[] { Attach });
         var result = checks ? DriveRun.RunWithChecks(image, drive, options) : DriveRun.Run(image, drive, options);
-        return new OverlayRun(result, reads, kReads, windows);
+        return new OverlayRun(result, reads, kReads, windows) { WindowReads = windowReads };
     }
 }
