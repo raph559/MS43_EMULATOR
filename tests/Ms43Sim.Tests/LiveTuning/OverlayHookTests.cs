@@ -12,17 +12,17 @@ public sealed class OverlayHookRuns
     public const string Head = "drive hooks\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n";
 
     /// <summary>
-    /// ign98_is loaded at key-on; an on during the crank; at idle the refused loads and a refused sum, then ign98_is on at
-    /// 7.5 s, a load of it while on, and off at 11.5 s.
+    /// ign98_is loaded at key-on; an on during the crank; at idle the refused loads (one of them of a table past the five)
+    /// and a refused sum, then ign98_is on at 7.5 s, a load of it while on, and off at 11.5 s.
     /// </summary>
     public static readonly string Commands = Head + Send(LiveOverlay.Load(1, 0)) + "1.5 crank rpm=200\n"
         + Send(LiveOverlay.On(1, 0)) + "3 idle\n"
-        + Send(LiveOverlay.Load(5, 1)) + Send(LiveOverlay.Load(0, 373)) + Send(LiveOverlay.Load(0, 372))
+        + Send(LiveOverlay.Load(5, 0)) + Send(LiveOverlay.Load(0, 373)) + Send(LiveOverlay.Load(0, 372))
         + Send(LiveOverlay.Load(2, 356)) + Send(LiveOverlay.On(1, 1)) + Send(LiveOverlay.On(1, 0)) + "1 idle\n"
         + Send(LiveOverlay.Load(1, 0)) + "3 idle\n"
         + Send(LiveOverlay.Off(1)) + "3 idle\n";
 
-    /// <summary>Three tables loaded at idle and on, then a part-load pull that reads them.</summary>
+    /// <summary>Two or three tables loaded at idle and on, then a part-load pull that reads them.</summary>
     public static string Sites(params (int Table, int Offset)[] tables) => Head + "1.5 crank rpm=200\n3 idle\n"
         + string.Concat(tables.Select(t => Send(LiveOverlay.Load(t.Table, t.Offset))))
         + string.Concat(tables.Select(t => Send(LiveOverlay.On(t.Table, 0)))) + "2 idle\n"
@@ -33,7 +33,7 @@ public sealed class OverlayHookRuns
     readonly Lazy<OverlayRun> commands = new(() => OverlayRuns.Run(LiveOverlayBin.Image, Commands));
     readonly Lazy<(OverlayRun A, OverlayRun B)> sites = new(() =>
     {
-        var runs = new[] { Sites((0, 0), (1, 320), (2, 356)), Sites((3, 0), (4, 192), (5, 384)) }
+        var runs = new[] { Sites((0, 0), (1, 320), (2, 356)), Sites((3, 0), (4, 192)) }
             .AsParallel().AsOrdered().Select(text => OverlayRuns.Run(LiveOverlayBin.Image, text)).ToArray();
         return (runs[0], runs[1]);
     });
@@ -62,7 +62,6 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
     static void Unchanged(OverlayWindow before, OverlayWindow after)
     {
         Assert.Equal(before.Tables, after.Tables);
-        Assert.Equal((before.KEdit, before.KState), (after.KEdit, after.KState));
         Assert.Equal(Convert.ToHexString(before.Copies), Convert.ToHexString(after.Copies));
     }
 
@@ -100,7 +99,7 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
     [Fact] public void EverySite_ReadsItsCopy()
     {
         var (a, b) = f.SiteRuns;
-        foreach (var (run, tables) in new[] { (a, new[] { (0, 0), (1, 320), (2, 356) }), (b, new[] { (3, 0), (4, 192), (5, 384) }) })
+        foreach (var (run, tables) in new[] { (a, new[] { (0, 0), (1, 320), (2, 356) }), (b, new[] { (3, 0), (4, 192) }) })
         {
             foreach (var (table, offset) in tables)
             {
@@ -120,10 +119,10 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
         Unchanged(step.Before, step.After);
     }
 
-    [Fact] public void APedalCopyAtAnOddOffset_IsRefused()                              // Review Focus 4
+    [Fact] public void ATablePastTheFive_IsRefused()
     {
-        var step = Step(f.CommandRun, LiveOverlay.Load(5, 1));
-        Assert.Equal(OverlayReason.Range, Reason(step.Exchange));
+        var step = Step(f.CommandRun, LiveOverlay.Load(5, 0));
+        Assert.Equal(OverlayReason.Table, Reason(step.Exchange));
         Unchanged(step.Before, step.After);
     }
 
@@ -167,10 +166,11 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
 }
 
 /// <summary>
-/// Identical copies on, on the warm start (plan 6 Task 5), each set against its own baseline: the same drive whose switch-ons
-/// carry a wrong sum, so nothing goes on. Equality of behaviour holds only between identical instruction streams: the warm
-/// idle's after-start transitions move by up to 2 s when the CPU's timing at idle changes (a refused request's work is
-/// enough), so a run with copies on is judged by what its readers read and by what it keeps (plan 6 record, Task 5).
+/// Identical copies on, on a warm start with a part-load pull (plan 6 Task 5), each set against its own baseline: the same
+/// drive whose switch-ons carry a wrong sum, so nothing goes on. Equality of behaviour holds only between identical
+/// instruction streams: the warm idle's after-start transitions move by up to 2 s when the CPU's timing at idle changes (a
+/// refused request's work is enough), so a run with copies on is judged by what its readers read and by what it keeps
+/// (plan 6 record, Task 5). The pull is there for the cam tables, which a warm idle never reads.
 /// </summary>
 public sealed class IdenticalCopyRuns
 {
@@ -178,9 +178,10 @@ public sealed class IdenticalCopyRuns
         "drive warm-start\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n1.5 crank rpm=200\n3 idle\n"
         + string.Concat(tables.Select(t => OverlayHookRuns.Send(LiveOverlay.Load(t.Table, t.Offset))))
         + string.Concat(tables.Select(t => OverlayHookRuns.Send(LiveOverlay.On(t.Table, on ? (ushort)0 : (ushort)1))))   // a wrong sum keeps it off
-        + "37 idle\nkline quiet\n15 off\n";
+        + "17 idle\n6 drive gear=3 speed=30..70 pedal=25\n4 drive gear=3 speed=70..100 pedal=70\n5 drive gear=3 speed=100..20 pedal=0\n"
+        + "5 idle\nkline quiet\n15 off\n";
 
-    public static readonly (int Table, int Offset)[][] Sets = { new[] { (0, 0), (1, 320), (2, 356) }, new[] { (3, 0), (4, 192), (5, 384) } };
+    public static readonly (int Table, int Offset)[][] Sets = { new[] { (0, 0), (1, 320), (2, 356) }, new[] { (3, 0), (4, 192) } };
 
     public IdenticalCopyRuns()
     {
@@ -224,9 +225,10 @@ public class IdenticalCopyTests(IdenticalCopyRuns f) : IClassFixture<IdenticalCo
     {
         // The learned values the after-run writes to the EEPROM follow the idle's timing too: on the car file alone, six more
         // status requests (answered FF) move seven of them (plan 6 record, Task 5). Faults and power cycles do not drift.
-        foreach (var (_, on, baseline, drive) in f.Pairs)
+        foreach (var (set, on, baseline, drive) in f.Pairs)
         {
-            Assert.Contains(on.Reads, r => r.FromCopy);
+            foreach (var (table, _) in set)
+                Assert.True(on.Reads.Any(r => r.Table.Index == table && r.FromCopy), $"{LiveOverlay.Tables[table].Name} is never read from its copy");
             Assert.DoesNotContain(baseline.Reads, r => r.FromCopy);
             Assert.Equal((RunVerdict.Pass, RunVerdict.Pass), (on.Result.Verdict, baseline.Result.Verdict));
             var compare = Core.Compare.Of(LiveOverlayBin.Image, LiveOverlayBin.Image, drive, baseline.Result, on.Result);

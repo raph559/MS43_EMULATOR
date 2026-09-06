@@ -10,8 +10,8 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// </summary>
 public class OverlayImageTests
 {
-    static readonly int[] Sites = { 0x2C650, 0x2C3A4, 0x3D40A, 0x33B48, 0x33BA2, 0x33B74, 0x33BEA, 0x1B12A };
-    const int KSite = 0x4AB28, Slot = 0x1FC8A, TaskEntry = 0x6E3E2, CrcEnd = 0x6FE00, Block = 0x4B544;
+    static readonly int[] Sites = { 0x2C650, 0x2C3A4, 0x3D40A, 0x33B48, 0x33BA2, 0x33B74, 0x33BEA };
+    const int Slot = 0x1FC8A, TaskEntry = 0x6E3E2, CrcEnd = 0x6FE00, Block = 0x4B544;
 
     /// <summary>The header at 0C:B544: LTOV, the version, then the code's start and end and the data's end in segment 0Ch.</summary>
     static (int CodeStart, int CodeEnd, int DataEnd) Extent(byte[] b)
@@ -19,7 +19,7 @@ public class OverlayImageTests
         Assert.Equal("LTOV", System.Text.Encoding.ASCII.GetString(b, Block, 4));
         int Word(int at) => b[at] | b[at + 1] << 8;
         Assert.Equal(1, Word(Block + 4));
-        Assert.Equal((6, 0), (Word(Block + 12), Word(Block + 14)));
+        Assert.Equal((5, 0), (Word(Block + 12), Word(Block + 14)));
         return (0x40000 + Word(Block + 6), 0x40000 + Word(Block + 8), 0x40000 + Word(Block + 10));
     }
 
@@ -30,7 +30,7 @@ public class OverlayImageTests
         var overlay = Flashed(LiveOverlayBin.Image);
         var car = Flashed(TestImages.Car);
         var (_, _, dataEnd) = Extent(overlay);
-        var hooks = Sites.Concat(new[] { KSite, Slot, TaskEntry, CrcEnd }).ToArray();
+        var hooks = Sites.Concat(new[] { Slot, TaskEntry, CrcEnd }).ToArray();             // the K read (0x4AB28) and the pedal map's site (0x1B12A) stay the car's
         var allowed = hooks.SelectMany(s => Enumerable.Range(s, 4))
             .Concat(Enumerable.Range(Block, dataEnd - Block))
             .Concat(Checksums.StoredFields.SelectMany(f => Enumerable.Range(f.Offset, f.Bytes))).ToHashSet();
@@ -60,7 +60,7 @@ public class OverlayImageTests
             Assert.True(target % 2 == 0, $"{what} → 0C:{target & 0xFFFF:X4} is odd");
             Assert.InRange(target, codeStart, codeEnd - 2);
         }
-        foreach (var site in Sites.Append(KSite).Append(Slot))
+        foreach (var site in Sites.Append(Slot))
         {
             Assert.Equal((0xDA, 0x0C), (b[site], b[site + 1]));                                   // CALLS 0Ch, …
             Inside(0x40000 + (b[site + 2] | b[site + 3] << 8), $"0x{site:X5}");
@@ -99,7 +99,7 @@ public class OverlayImageTests
             at = next;
         }
         Assert.Equal(codeEnd, at);
-        var exits = new HashSet<int> { 0x0D029A, 0x0D0168, 0x0D80DE };
+        var exits = new HashSet<int> { 0x0D029A, 0x0D80DE };
         foreach (var (from, kind, target) in branches)
         {
             if (kind == "far" && exits.Contains(target))
@@ -159,8 +159,8 @@ public class OverlayImageTests
     [Fact] public void Status_AnswersOnAKeyOnRun()
     {
         var s = LiveOverlay.ParseStatus(OneReply(LiveOverlayBin.Image, "6D 00"));
-        Assert.Equal((1, false, true, true), (s.Version, s.Running, s.RicherOnly, s.PedalLive));
-        Assert.Equal((2381, 0, 2381, 0), ((int)s.KNow, (int)s.KEdit, (int)s.KStartUp, (int)s.KState));
+        Assert.Equal((1, false, true), (s.Version, s.Running, s.RicherOnly));
+        Assert.Equal(5, s.Tables.Count);
         Assert.All(s.Tables, t => Assert.Equal(new OverlayEntry(OverlayState.Free, 0, 0), t));
         Assert.Equal(692, s.FreeBytes);
     }

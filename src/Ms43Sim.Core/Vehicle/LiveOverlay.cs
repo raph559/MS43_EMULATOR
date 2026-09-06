@@ -2,32 +2,28 @@ namespace Ms43Sim.Core;
 
 /// <summary>
 /// One live table of the overlay (plan 6, R1): its index in the overlay's own list, its name, where the car file holds it
-/// (file offset, and the page and page offset its sites load into R13/R12), its size, whether its cells are words (the
-/// pedal map, read by 0D:0168) or bytes (0D:029A), and the file offsets of the CALLS at its sites.
+/// (file offset, and the page and page offset its sites load into R13/R12), its size in bytes (each cell one byte, read
+/// by 0D:029A), and the file offsets of the CALLS at its sites.
 /// </summary>
-public sealed record OverlayTable(int Index, string Name, int FileOffset, int Page, int PageOffset, int Bytes, bool Words,
-    IReadOnlyList<int> Sites);
+public sealed record OverlayTable(int Index, string Name, int FileOffset, int Page, int PageOffset, int Bytes, IReadOnlyList<int> Sites);
 
 /// <summary>A table's state in the overlay's directory: Free, Loaded (copied, not confirmed), Ready (confirmed, off), On.</summary>
 public enum OverlayState : byte { Free, Loaded, Ready, On }
 
 /// <summary>Why the overlay refused a request: the byte after its B0 (parameter) or B1 (function) status.</summary>
-public enum OverlayReason : byte { Length = 1, Sub, Table, Range, Overlap, NotRunning, TableOn, NotLoaded, Sum, Leaner, KTooLow, Pedal }
+public enum OverlayReason : byte { Length = 1, Sub, Table, Range, Overlap, NotRunning, TableOn, NotLoaded, Sum, Leaner }
 
 /// <summary>A directory entry: the state, the copy's offset in the copy area, and the edit sum it was switched on with.</summary>
 public sealed record OverlayEntry(OverlayState State, int Offset, ushort EditSum);
 
 /// <summary>
-/// The status reply's fields (plan 6, "The K-line contract"): the version, whether the engine runs, which rules the build
-/// holds, K now, edited and at start-up (K₀, the firmware's 91B6), K's state (0 none, 1 stored, 2 on), the six tables'
-/// entries and the copy area's free bytes.
+/// The status reply's fields (plan 6, "The K-line contract"): the version, whether the engine runs, whether the build holds
+/// the richer-only rule, the five tables' entries and the copy area's free bytes.
 /// </summary>
-public sealed record OverlayStatus(int Version, bool Running, bool RicherOnly, bool PedalLive, ushort KNow, ushort KEdit,
-    ushort KStartUp, byte KState, IReadOnlyList<OverlayEntry> Tables, int FreeBytes);
+public sealed record OverlayStatus(int Version, bool Running, bool RicherOnly, IReadOnlyList<OverlayEntry> Tables, int FreeBytes);
 
 /// <summary>The window 9D00–9FDF as RAM holds it: the control block and the copy area (read by an observer, never written).</summary>
-public sealed record OverlayWindow(bool Initialised, ushort Seen, ushort KEdit, byte KState, IReadOnlyList<OverlayEntry> Tables,
-    byte[] Copies);
+public sealed record OverlayWindow(bool Initialised, ushort Seen, IReadOnlyList<OverlayEntry> Tables, byte[] Copies);
 
 /// <summary>
 /// The live-tuning overlay's K-line contract, DS2 command 0x6D (plan 6): the requests the app sends, as DS2 payloads from the
@@ -47,24 +43,23 @@ public static class LiveOverlay
     /// <summary>3 s of the firmware's 10 ms ticks (E2A6) without a 0x6D frame: everything switches off.</summary>
     public const int SilenceTicks = 300;
 
-    /// <summary>The index that names the fuel constant K in on, off and free.</summary>
-    public const int K = 6;
-
     public const ushort Magic = 0xC0DE;
 
     const int WindowInRam = 0x1D00;                          // 9D00 through DPP2 (10h): external RAM 41D00h, offset 1D00h
 
     enum Sub : byte { Status, Load, Write, On, Off, AllOn, AllOff, Free, Revert }
 
-    /// <summary>The six live tables (plan 6, R1), in the overlay's order.</summary>
+    /// <summary>
+    /// The five live tables (plan 6, R1), in the overlay's order. The owner took the pedal map and the fuel constant K out
+    /// of the live set (2026-10-22).
+    /// </summary>
     public static IReadOnlyList<OverlayTable> Tables { get; } = new[]
     {
-        new OverlayTable(0, "ign98_pl", 0x77315, 0x1D, 0x3315, 320, false, new[] { 0x2C650 }),
-        new OverlayTable(1, "ign98_is", 0x775D4, 0x1D, 0x35D4, 36, false, new[] { 0x2C3A4 }),
-        new OverlayTable(2, "af98", 0x7D69C, 0x1F, 0x169C, 192, false, new[] { 0x3D40A }),
-        new OverlayTable(3, "cam_in", 0x76390, 0x1D, 0x2390, 192, false, new[] { 0x33B48, 0x33BA2 }),
-        new OverlayTable(4, "cam_ex", 0x7629C, 0x1D, 0x229C, 192, false, new[] { 0x33B74, 0x33BEA }),
-        new OverlayTable(5, "pedal", 0x7E4DC, 0x1F, 0x24DC, 288, true, new[] { 0x1B12A }),
+        new OverlayTable(0, "ign98_pl", 0x77315, 0x1D, 0x3315, 320, new[] { 0x2C650 }),
+        new OverlayTable(1, "ign98_is", 0x775D4, 0x1D, 0x35D4, 36, new[] { 0x2C3A4 }),
+        new OverlayTable(2, "af98", 0x7D69C, 0x1F, 0x169C, 192, new[] { 0x3D40A }),
+        new OverlayTable(3, "cam_in", 0x76390, 0x1D, 0x2390, 192, new[] { 0x33B48, 0x33BA2 }),
+        new OverlayTable(4, "cam_ex", 0x7629C, 0x1D, 0x229C, 192, new[] { 0x33B74, 0x33BEA }),
     };
 
     public static byte[] Status() => Payload(Sub.Status);
@@ -80,8 +75,8 @@ public static class LiveOverlay
         return Payload(Sub.Write, new[] { (byte)table, (byte)(at >> 8), (byte)at }.Concat(data.ToArray()).ToArray());
     }
 
-    /// <summary>Switches a table on with its edit sum, or (<see cref="K"/>) K on with its value.</summary>
-    public static byte[] On(int table, ushort sumOrK) => Payload(Sub.On, (byte)table, (byte)(sumOrK >> 8), (byte)sumOrK);
+    /// <summary>Switches a table on with its edit sum.</summary>
+    public static byte[] On(int table, ushort sum) => Payload(Sub.On, (byte)table, (byte)(sum >> 8), (byte)sum);
 
     public static byte[] Off(int table) => Payload(Sub.Off, (byte)table);
 
@@ -127,20 +122,16 @@ public static class LiveOverlay
         return (ushort)sum;
     }
 
-    /// <summary>Richer only (plan 6, D10): K from ⌈0.9 · K₀⌉ to K₀.</summary>
-    public static (int Least, int Most) KBounds(int kStartUp) => ((9 * kStartUp + 9) / 10, kStartUp);
-
-    /// <summary>The fields of a whole status reply (<c>12 38 A0 …</c>).</summary>
+    /// <summary>The fields of a whole status reply (<c>12 2A A0 …</c>).</summary>
     public static OverlayStatus ParseStatus(IReadOnlyList<byte> reply)
     {
-        if (!Ds2.IsFrame(reply) || reply.Count != 56 || reply[2] != 0xA0 || reply[3] != 'L' || reply[4] != 'T' || reply[5] != 'O' || reply[6] != 'V')
+        if (!Ds2.IsFrame(reply) || reply.Count != 42 || reply[2] != 0xA0 || reply[3] != 'L' || reply[4] != 'T' || reply[5] != 'O' || reply[6] != 'V')
             throw new InvalidDataException("not the overlay's status reply: " + Convert.ToHexString(reply.ToArray()));
         var p = reply.Skip(3).ToArray();
         int Word(int at) => p[at] << 8 | p[at + 1];
-        var tables = Enumerable.Range(0, 6).Select(i => new OverlayEntry((OverlayState)p[14 + 6 * i], Word(16 + 6 * i), (ushort)Word(18 + 6 * i)))
+        var tables = Enumerable.Range(0, Tables.Count).Select(i => new OverlayEntry((OverlayState)p[6 + 6 * i], Word(8 + 6 * i), (ushort)Word(10 + 6 * i)))
             .ToArray();
-        return new OverlayStatus(p[4], (p[5] & 1) != 0, (p[5] & 2) != 0, (p[5] & 4) != 0, (ushort)Word(6), (ushort)Word(8), (ushort)Word(10),
-            p[12], tables, Word(50));
+        return new OverlayStatus(p[4], (p[5] & 1) != 0, (p[5] & 2) != 0, tables, Word(36));
     }
 
     /// <summary>The reason of a B0/B1 refusal; null for an A0 reply.</summary>
@@ -160,11 +151,10 @@ public static class LiveOverlay
     public static OverlayWindow ReadWindow(byte[] externalRam)
     {
         int Word(int at) => externalRam[WindowInRam + at] | externalRam[WindowInRam + at + 1] << 8;
-        var tables = Enumerable.Range(0, 6)
+        var tables = Enumerable.Range(0, Tables.Count)
             .Select(i => new OverlayEntry((OverlayState)externalRam[WindowInRam + 8 + 6 * i], Word(10 + 6 * i), (ushort)Word(12 + 6 * i)))
             .ToArray();
-        return new OverlayWindow(Word(0) == Magic, (ushort)Word(2), (ushort)Word(4), externalRam[WindowInRam + 6], tables,
-            externalRam[(WindowInRam + 0x2C)..(WindowInRam + 0x2C + CopyBytes)]);
+        return new OverlayWindow(Word(0) == Magic, (ushort)Word(2), tables, externalRam[(WindowInRam + 0x2C)..(WindowInRam + 0x2C + CopyBytes)]);
     }
 
     /// <summary>A drive file's line that sends <paramref name="payload"/>: <c>kline send 6D …</c>.</summary>

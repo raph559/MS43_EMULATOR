@@ -8,7 +8,7 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// <summary>
 /// What the car file does that the live-tuning overlay leans on (plan 6 Task 1, R1–R7), observed and never forced: the
 /// seven standard drives, the stall drive and a quick key cycle, each run once on the car file as flashed, with a probe
-/// that reads the bus's data accesses, the readers' entries, the eight sites' interrupt level, the 10 ms tick counter and
+/// that reads the bus's data accesses, the readers' entries, the seven sites' interrupt level, the 10 ms tick counter and
 /// the engine-running signal.
 /// </summary>
 public sealed class OverlayFacts
@@ -101,7 +101,7 @@ public sealed class Probe
         machine.Bus.DataWatch = (address, write) =>
         {
             var file = (int)(address & 0x7FFFF);
-            if (!write && file >= 0x7629C && file < 0x7E5FC && Live(file) && machine.Bus.Decode(address) == Region.Flash)
+            if (!write && file >= 0x7629C && file < 0x7D75C && Live(file) && machine.Bus.Decode(address) == Region.Flash)
                 tableReads.Add((origin + machine.Cycles, file, machine.Cpu.InstructionAddress));
             else if (write && handedOver && (address & 0x1FFF) is >= 0x1D00 and < 0x1FE0 && machine.Bus.Decode(address) == Region.ExternalRam)
                 windowWrites.Add((origin + machine.Cycles, (int)(address & 0x1FFF), machine.Cpu.InstructionAddress));
@@ -146,7 +146,7 @@ public sealed class Probe
             ticks.Add(((origin + machine.Cycles) / 24e6, machine.Bus.Peek16(0xE2A6)));
     }
 
-    /// <summary>The six live tables (R1): name, file offset, bytes and call sites.</summary>
+    /// <summary>The five live tables (R1): name, file offset, bytes and call sites.</summary>
     public static readonly (string Name, int File, int Bytes, int[] Sites)[] LiveTables =
     {
         ("ign98_pl", 0x77315, 320, new[] { 0x2C650 }),
@@ -154,7 +154,6 @@ public sealed class Probe
         ("af98", 0x7D69C, 192, new[] { 0x3D40A }),
         ("cam_in", 0x76390, 192, new[] { 0x33B48, 0x33BA2 }),
         ("cam_ex", 0x7629C, 192, new[] { 0x33B74, 0x33BEA }),
-        ("pedal", 0x7E4DC, 288, new[] { 0x1B12A }),
     };
 
     public static bool Live(int file) => LiveTables.Any(t => file >= t.File && file < t.File + t.Bytes);
@@ -178,14 +177,12 @@ public class OverlayFactsStaticTests
             (0x33BA2, 0x2390, 0x1D, new byte[] { 0xDA, 0x0D, 0x9A, 0x02 }),
             (0x33B74, 0x229C, 0x1D, new byte[] { 0xDA, 0x0D, 0x9A, 0x02 }),
             (0x33BEA, 0x229C, 0x1D, new byte[] { 0xDA, 0x0D, 0x9A, 0x02 }),
-            (0x1B12A, 0x24DC, 0x1F, new byte[] { 0xDA, 0x0D, 0x68, 0x01 }),
         };
         foreach (var (site, offset, page, call) in sites)
         {
             var expected = new byte[] { 0xE6, 0xFC, (byte)offset, (byte)(offset >> 8), 0xE6, 0xFD, (byte)page, 0x00 }.Concat(call).ToArray();
             Assert.Equal(Convert.ToHexString(expected), Convert.ToHexString(car, site - 8, 12));
         }
-        Assert.Equal("F2FEB691", Convert.ToHexString(car, 0x4AB28, 4));      // MOV R14, 91B6h: the one read of K
         Assert.Equal("DA09B6FF", Convert.ToHexString(car, 0x1FC8A, 4));      // the 0x6D slot: CALLS 09h, FFB6h
         Assert.Equal("DE800D00", Convert.ToHexString(car, 0x6E3E2, 4));      // queue-1 task 09h: 0D:80DE
         Assert.Equal("43B50C00", Convert.ToHexString(car, 0x6FE00, 4));      // the program CRC's range 4 ends at 0C:B543
@@ -209,7 +206,7 @@ public class OverlayFactsTests(OverlayFacts f, ITestOutputHelper output) : IClas
     /// <summary>The checksum task's CRC-16 loop (0E:3642): it reads every byte of each CRC range, and its timing does not depend on them.</summary>
     const uint CrcLoopRead = 0x0E364C;
 
-    [Fact] public void TheSixTables_AreReadOnlyFromTheEightSites()
+    [Fact] public void TheFiveTables_AreReadOnlyFromTheirSevenSites()
     {
         var probes = f.Standard.Values.ToList();
         var outside = probes.SelectMany(p => p.TableReads).Where(r => !Readers.Any(x => r.Pc >= x.Start && r.Pc < x.End))
