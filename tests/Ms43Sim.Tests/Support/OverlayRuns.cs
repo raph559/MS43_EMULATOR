@@ -70,10 +70,18 @@ public static class OverlayRuns
                         windowReads.Add((origin + machine.Cycles, (int)(address & 0x1FFF) - (LiveOverlay.CopyAddress - 0x8000), reads[^1].Table));
                 };
             }
-            foreach (var back in new uint[] { 0x09FAD6, 0x09FB04 })                 // the serial-line task, back from the dispatcher
+            // One window per dispatcher call. A hook runs as the CPU reaches its instruction, and again if an interrupt was
+            // taken there first, so the return point alone would record a request twice; the call site arms it.
+            var dispatched = false;
+            foreach (var call in new uint[] { 0x09FAD2, 0x09FB00 })                 // the serial-line task calls the dispatcher
+                machine.OnInstruction(call, _ => dispatched = true);
+            foreach (var back in new uint[] { 0x09FAD6, 0x09FB04 })                 // and is back from it
             {
                 machine.OnInstruction(back, m =>
                 {
+                    if (!dispatched)
+                        return;
+                    dispatched = false;
                     if (m.Bus.Peek16(0xF7CC) >> 8 == LiveOverlay.Command)          // F7CD: the command it dispatched
                         windows.Add((origin + m.Cycles, LiveOverlay.ReadWindow(m.Bus.ExternalRam)));
                 });
