@@ -17,7 +17,7 @@ public sealed class OverlayHookRuns
     /// </summary>
     public static readonly string Commands = Head + Send(LiveOverlay.Load(1, 0)) + "1.5 crank rpm=200\n"
         + Send(LiveOverlay.On(1, 0)) + "3 idle\n"
-        + Send(LiveOverlay.Load(5, 0)) + Send(LiveOverlay.Load(0, 373)) + Send(LiveOverlay.Load(0, 372))
+        + Send(LiveOverlay.Load(5, 0)) + Send(LiveOverlay.Load(0, 373)) + Send(LiveOverlay.Load(0, 0xFF00)) + Send(LiveOverlay.Load(0, 372))
         + Send(LiveOverlay.Load(2, 356)) + Send(LiveOverlay.On(1, 1)) + Send(LiveOverlay.On(1, 0)) + "1 idle\n"
         + Send(LiveOverlay.Load(1, 0)) + "3 idle\n"
         + Send(LiveOverlay.Off(1)) + "3 idle\n";
@@ -131,6 +131,9 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
         var past = Step(f.CommandRun, LiveOverlay.Load(0, 373));                         // 373 + 320 = 693 > 692
         Assert.Equal(OverlayReason.Range, Reason(past.Exchange));
         Unchanged(past.Before, past.After);
+        var wrapped = Step(f.CommandRun, LiveOverlay.Load(0, 0xFF00));                   // FF00h + 320 is 64 in 16 bits
+        Assert.Equal(OverlayReason.Range, Reason(wrapped.Exchange));
+        Unchanged(wrapped.Before, wrapped.After);
         var fits = Step(f.CommandRun, LiveOverlay.Load(0, 372));
         Assert.Null(Reason(fits.Exchange));
         Assert.Equal(new OverlayEntry(OverlayState.Loaded, 372, 0), fits.After.Tables[0]);
