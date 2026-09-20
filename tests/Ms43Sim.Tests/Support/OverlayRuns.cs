@@ -17,12 +17,21 @@ public sealed record TableRead(ulong Cycle, uint Reader, ushort R12, ushort R13,
     public double Seconds => Cycle / 24e6;
 }
 
+/// <summary>A 10 ms sample of an overlay run: the drive cycle, the running signal (D3) and the tables' states in the window.</summary>
+public sealed record OverlayRunSample(ulong Cycle, bool Running, OverlayState[] States);
+
 /// <summary>
 /// One observed run with the overlay's K-line traffic: the result, every live table read, and the window after each 0x6D
 /// request the dispatcher handled.
 /// </summary>
 public sealed record OverlayRun(DriveResult Result, IReadOnlyList<TableRead> Reads, IReadOnlyList<(ulong Cycle, OverlayWindow Window)> Windows)
 {
+    /// <summary>
+    /// Every 10 ms from each power cycle's start, a sample whenever the running signal (F900 = 2 and FD2C bits 9–12) or a
+    /// table's state in the window changed since the last one.
+    /// </summary>
+    public IReadOnlyList<OverlayRunSample> Samples { get; init; } = Array.Empty<OverlayRunSample>();
+
     /// <summary>
     /// With <c>watchWindow</c>: every byte the reader (0D:029A) read from the window, as its offset in the copy area, with
     /// the table whose site called it (the last reader entry before it).
@@ -51,9 +60,19 @@ public static class OverlayRuns
         var windowReads = new List<(ulong, int, OverlayTable)>();
         var reads = new List<TableRead>();
         var windows = new List<(ulong, OverlayWindow)>();
+        var samples = new List<OverlayRunSample>();
         void Attach(DriveContext context) => context.PowerCycleStarted += (machine, _) =>
         {
             var origin = context.PowerCycleStart;
+            void Sample(ulong at) => machine.Scheduler.Schedule(at, "overlay-sample", () =>
+            {
+                var running = (machine.Bus.Peek16(0xF900) & 0xFF) == 2 && (machine.Bus.Peek16(0xFD2C) & 0x1E00) != 0;
+                var states = LiveOverlay.Tables.Select(t => (OverlayState)machine.Bus.ExternalRam[0x1D08 + 6 * t.Index]).ToArray();
+                if (samples.Count == 0 || samples[^1].Running != running || !samples[^1].States.SequenceEqual(states))
+                    samples.Add(new OverlayRunSample(origin + machine.Cycles, running, states));
+                Sample(at + 240_000);
+            });
+            Sample(0);
             machine.OnInstruction(Reader, m =>
             {
                 var back = (uint)m.Bus.Peek16((uint)(m.Cpu.Sp + 2)) << 16 | m.Bus.Peek16(m.Cpu.Sp);
@@ -90,6 +109,6 @@ public static class OverlayRuns
         var drive = DriveParser.Parse(driveText);
         var options = new DriveRunOptions(Eeprom: eeprom, Observers: new Action<DriveContext>[] { Attach });
         var result = checks ? DriveRun.RunWithChecks(image, drive, options) : DriveRun.Run(image, drive, options);
-        return new OverlayRun(result, reads, windows) { WindowReads = windowReads };
+        return new OverlayRun(result, reads, windows) { WindowReads = windowReads, Samples = samples };
     }
 }

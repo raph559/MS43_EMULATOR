@@ -17,7 +17,7 @@ public static class ProgramIdentity
     /// MS43X001 with the live-tuning overlay 1, as tools/build_live_overlay.py builds it from patches/live_overlay.asm (plan 6,
     /// D13). A rebuild that changes the program changes this pin.
     /// </summary>
-    public const string Ms43X001LiveOverlay = "554f911e31a9f905152c9c4a560b9d028468be6c41cf618452e51d8a435bf741";
+    public const string Ms43X001LiveOverlay = "5ebb52a7772d975da76c25c7b024aec0d394445332373d0f7c69daebe561ef8a";
 
     public static string Of(FirmwareImage image)
     {
