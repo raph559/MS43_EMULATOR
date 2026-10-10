@@ -65,7 +65,9 @@ public sealed partial class C167Cpu
 
     /// <summary>
     /// The last <see cref="Step"/> (or <see cref="TryServePecWhileIdle"/>) entered a trap or an
-    /// interrupt, or made a PEC transfer, instead of executing an instruction.
+    /// interrupt, or made a PEC transfer, instead of executing an instruction. It is already set while that entry or
+    /// transfer accesses memory, so a <see cref="PhysicalBus.DataWatch"/> observer can tell its accesses from the
+    /// interrupted instruction's.
     /// </summary>
     public bool LastStepWasEntry { get; private set; }
 

@@ -36,10 +36,10 @@ public sealed class OverlaySafetyRuns
     public static string QuickKeyCycle(double off) =>
         Start + $"{off.ToString(System.Globalization.CultureInfo.InvariantCulture)} off\n3 crank rpm=200\n3 idle\n" + BothOn + "3 idle\n";
 
-    /// <summary>The key on with the engine stopped: a load, a write, an on and an off at 3 s.</summary>
+    /// <summary>The key on with the engine stopped: a load, a write, an on, an off, an all on, a free and a revert at 3 s.</summary>
     public static readonly string Stopped = "drive stopped\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n"
         + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Write(0, 0, OverlayEditRuns.Flash(0)[..1])) + Send(LiveOverlay.On(0, 0))
-        + Send(LiveOverlay.Off(0)) + "5 on\n";
+        + Send(LiveOverlay.Off(0)) + Send(LiveOverlay.AllOn()) + Send(LiveOverlay.Free(0)) + Send(LiveOverlay.Revert()) + "5 on\n";
 
     public OverlaySafetyRuns()
     {
@@ -180,7 +180,10 @@ public class OverlaySafetyTests(OverlaySafetyRuns f, Xunit.Abstractions.ITestOut
     {
         var run = f.StoppedRun;
         var replies = run.Overlay.Where(e => e.Request[3] != 0x00).Select(e => (e.Request[3], Reason(e))).ToList();
-        Assert.Equal(new (byte, OverlayReason?)[] { (0x01, null), (0x02, null), (0x03, OverlayReason.NotRunning), (0x04, null) }, replies);
+        Assert.Equal(new (byte, OverlayReason?)[]
+        {
+            (0x01, null), (0x02, null), (0x03, OverlayReason.NotRunning), (0x04, null), (0x05, OverlayReason.NotRunning), (0x07, null), (0x08, null),
+        }, replies);
         var statuses = run.Overlay.Where(e => e.Request[3] == 0x00).ToList();
         Assert.NotEmpty(statuses);
         Assert.All(statuses, e => Assert.False(LiveOverlay.ParseStatus(e.Reply!).Running));

@@ -18,6 +18,9 @@ public sealed record TableRead(ulong Cycle, uint Reader, ushort R12, ushort R13,
 }
 
 /// <summary>A 10 ms sample of an overlay run: the drive cycle, the running signal (D3) and the tables' states in the window.</summary>
+/// <summary>A data write made with the PC in the overlay (plan 6 Task 8).</summary>
+public sealed record OverlayWrite(ulong Cycle, uint Pc, uint Address, ushort R0, ushort Sp, ushort Cp);
+
 public sealed record OverlayRunSample(ulong Cycle, bool Running, OverlayState[] States);
 
 /// <summary>
@@ -38,6 +41,13 @@ public sealed record OverlayRun(DriveResult Result, IReadOnlyList<TableRead> Rea
     /// </summary>
     public IReadOnlyList<(ulong Cycle, int Offset, OverlayTable Table)> WindowReads { get; init; } = Array.Empty<(ulong, int, OverlayTable)>();
 
+    /// <summary>
+    /// With <c>watchWrites</c>: every data write made with the PC in the overlay's block (0C:B544–0C:BFFF), with its physical
+    /// address, R0, SP and CP as they were. An interrupt entry or a PEC transfer between two of its instructions is not the
+    /// overlay's.
+    /// </summary>
+    public IReadOnlyList<OverlayWrite> OverlayWrites { get; init; } = Array.Empty<OverlayWrite>();
+
     /// <summary>The 0x6D exchanges, in order.</summary>
     public IReadOnlyList<KLineExchange> Overlay =>
         Result.KLine.Where(e => e.Request.Count > 2 && e.Request[2] == LiveOverlay.Command).ToList();
@@ -55,8 +65,10 @@ public static class OverlayRuns
 
     const uint Reader = 0x0D029A;
 
-    public static OverlayRun Run(FlashedImage image, string driveText, byte[]? eeprom = null, bool checks = false, bool watchWindow = false)
+    public static OverlayRun Run(FlashedImage image, string driveText, byte[]? eeprom = null, bool checks = false, bool watchWindow = false,
+        bool watchWrites = false)
     {
+        var overlayWrites = new List<OverlayWrite>();
         var windowReads = new List<(ulong, int, OverlayTable)>();
         var reads = new List<TableRead>();
         var windows = new List<(ulong, OverlayWindow)>();
@@ -79,12 +91,14 @@ public static class OverlayRuns
                 if (LiveOverlay.Tables.Any(t => t.Sites.Any(s => back == 0x80000 + (uint)s + 4)))
                     reads.Add(new TableRead(origin + m.Cycles, Reader, m.Cpu.R(12), m.Cpu.R(13), back));
             });
-            if (watchWindow)
+            if (watchWindow || watchWrites)
             {
                 machine.Bus.DataWatch = (address, write) =>
                 {
                     var pc = machine.Cpu.InstructionAddress;
-                    if (!write && pc is >= Reader and < 0x0D0358
+                    if (watchWrites && write && pc is >= 0x0CB544 and < 0x0CC000 && !machine.Cpu.LastStepWasEntry)
+                        overlayWrites.Add(new OverlayWrite(origin + machine.Cycles, pc, address, machine.Cpu.R(0), (ushort)machine.Cpu.Sp, machine.Cpu.Cp));
+                    if (watchWindow && !write && pc is >= Reader and < 0x0D0358
                         && machine.Bus.Decode(address) == Region.ExternalRam && reads.Count > 0)
                         windowReads.Add((origin + machine.Cycles, (int)(address & 0x1FFF) - (LiveOverlay.CopyAddress - 0x8000), reads[^1].Table));
                 };
@@ -109,6 +123,6 @@ public static class OverlayRuns
         var drive = DriveParser.Parse(driveText);
         var options = new DriveRunOptions(Eeprom: eeprom, Observers: new Action<DriveContext>[] { Attach });
         var result = checks ? DriveRun.RunWithChecks(image, drive, options) : DriveRun.Run(image, drive, options);
-        return new OverlayRun(result, reads, windows) { WindowReads = windowReads, Samples = samples };
+        return new OverlayRun(result, reads, windows) { WindowReads = windowReads, Samples = samples, OverlayWrites = overlayWrites };
     }
 }

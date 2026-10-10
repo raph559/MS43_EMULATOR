@@ -18,6 +18,7 @@ public sealed partial class C167Cpu
             return false;
         if (!irq.TryArbitrate(psw >> 12, out var index, out var level, out var group))
             return false;
+        LastStepWasEntry = true;
         if (IsPecRequest(level, group, out var channel, out var pecc))
             PecTransfer(irq, index, channel, pecc);
         else
@@ -42,9 +43,9 @@ public sealed partial class C167Cpu
             return false;
         instructionAddress = Address;
         dataStates = 0;
+        LastStepWasEntry = true;
         if (!PecTransfer(irq, index, channel, pecc))
             Mode = CpuMode.Running;
-        LastStepWasEntry = true;
         states = FinishStep(Timing.EntryStates + dataStates);
         return true;
     }

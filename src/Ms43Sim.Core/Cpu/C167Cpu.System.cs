@@ -166,11 +166,13 @@ public sealed partial class C167Cpu
             return false;
         if ((tfr & ClassAMask) != 0 && inServiceA == 0 && !InterruptsLocked)
         {
+            LastStepWasEntry = true;
             EnterTrap(HighestClassA(tfr), csp, ip);
             return true;
         }
         if ((tfr & ClassBMask) != 0 && inServiceA == 0 && inServiceB == 0)
         {
+            LastStepWasEntry = true;
             EnterTrap(HighestClassB(tfr), csp, ip);
             return true;
         }
