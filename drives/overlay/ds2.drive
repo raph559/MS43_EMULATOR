@@ -1,0 +1,48 @@
+# The DS2 command 0x6D at idle (plan 6 Task 10): the whole command set with identical copies, and abuse that the overlay
+# refuses, each with its reason and nothing changed. No calibration byte is written: the one accepted write goes into a
+# copy that is never switched on.
+drive ds2
+start blank
+set coolant=90 oil=90 intake=33 ambient=20 clock=60   # a warm engine, the clock at 01:00
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+1.5 crank rpm=200
+2 idle
+kline send 6D 00               # status
+kline send 6D 01 00 00 00      # load ign98_pl at 0
+kline send 6D 01 01 01 40      # load ign98_is at 320
+kline send 6D 01 02 01 64      # load af98 at 356
+kline send 6D 02 02 00 00 AA   # a write into af98's copy: Loaded, and never switched on
+kline send 6D 03 00 00 00      # on, edit sum 0
+kline send 6D 03 01 00 00
+2 idle
+kline send 6D 04 00            # off ign98_pl: Ready
+kline send 6D 06               # all off
+kline send 6D 05               # all on: ign98_pl and ign98_is On again, af98 stays Loaded
+kline send 6D 04 00
+kline send 6D 07 00            # free ign98_pl
+kline send 6D 01 00 00 00      # loaded again
+kline send 6D 03 00 00 00
+2 idle
+kline raw 12 05 6D 00 85       # a bad xor: dropped by the firmware
+kline raw 13 05 6D 00 7B       # no 12h start
+kline raw 12 02 10             # a length byte of 2
+kline send 6D                  # B0 01 length
+kline send 6D 00 00            # B0 01
+kline send 6D 09               # B0 02 sub
+kline send 6D FF               # B0 02
+kline send 6D 01 05 00 00      # B0 03 table
+kline send 6D 07 FF            # B0 03
+kline send 6D 02 01 00 24 AA   # B0 04 range: at ign98_is's end
+kline send 6D 01 03 01 F5      # B0 04: 501 + 192 runs past the area
+kline send 6D 01 03 01 2C      # B0 05 overlap: 300 + 192 crosses ign98_is at 320
+kline send 6D 07 01            # B1 07 on: free of an On table
+kline send 6D 02 03 00 00 AA   # B1 08 not loaded: write into a Free table
+kline send 6D 03 03 00 00      # B1 08: on of a Free table
+kline send 6D 03 01 00 01      # B1 09 sum
+kline send 6D 03 02 00 00      # B1 09: af98's copy differs from the flash
+2 idle
+kline send 6D 08               # revert: every table Free
+5 idle

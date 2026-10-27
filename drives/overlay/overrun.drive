@@ -1,0 +1,19 @@
+# The overrun fuel cut (R8), with the app's live session (plan 6 Task 10): cam_in and cam_ex on from the idle.
+drive overrun
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+kline send 6D 01 03 00 00      # load cam_in at 0
+kline send 6D 01 04 00 C0      # load cam_ex at 192
+1.5 crank rpm=200
+2 idle
+kline send 6D 03 03 00 00      # on, edit sum 0
+kline send 6D 03 04 00 00
+4 idle
+6 drive gear=4 speed=25..110 pedal=30    # accelerating in 4th from near idle speed
+10 drive gear=4 speed=110..30 pedal=0    # the lift: the overrun fuel cut
+2 drive gear=4 speed=30 pedal=0 clutch=1 # the clutch in
+5 idle

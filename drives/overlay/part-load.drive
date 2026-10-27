@@ -1,0 +1,19 @@
+# A gentle cruise (R9) and a coast, with the app's live session (plan 6 Task 10): ign98_pl and ign98_is on from the idle.
+drive part-load
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+kline send 6D 01 00 00 00      # load ign98_pl at 0
+kline send 6D 01 01 01 40      # load ign98_is at 320
+1.5 crank rpm=200
+2 idle
+kline send 6D 03 00 00 00      # on, edit sum 0
+kline send 6D 03 01 00 00
+4 idle
+10 drive gear=3 speed=40..80 pedal=15   # pulling away gently in 3rd
+20 drive gear=4 speed=90 pedal=12       # cruising in 4th
+5 drive gear=4 speed=90..20 pedal=0     # the coast
+5 idle

@@ -1,0 +1,18 @@
+# The cold start (R10) with the app's live session (plan 6 Task 10): ign98_pl, ign98_is and cam_in loaded at the key-on
+# as copies of the flashed tables and switched on once the engine idles.
+drive cold-start
+start blank
+set coolant=0 oil=0 intake=0 ambient=0 clock=0   # soaked overnight at 0 °C, the clock at midnight
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+kline send 6D 01 00 00 00      # load ign98_pl at 0
+kline send 6D 01 01 01 40      # load ign98_is at 320
+kline send 6D 01 03 01 64      # load cam_in at 356
+2 crank rpm=160 battery=10                       # a cold starter turns slower on a sagging battery
+4.5 idle coolant=0..2 oil=0..1.5 intake=0..1     # the standard drive's 90 s warming ramp, split where the tables go on
+kline send 6D 03 00 00 00      # on, edit sum 0
+kline send 6D 03 01 00 00
+kline send 6D 03 03 00 00
+85.5 idle coolant=2..40 oil=1.5..30 intake=1..20

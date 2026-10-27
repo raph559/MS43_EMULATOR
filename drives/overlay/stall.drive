@@ -1,0 +1,22 @@
+# A stall (plan 6 Task 10, design §7.4): ign98_pl and ign98_is on at idle; the engine stalls at 9.5 s (plan 5's restart
+# timing) and the overlay switches both off; after the restart the app switches them on again.
+drive stall
+start blank
+set coolant=90 oil=90 intake=33 ambient=20 clock=60   # a warm engine, the clock at 01:00
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+kline send 6D 01 00 00 00      # load ign98_pl at 0
+kline send 6D 01 01 01 40      # load ign98_is at 320
+1.5 crank rpm=200
+3 idle
+kline send 6D 03 00 00 00      # on, edit sum 0
+kline send 6D 03 01 00 00
+2 idle
+3 stall
+1.5 crank rpm=200
+3 idle
+kline send 6D 03 00 00 00      # on, edit sum 0
+kline send 6D 03 01 00 00
+2 idle

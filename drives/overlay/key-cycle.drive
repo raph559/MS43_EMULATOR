@@ -1,0 +1,26 @@
+# Two power cycles (Review Focus 5) with the app's live session (plan 6 Task 10): ign98_is and cam_ex on at the first
+# idle; the key cycle wipes the window, so the app connects, loads and switches them on again after the second start.
+drive key-cycle
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+kline connect                  # the MS43 logger app: connected at the key-on (125,000 baud), polling the live frame,
+kline poll                     # and a 0x6D status every second, the keep-alive the overlay needs (plan 6 contract)
+kline every 1 6D 00
+kline send 6D 01 01 00 00      # load ign98_is at 0
+kline send 6D 01 04 00 24      # load cam_ex at 36
+1.5 crank rpm=200
+2 idle
+kline send 6D 03 01 00 00      # on, edit sum 0
+kline send 6D 03 04 00 00
+8 idle
+15 off              # the after-run writes the EEPROM and the main relay drops
+3 on                # the next key-on: a new power cycle, the ECU back at 9,600 baud
+kline connect
+kline send 6D 01 01 00 00
+kline send 6D 01 04 00 24
+1.5 crank rpm=200
+2 idle
+kline send 6D 03 01 00 00
+kline send 6D 03 04 00 00
+8 idle
