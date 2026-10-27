@@ -13,7 +13,7 @@ public sealed class OverlaySafetyRuns
 {
     static string Send(byte[] payload) => OverlayHookRuns.Send(payload);
 
-    static readonly string BothOn = Send(LiveOverlay.On(0, 0)) + Send(LiveOverlay.On(1, 0));
+    static readonly string BothOn = Send(LiveOverlay.On(0, LiveOverlay.Crc32(OverlayEditRuns.Flash(0)))) + Send(LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1))));
 
     static readonly string Head = "drive safety\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n1.5 crank rpm=200\n3 idle\n"
         + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Load(1, 320)) + BothOn;
@@ -38,7 +38,7 @@ public sealed class OverlaySafetyRuns
 
     /// <summary>The key on with the engine stopped: a load, a write, an on, an off, an all on, a free and a revert at 3 s.</summary>
     public static readonly string Stopped = "drive stopped\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n"
-        + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Write(0, 0, OverlayEditRuns.Flash(0)[..1])) + Send(LiveOverlay.On(0, 0))
+        + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Write(0, 0, OverlayEditRuns.Flash(0)[..1])) + Send(LiveOverlay.On(0, LiveOverlay.Crc32(OverlayEditRuns.Flash(0))))
         + Send(LiveOverlay.Off(0)) + Send(LiveOverlay.AllOn()) + Send(LiveOverlay.Free(0)) + Send(LiveOverlay.Revert()) + "5 on\n";
 
     public OverlaySafetyRuns()

@@ -5,14 +5,14 @@ namespace Ms43Sim.Tests.Support;
 
 /// <summary>
 /// The live-tuning overlay (plan 6) as the tests run it: the assembler's Intel HEX output of patches/live_overlay.asm,
-/// written by tools/build_live_overlay.py to fixtures/live_overlay.hex and committed, applied to the car file in memory and
+/// written by tools/build_live_overlay.py to fixtures/live_overlay_v2.hex and committed, applied to the car file in memory and
 /// built as flashed. No image is written to disk here. A record that would touch the boot block, a validity tag or the
 /// programming signature at 0x4FFE6–0x4FFFF is refused. The fixture is pinned by the program identity it gives
 /// (<see cref="ProgramIdentity.Ms43X001LiveOverlay"/>), and checked against the source by an <see cref="AslFactAttribute"/>.
 /// </summary>
 public static class LiveOverlayBin
 {
-    public const string FixtureRelative = "sim/tests/Ms43Sim.Tests/fixtures/live_overlay.hex";
+    public const string FixtureRelative = "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v2.hex";
 
     static readonly (int Start, int End)[] Forbidden =
     {

@@ -127,6 +127,8 @@ public sealed record StartupResult(
     IReadOnlyDictionary<uint, long>? CanPartnersSent,
     FaultContext FaultContext)
 {
+    public CalibrationSafetyAssessment PhysicalCalibrationSafety => CalibrationSafetyAssessment.Current;
+
     /// <summary>Events of type T the run raised, including those the log did not keep.</summary>
     public long CountOf<T>() where T : SimEvent => EventCounts.GetValueOrDefault(typeof(T));
 }

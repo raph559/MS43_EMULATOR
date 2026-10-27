@@ -15,8 +15,8 @@ kline send 6D 01 00 00 00      # load ign98_pl at 0
 kline send 6D 01 01 01 40      # load ign98_is at 320
 kline send 6D 01 02 01 64      # load af98 at 356
 kline send 6D 02 02 00 00 AA   # a write into af98's copy: Loaded, and never switched on
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
 2 idle
 kline send 6D 04 00            # off ign98_pl: Ready
 kline send 6D 06               # all off
@@ -24,7 +24,7 @@ kline send 6D 05               # all on: ign98_pl and ign98_is On again, af98 st
 kline send 6D 04 00
 kline send 6D 07 00            # free ign98_pl
 kline send 6D 01 00 00 00      # loaded again
-kline send 6D 03 00 00 00
+kline send 6D 03 00 55 0B 59 DE
 2 idle
 kline raw 12 05 6D 00 85       # a bad xor: dropped by the firmware
 kline raw 13 05 6D 00 7B       # no 12h start
@@ -40,9 +40,9 @@ kline send 6D 01 03 01 F5      # B0 04: 501 + 192 runs past the area
 kline send 6D 01 03 01 2C      # B0 05 overlap: 300 + 192 crosses ign98_is at 320
 kline send 6D 07 01            # B1 07 on: free of an On table
 kline send 6D 02 03 00 00 AA   # B1 08 not loaded: write into a Free table
-kline send 6D 03 03 00 00      # B1 08: on of a Free table
-kline send 6D 03 01 00 01      # B1 09 sum
-kline send 6D 03 02 00 00      # B1 09: af98's copy differs from the flash
+kline send 6D 03 03 D8 EE E0 FD      # B1 08: on of a Free table
+kline send 6D 03 01 00 00 00 01      # B1 09 integrity
+kline send 6D 03 02 90 08 89 8C      # B1 09: af98's copy differs from the flash
 2 idle
 kline send 6D 08               # revert: every table Free
 5 idle

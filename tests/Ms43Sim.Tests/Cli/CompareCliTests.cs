@@ -1,5 +1,7 @@
 using Ms43Sim.Cli;
+using Ms43Sim.Core;
 using Ms43Sim.Tests.Support;
+using System.Text.Json;
 
 namespace Ms43Sim.Tests.Cli;
 
@@ -36,6 +38,10 @@ public class CompareCliTests
         var verdict = File.ReadAllText(Path.Combine(outDir, "reference", "verdict.txt")).Trim();
         Assert.Equal(verdict switch { "pass" => 0, "fail" => 1, _ => 4 }, code);
         Assert.Contains("short:", output);
+        Assert.Contains(AssessmentWriter.PhysicalSummary, output);
+        using var assessment = JsonDocument.Parse(File.ReadAllText(Path.Combine(outDir, "assessment.json")));
+        Assert.Equal("NotEvaluated", assessment.RootElement.GetProperty("physicalCalibrationSafety").GetProperty("status").GetString());
+        Assert.False(assessment.RootElement.GetProperty("physicalCalibrationSafety").GetProperty("engineSafeClearance").GetBoolean());
         Assert.True(File.Exists(Path.Combine(outDir, "compare-report.md")));
         Assert.Single(File.ReadAllLines(Path.Combine(outDir, "diff.csv")));     // the header: the same bin twice
     }

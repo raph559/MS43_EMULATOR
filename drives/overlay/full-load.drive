@@ -12,9 +12,9 @@ kline send 6D 01 02 01 40      # load af98 at 320
 kline send 6D 01 01 02 00      # load ign98_is at 512
 1.5 crank rpm=200
 2 idle
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 02 00 00
-kline send 6D 03 01 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 02 90 08 89 8C
+kline send 6D 03 01 E7 80 CD 61
 4 idle
 8 drive gear=3 speed=50..150 pedal=95            # the pull
 2 drive gear=3 rpm=6900                          # just below the 7,008 rpm limiter

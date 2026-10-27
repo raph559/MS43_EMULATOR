@@ -271,6 +271,6 @@ public class OverlayFactsTests(OverlayFacts f, ITestOutputHelper output) : IClas
         var all = f.Standard.Values.Append(f.Stall).Append(f.QuickKeyCycle).ToList();
         var writers = all.SelectMany(p => p.WindowWrites).Select(w => w.Pc).Distinct().Order().ToList();
         Assert.True(writers.Count == 0, "the window written after the handover by " + string.Join(", ", writers.Select(pc => pc.ToString("X6"))));
-        Assert.All(all.SelectMany(p => p.MagicAtHandover), magic => Assert.NotEqual(0xC0DE, magic));
+        Assert.All(all.SelectMany(p => p.MagicAtHandover), magic => Assert.NotEqual(LiveOverlay.Magic, magic));
     }
 }

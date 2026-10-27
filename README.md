@@ -49,7 +49,8 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
 - Plan 6 adds:
   - the live-tuning overlay bin (`patches/live_overlay.asm`, built by
     `tools/build_live_overlay.py`), its contract in C# (`LiveOverlay`, DS2 command 0x6D) and its
-    program identity (`ProgramIdentity.Ms43X001LiveOverlay`), so the checks that read the
+    program identity (`ProgramIdentity.Ms43X001LiveOverlayV2` for v2; the historical
+    `ProgramIdentity.Ms43X001LiveOverlay` remains recognized), so the checks that read the
     firmware's RAM run on it and it can pass;
   - the overlay drives in `drives/overlay/`: the standard seven with the app's session and tables
     on, the DS2 command and its abuse (`ds2`), `silence`, `stall` and `quick-key-cycle`;
@@ -97,7 +98,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--key-off-at K` | | Turns the key off (AN1 to 0 V) at K seconds, 0 < K < S; the run stops when the main relay drops |
 | `--eeprom FILE` | blank | The EEPROM's contents: 2,048 bytes, word *i* little-endian at byte 2*i*. The file is only read |
 | `--engine NAME` | | Puts an engine around the ECU: `warm-idle` (warm engine, the car's ASC partners on CAN). The starter turns it at 3.0 s and it should run on its own from 4.0 s. Without it the engine stays stopped |
-| `--out DIR` | `runs/run-<name>` | Where the five output files go: `run-report.md`, `inventory.csv`, `eeprom.bin` (the chip at the end of the run), `events.csv` (every output change, with the crank angle in an engine run) and `trace.csv` (the firmware's variables every 100 ms). An output that is also an input (an `--eeprom` file in that folder) is a usage error |
+| `--out DIR` | `runs/run-<name>` | Where the output files go: `run-report.md`, `inventory.csv`, `eeprom.bin` (the chip at the end of the run), `events.csv` (every output change, with the crank angle in an engine run), `trace.csv` (the firmware's variables every 100 ms), and `assessment.json` (software-check scope and physical safety status). An output that is also an input (an `--eeprom` file in that folder) is a usage error |
 
 The outcome is the first that holds: `Trapped`, `ResetLoop` (any reset), `PoweredOff` (the main
 relay released after the handover), `SchedulerRunning` (the main loop's SRVWDT at 0E:0144 in the
@@ -149,7 +150,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR
 | `--drives DIR` | `sim/drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
 | `--jobs N` | 1 | `check` only: how many drives run at once after the warm start; each run is deterministic |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` |
-| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the verdict and its reasons, the drive, the power cycles with why each ended and every key switch, the checks and their findings, design §7's coverage with what did not run and what the checks did not judge, and the K-line), `events.csv`, `trace.csv`, `eeprom.bin`, `verdict.txt` (one word) and `kline.csv` (the tester's requests, what came of each, and the bytes the line lost) |
+| `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the software verdict and its reasons, the separate physical safety status, the drive, power cycles, checks, coverage and K-line), `events.csv`, `trace.csv`, `eeprom.bin`, `verdict.txt` (the software verdict), `assessment.json` (both assessments and unjudged software properties), and `kline.csv` (the tester's requests, what came of each, and the bytes the line lost). `check` also writes an aggregate `assessment.json` |
 
 The exit code is the verdict (the worst one for `check`): **0 pass, 1 fail, 4 incomplete**; 2 is a
 usage error (a mistake in a drive file is reported with its line), 3 an unreadable or wrong-size
@@ -161,6 +162,19 @@ input. Fail beats incomplete beats pass:
   without an explanation, or part of the drive did not run (the main relay dropped while the drive
   had the key on, or the drive never cranks the engine);
 - **pass:** none of these.
+
+These are **software/output-check verdicts**. The API retains `RunVerdict.Pass`, and `verdict.txt`
+and the exit code retain their existing values for automation. They provide no physical engine
+or calibration safety clearance. Every run, drive and compare report states **physical calibration
+safety: NotEvaluated**, and `assessment.json` carries both results separately. The result API exposes
+`PhysicalCalibrationSafety` with `EngineSafeClearance = false` and named missing models.
+
+The engine model has no combustion-pressure or octane response, measured mixture/fuel-delivery
+model, thermal response to the calibration, or torque/mechanical-limit model. Its knock input is
+a function of RPM. Physical ECU timing is also unverified. Consequently, a calibration can pass
+all modeled output checks while requesting physically inappropriate ignition or fueling. Use the
+software verdict to assess the exercised firmware mechanisms; the simulator cannot validate SP95
+octane suitability or clear a calibration for an engine.
 
 **A drive file** (`sim/drives/*.drive`, plan 4 R17) is text: `#` starts a comment.
 
@@ -238,7 +252,7 @@ dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare REF.bin CANDI
 | `--jobs N` | 1 | A set only: how many drives run at once after the warm start |
 | `--xdf FILE` | | The MS43X001 XDF (local only): names its single constants |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot`, for both bins |
-| `--out DIR` | `runs/compare-<drive or set>-<ref>-vs-<candidate>` | `compare-report.md`, `diff.csv`, and each run's own drive files under `reference/` and `candidate/`; a set writes one such folder per drive and `summary.md` |
+| `--out DIR` | `runs/compare-<drive or set>-<ref>-vs-<candidate>` | `compare-report.md`, `diff.csv`, `assessment.json`, and each run's own drive files under `reference/` and `candidate/`; a set writes one such folder per drive, `summary.md`, and an aggregate `assessment.json` |
 
 The report gives both bins' SHA-256 and the drive, both verdicts, and three kinds of difference:
 - **calibration** (0x70000–0x7FFFF): every table, axis and constant with changed bytes, named from
@@ -471,7 +485,7 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 |---|---|
 | `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`, the K-line and its tester), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners, and the compare (`Compare/`) |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
-| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build, and `fixtures/live_overlay.hex`, the live-tuning overlay (the assembler's output only, both applied in memory) |
+| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build; `fixtures/live_overlay_v2.hex`, the current live-tuning overlay; and `fixtures/live_overlay.hex`, the retained historical v1 overlay (assembler output applied in memory) |
 | `drives/` | the seven standard drive files; `drives/overlay/`, the overlay's eleven |
 | `tools/` | Python helpers: manual text extraction, SFR table generation, decoder cross-check |
 | `refs/` | the two Infineon manuals and their text — local only, not committed |

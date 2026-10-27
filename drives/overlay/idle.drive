@@ -10,8 +10,8 @@ kline send 6D 01 03 00 00      # load cam_in at 0
 kline send 6D 01 01 00 C0      # load ign98_is at 192
 1.5 crank rpm=200
 2 idle
-kline send 6D 03 03 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
+kline send 6D 03 03 D8 EE E0 FD      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
 18 idle
 5 idle ac=1                            # the A/C request
 3 drive gear=N rpm=2500 speed=0        # a blip in neutral at a standstill

@@ -11,10 +11,10 @@ public sealed record OverlayTable(int Index, string Name, int FileOffset, int Pa
 public enum OverlayState : byte { Free, Loaded, Ready, On }
 
 /// <summary>Why the overlay refused a request: the byte after its B0 (parameter) or B1 (function) status.</summary>
-public enum OverlayReason : byte { Length = 1, Sub, Table, Range, Overlap, NotRunning, TableOn, NotLoaded, Sum, Leaner }
+public enum OverlayReason : byte { Length = 1, Sub, Table, Range, Overlap, NotRunning, TableOn, NotLoaded, Integrity, Leaner, EditLimit }
 
-/// <summary>A directory entry: the state, the copy's offset in the copy area, and the edit sum it was switched on with.</summary>
-public sealed record OverlayEntry(OverlayState State, int Offset, ushort EditSum);
+/// <summary>A directory entry: the state, the copy's offset in the copy area, and the full-copy CRC-32 used at activation.</summary>
+public sealed record OverlayEntry(OverlayState State, int Offset, uint ContentCrc32);
 
 /// <summary>
 /// The status reply's fields (plan 6, "The K-line contract"): the version, whether the engine runs, whether the build holds
@@ -33,17 +33,19 @@ public sealed record OverlayWindow(bool Initialised, ushort Seen, IReadOnlyList<
 public static class LiveOverlay
 {
     public const byte Command = 0x6D;
+    public const byte Version = 2;
+    public const int MaxRawDelta = 8;
 
-    /// <summary>The copy area: 692 bytes from 9D2C, after the 44-byte control block at 9D00.</summary>
-    public const int CopyAddress = 0x9D2C, CopyBytes = 692;
+    /// <summary>The copy area: 688 bytes from 9D30, after the 48-byte control block at 9D00.</summary>
+    public const int CopyAddress = 0x9D30, CopyBytes = 688;
 
     /// <summary>The most data one write carries: its request is then 128 bytes, inside the firmware's 129.</summary>
     public const int MostWrite = 120;
 
-    /// <summary>3 s of the firmware's 10 ms ticks (E2A6) without a 0x6D frame: everything switches off.</summary>
+    /// <summary>300 processed firmware ticks without a 0x6D frame; nominally 3 s, dependent on main-task progress.</summary>
     public const int SilenceTicks = 300;
 
-    public const ushort Magic = 0xC0DE;
+    public const ushort Magic = 0xC0D2;
 
     const int WindowInRam = 0x1D00;                          // 9D00 through DPP2 (10h): external RAM 41D00h, offset 1D00h
 
@@ -75,8 +77,8 @@ public static class LiveOverlay
         return Payload(Sub.Write, new[] { (byte)table, (byte)(at >> 8), (byte)at }.Concat(data.ToArray()).ToArray());
     }
 
-    /// <summary>Switches a table on with its edit sum.</summary>
-    public static byte[] On(int table, ushort sum) => Payload(Sub.On, (byte)table, (byte)(sum >> 8), (byte)sum);
+    /// <summary>Finalizes the complete copy using CRC-32/ISO-HDLC before activation.</summary>
+    public static byte[] On(int table, uint crc) => Payload(Sub.On, (byte)table, (byte)(crc >> 24), (byte)(crc >> 16), (byte)(crc >> 8), (byte)crc);
 
     public static byte[] Off(int table) => Payload(Sub.Off, (byte)table);
 
@@ -113,25 +115,32 @@ public static class LiveOverlay
         return writes;
     }
 
-    /// <summary>The edit sum: the sum of the copy's bytes minus the flashed table's, modulo 2¹⁶ (0 for an identical copy).</summary>
-    public static ushort EditSum(ReadOnlySpan<byte> copy, ReadOnlySpan<byte> flash)
+    /// <summary>CRC-32/ISO-HDLC of the complete table, including its unchanged cells.</summary>
+    public static uint Crc32(ReadOnlySpan<byte> copy)
     {
-        var sum = 0;
-        for (var i = 0; i < copy.Length; i++)
-            sum += copy[i] - flash[i];
-        return (ushort)sum;
+        var crc = uint.MaxValue;
+        foreach (var value in copy)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc >> 1) ^ ((crc & 1) == 0 ? 0u : 0xEDB88320u);
+        }
+        return ~crc;
     }
 
-    /// <summary>The fields of a whole status reply (<c>12 2A A0 …</c>).</summary>
+    /// <summary>The fields of a whole status reply (<c>12 34 A0 …</c>).</summary>
     public static OverlayStatus ParseStatus(IReadOnlyList<byte> reply)
     {
-        if (!Ds2.IsFrame(reply) || reply.Count != 42 || reply[2] != 0xA0 || reply[3] != 'L' || reply[4] != 'T' || reply[5] != 'O' || reply[6] != 'V')
+        if (!Ds2.IsFrame(reply) || reply.Count != 52 || reply[2] != 0xA0 || reply[3] != 'L' || reply[4] != 'T' || reply[5] != 'O' || reply[6] != 'V')
             throw new InvalidDataException("not the overlay's status reply: " + Convert.ToHexString(reply.ToArray()));
         var p = reply.Skip(3).ToArray();
         int Word(int at) => p[at] << 8 | p[at + 1];
-        var tables = Enumerable.Range(0, Tables.Count).Select(i => new OverlayEntry((OverlayState)p[6 + 6 * i], Word(8 + 6 * i), (ushort)Word(10 + 6 * i)))
+        if (p[4] != Version)
+            throw new InvalidDataException($"overlay protocol {p[4]} is unsupported; expected {Version}");
+        uint Dword(int at) => (uint)Word(at) << 16 | (uint)Word(at + 2);
+        var tables = Enumerable.Range(0, Tables.Count).Select(i => new OverlayEntry((OverlayState)p[6 + 8 * i], Word(8 + 8 * i), Dword(10 + 8 * i)))
             .ToArray();
-        return new OverlayStatus(p[4], (p[5] & 1) != 0, (p[5] & 2) != 0, tables, Word(36));
+        return new OverlayStatus(p[4], (p[5] & 1) != 0, (p[5] & 2) != 0, tables, Word(46));
     }
 
     /// <summary>The reason of a B0/B1 refusal; null for an A0 reply.</summary>
@@ -151,10 +160,11 @@ public static class LiveOverlay
     public static OverlayWindow ReadWindow(byte[] externalRam)
     {
         int Word(int at) => externalRam[WindowInRam + at] | externalRam[WindowInRam + at + 1] << 8;
+        uint Dword(int at) => (uint)Word(at) | (uint)Word(at + 2) << 16;
         var tables = Enumerable.Range(0, Tables.Count)
-            .Select(i => new OverlayEntry((OverlayState)externalRam[WindowInRam + 8 + 6 * i], Word(10 + 6 * i), (ushort)Word(12 + 6 * i)))
+            .Select(i => new OverlayEntry((OverlayState)externalRam[WindowInRam + 8 + 8 * i], Word(10 + 8 * i), Dword(12 + 8 * i)))
             .ToArray();
-        return new OverlayWindow(Word(0) == Magic, (ushort)Word(2), tables, externalRam[(WindowInRam + 0x2C)..(WindowInRam + 0x2C + CopyBytes)]);
+        return new OverlayWindow(Word(0) == Magic, (ushort)Word(2), tables, externalRam[(WindowInRam + 0x30)..(WindowInRam + 0x30 + CopyBytes)]);
     }
 
     /// <summary>A drive file's line that sends <paramref name="payload"/>: <c>kline send 6D …</c>.</summary>

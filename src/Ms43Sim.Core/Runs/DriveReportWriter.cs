@@ -23,6 +23,8 @@ public static class DriveReportWriter
         File.WriteAllText(Path.Combine(directory, "trace.csv"), RunReportWriter.TraceCsv(r.Trace));
         File.WriteAllBytes(Path.Combine(directory, "eeprom.bin"), r.Eeprom.FinalImage);
         File.WriteAllText(Path.Combine(directory, "verdict.txt"), Word(r.Verdict) + "\n");
+        File.WriteAllText(Path.Combine(directory, "assessment.json"), AssessmentWriter.Json(r.SoftwareOutputVerdict,
+            new[] { r.Image.Image.Sha256 }, r.Coverage?.NotJudged));
         File.WriteAllText(Path.Combine(directory, "kline.csv"), KLineCsv(r));
     }
 
@@ -111,13 +113,14 @@ public static class DriveReportWriter
     {
         var s = new StringBuilder();
         var coverage = r.Coverage;
-        s.AppendLine($"# Drive {r.Drive.Name}: {Word(r.Verdict)}").AppendLine();
+        s.AppendLine($"# Drive {r.Drive.Name}: software/output checks {Word(r.Verdict)}").AppendLine();
         s.AppendLine($"Image: {r.Image.Mode}, source SHA-256 {r.Image.SourceSha256}; program identity {ProgramIdentity.Of(r.Image.Image)}" +
                      (ProgramIdentity.Name(r.Image.Image) is { } name ? $" ({name})." : " (not a known program: the checks that read its RAM are not evaluated)."));
         s.AppendLine($"EEPROM at the first key-on: {r.Eeprom.Source} (the drive expects {r.Drive.Start.ToString().ToLowerInvariant()}).").AppendLine();
 
-        s.AppendLine("## Verdict").AppendLine();
-        s.AppendLine($"**{Word(r.Verdict)}** (exit code {(int)r.Verdict}). Fail beats incomplete beats pass (C2).").AppendLine();
+        s.AppendLine("## Software/output-check verdict").AppendLine();
+        s.AppendLine($"**{Word(r.Verdict)}** (exit code {(int)r.Verdict}); scope: {AssessmentWriter.Scope}. Fail beats incomplete beats pass.").AppendLine();
+        s.AppendLine("`verdict.txt` and the process exit code carry this software verdict only. `assessment.json` reports both this verdict and the physical calibration safety status.").AppendLine();
         if (coverage is null)
             s.AppendLine("- no checks ran: a drive run without checks is incomplete");
         else
@@ -129,6 +132,8 @@ public static class DriveReportWriter
                 s.AppendLine($"- {reason}");
         }
         s.AppendLine();
+
+        AssessmentWriter.AppendPhysicalSafety(s);
 
         s.AppendLine("## Drive").AppendLine();
         s.AppendLine("| Line | From (s) | Seconds | Mode | Keys | Forces | Silenced |");

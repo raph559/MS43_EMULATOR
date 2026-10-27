@@ -79,7 +79,7 @@ public static class OverlayRuns
             void Sample(ulong at) => machine.Scheduler.Schedule(at, "overlay-sample", () =>
             {
                 var running = (machine.Bus.Peek16(0xF900) & 0xFF) == 2 && (machine.Bus.Peek16(0xFD2C) & 0x1E00) != 0;
-                var states = LiveOverlay.Tables.Select(t => (OverlayState)machine.Bus.ExternalRam[0x1D08 + 6 * t.Index]).ToArray();
+                var states = LiveOverlay.Tables.Select(t => (OverlayState)machine.Bus.ExternalRam[0x1D08 + 8 * t.Index]).ToArray();
                 if (samples.Count == 0 || samples[^1].Running != running || !samples[^1].States.SequenceEqual(states))
                     samples.Add(new OverlayRunSample(origin + machine.Cycles, running, states));
                 Sample(at + 240_000);

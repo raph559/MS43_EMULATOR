@@ -60,14 +60,23 @@ public class OverlayDriveSetTests(OverlayDriveSetFixture f) : IClassFixture<Over
 {
     static string Hex(IEnumerable<byte>? bytes) => bytes is null ? "nothing" : Convert.ToHexString(bytes.ToArray());
 
-    static string Payload(params byte[] bytes) => Hex(new byte[] { LiveOverlay.Command }.Concat(bytes));
+    static string Payload(params byte[] bytes)
+    {
+        if (bytes.Length == 4 && bytes[0] == 3)
+        {
+            var crc = bytes[2] == 0 && bytes[3] == 0
+                ? LiveOverlay.Crc32(OverlayEditRuns.Flash(bytes[1])) : 1u;
+            return Hex(LiveOverlay.On(bytes[1], crc));
+        }
+        return Hex(new byte[] { LiveOverlay.Command }.Concat(bytes));
+    }
 
     /// <summary>ds2.drive's requests other than the statuses and the raw frames, in order, with the reply each must get.</summary>
     static IEnumerable<(string Payload, string Reply)> Ds2Expected()
     {
         static string A0() => Hex(Ds2.Frame(new byte[] { 0xA0 }));
         static string Refused(byte status, OverlayReason reason) => Hex(Ds2.Frame(new[] { status, (byte)reason }));
-        var af98Sum = OverlayEditRuns.Flash(2)[0] == 0xAA ? A0() : Refused(0xB1, OverlayReason.Sum);
+        var af98Sum = OverlayEditRuns.Flash(2)[0] == 0xAA ? A0() : Refused(0xB1, OverlayReason.Integrity);
         return new[]
         {
             (Payload(0x01, 0x00, 0x00, 0x00), A0()), (Payload(0x01, 0x01, 0x01, 0x40), A0()), (Payload(0x01, 0x02, 0x01, 0x64), A0()),
@@ -81,7 +90,7 @@ public class OverlayDriveSetTests(OverlayDriveSetFixture f) : IClassFixture<Over
             (Payload(0x01, 0x03, 0x01, 0x2C), Refused(0xB0, OverlayReason.Overlap)),
             (Payload(0x07, 0x01), Refused(0xB1, OverlayReason.TableOn)),
             (Payload(0x02, 0x03, 0x00, 0x00, 0xAA), Refused(0xB1, OverlayReason.NotLoaded)), (Payload(0x03, 0x03, 0x00, 0x00), Refused(0xB1, OverlayReason.NotLoaded)),
-            (Payload(0x03, 0x01, 0x00, 0x01), Refused(0xB1, OverlayReason.Sum)), (Payload(0x03, 0x02, 0x00, 0x00), af98Sum),
+            (Payload(0x03, 0x01, 0x00, 0x01), Refused(0xB1, OverlayReason.Integrity)), (Payload(0x03, 0x02, 0x00, 0x00), af98Sum),
             (Payload(0x08), A0()),
         };
     }

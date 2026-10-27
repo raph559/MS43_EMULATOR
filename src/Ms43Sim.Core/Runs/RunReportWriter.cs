@@ -22,6 +22,7 @@ public static class RunReportWriter
         File.WriteAllBytes(Path.Combine(directory, "eeprom.bin"), r.Eeprom.FinalImage);
         File.WriteAllText(Path.Combine(directory, "events.csv"), EventsCsv(r.OutputEvents));
         File.WriteAllText(Path.Combine(directory, "trace.csv"), TraceCsv(r.Trace));
+        File.WriteAllText(Path.Combine(directory, "assessment.json"), AssessmentWriter.Json(null, new[] { r.Image.Image.Sha256 }));
     }
 
     /// <summary>The text of run-report.md.</summary>
@@ -29,6 +30,7 @@ public static class RunReportWriter
     {
         var s = new StringBuilder();
         s.AppendLine("# Start-up run report").AppendLine();
+        AssessmentWriter.AppendPhysicalSafety(s);
         Image(s, r);
         Eeprom(s, r);
         Outcome(s, r);

@@ -18,7 +18,7 @@ public class OverlayImageTests
     {
         Assert.Equal("LTOV", System.Text.Encoding.ASCII.GetString(b, Block, 4));
         int Word(int at) => b[at] | b[at + 1] << 8;
-        Assert.Equal(1, Word(Block + 4));
+        Assert.Equal(2, Word(Block + 4));
         Assert.Equal((5, 0), (Word(Block + 12), Word(Block + 14)));
         return (0x40000 + Word(Block + 6), 0x40000 + Word(Block + 8), 0x40000 + Word(Block + 10));
     }
@@ -121,9 +121,9 @@ public class OverlayImageTests
     [Fact] public void TheIdentity_IsPinned_AndKnown()
     {
         var overlay = LiveOverlayBin.Image.Image;
-        Assert.Equal(ProgramIdentity.Ms43X001LiveOverlay, ProgramIdentity.Of(overlay));
+        Assert.Equal(ProgramIdentity.Ms43X001LiveOverlayV2, ProgramIdentity.Of(overlay));
         Assert.True(ProgramIdentity.HasMs43X001Ram(overlay));
-        Assert.Equal("MS43X001 with the live-tuning overlay 1", ProgramIdentity.Name(overlay));
+        Assert.Equal("MS43X001 with the live-tuning overlay 2", ProgramIdentity.Name(overlay));
         Assert.Equal("MS43X001", ProgramIdentity.Name(TestImages.Car.Image));
         var old = Overlay.Over(TestBins.CarBytes).Image;                                         // the frozen known-bad build
         Assert.False(ProgramIdentity.HasMs43X001Ram(old));
@@ -159,10 +159,10 @@ public class OverlayImageTests
     [Fact] public void Status_AnswersOnAKeyOnRun()
     {
         var s = LiveOverlay.ParseStatus(OneReply(LiveOverlayBin.Image, "6D 00"));
-        Assert.Equal((1, false, true), (s.Version, s.Running, s.RicherOnly));
+        Assert.Equal((2, false, true), (s.Version, s.Running, s.RicherOnly));
         Assert.Equal(5, s.Tables.Count);
         Assert.All(s.Tables, t => Assert.Equal(new OverlayEntry(OverlayState.Free, 0, 0), t));
-        Assert.Equal(692, s.FreeBytes);
+        Assert.Equal(688, s.FreeBytes);
     }
 
     [Fact, Trait("Category", "StandardDrives")] public void TheOverlayOff_PassesTheWarmStart()

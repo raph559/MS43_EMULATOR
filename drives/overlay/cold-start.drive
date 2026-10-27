@@ -12,7 +12,7 @@ kline send 6D 01 01 01 40      # load ign98_is at 320
 kline send 6D 01 03 01 64      # load cam_in at 356
 2 crank rpm=160 battery=10                       # a cold starter turns slower on a sagging battery
 4.5 idle coolant=0..2 oil=0..1.5 intake=0..1     # the standard drive's 90 s warming ramp, split where the tables go on
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
-kline send 6D 03 03 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
+kline send 6D 03 03 D8 EE E0 FD
 85.5 idle coolant=2..40 oil=1.5..30 intake=1..20

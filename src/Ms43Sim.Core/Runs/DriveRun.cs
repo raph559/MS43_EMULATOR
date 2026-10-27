@@ -52,6 +52,10 @@ public sealed record DriveResult(FlashedImage Image, Drive Drive, IReadOnlyList<
     string StateHash, IReadOnlyList<string> Assumptions, ulong Cycles, ulong Instructions,
     Coverage? Coverage = null, RunVerdict Verdict = RunVerdict.Incomplete)
 {
+    public RunVerdict SoftwareOutputVerdict => Verdict;
+
+    public CalibrationSafetyAssessment PhysicalCalibrationSafety => CalibrationSafetyAssessment.Current;
+
     /// <summary>The check called <paramref name="name"/>.</summary>
     public ICheck Check(string name) =>
         Checks.FirstOrDefault(c => c.Name == name) ?? throw new KeyNotFoundException($"no check '{name}' in this run");

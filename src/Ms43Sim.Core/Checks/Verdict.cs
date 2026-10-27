@@ -1,6 +1,6 @@
 namespace Ms43Sim.Core;
 
-/// <summary>A drive's verdict; the value is the exit code (plan 4 C8).</summary>
+/// <summary>A drive's software/output-check verdict; the value is the exit code. It is not physical calibration safety clearance.</summary>
 public enum RunVerdict { Pass = 0, Fail = 1, Incomplete = 4 }
 
 /// <summary>

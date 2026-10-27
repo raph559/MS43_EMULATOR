@@ -15,6 +15,10 @@ public sealed record CompareResult(string Drive, DriveResult Reference, DriveRes
     IReadOnlyList<CalibrationDifference> Calibration, IReadOnlyList<CodeDifference> Code,
     IReadOnlyList<BehaviourDifference> Behaviour, RunVerdict Verdict)
 {
+    public RunVerdict SoftwareOutputVerdict => Verdict;
+
+    public CalibrationSafetyAssessment PhysicalCalibrationSafety => CalibrationSafetyAssessment.Current;
+
     /// <summary>The tolerances the behaviour was judged with.</summary>
     public CompareTolerances Tolerances { get; init; } = CompareTolerances.Default;
 

@@ -1,5 +1,7 @@
 using Ms43Sim.Cli;
+using Ms43Sim.Core;
 using Ms43Sim.Tests.Support;
+using System.Text.Json;
 
 namespace Ms43Sim.Tests.Cli;
 
@@ -93,6 +95,7 @@ public class CliTests
         var code = Program.Run(new[] { "run", TestImages.CarPath, "--engine", "warm-idle", "--seconds", "8", "--out", dir.Path }, output, TextWriter.Null);
         Assert.Equal(0, code);
         Assert.Contains("engine: running at ", output.ToString());
+        Assert.Contains(AssessmentWriter.PhysicalSummary, output.ToString());
         foreach (var f in new[] { "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv" })
             Assert.True(File.Exists(Path.Combine(dir.Path, f)), f);
     }
@@ -143,6 +146,12 @@ public class CliTests
         Assert.True(code == 0, output.ToString());
         Assert.Equal("pass", File.ReadAllText(Path.Combine(dir.Path, "warm-start", "verdict.txt")).Trim());
         Assert.Equal("pass", File.ReadAllText(Path.Combine(dir.Path, "idle", "verdict.txt")).Trim());
+        Assert.Contains("software/output checks: pass", output.ToString());
+        Assert.Contains(AssessmentWriter.PhysicalSummary, output.ToString());
+        using var assessment = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir.Path, "assessment.json")));
+        Assert.Equal("pass", assessment.RootElement.GetProperty("softwareOutputChecks").GetProperty("verdict").GetString());
+        Assert.Equal("NotEvaluated", assessment.RootElement.GetProperty("physicalCalibrationSafety").GetProperty("status").GetString());
+        Assert.False(assessment.RootElement.GetProperty("physicalCalibrationSafety").GetProperty("engineSafeClearance").GetBoolean());
         foreach (var file in new[] { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin" })
             Assert.True(File.Exists(Path.Combine(dir.Path, "idle", file)), file);
         var lines = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);

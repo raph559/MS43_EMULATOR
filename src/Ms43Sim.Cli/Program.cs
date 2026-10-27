@@ -20,19 +20,19 @@ public static class Program
         "      (0 < K < S), and the run stops when the main relay drops; --eeprom loads a\n" +
         "      2,048-byte EEPROM image (default: blank) and is only read; writes run-report.md,\n" +
         "      inventory.csv, eeprom.bin (the chip at the end of the run), events.csv (the\n" +
-        "      outputs) and trace.csv (the variables every 100 ms)\n" +
+        "      outputs), trace.csv (the variables every 100 ms) and assessment.json\n" +
         "  ms43sim run BIN --drive FILE [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
         "                  [--eeprom FILE] [--out DIR]\n" +
         "      runs the drive FILE on BIN with every check; a drive that starts seasoned needs\n" +
         "      --eeprom (a warm-start run's eeprom.bin); writes drive-report.md, events.csv,\n" +
-        "      trace.csv, eeprom.bin and verdict.txt; the exit code is the verdict: 0 pass,\n" +
-        "      1 fail, 4 incomplete\n" +
+        "      trace.csv, eeprom.bin, verdict.txt and assessment.json; the exit code reports\n" +
+        "      software/output checks only: 0 pass, 1 fail, 4 incomplete\n" +
         "  ms43sim check BIN [--drives DIR] [--jobs N] [--raw | --partial-onto ECU.bin]\n" +
         "                    [--ecu-boot BOOT.bin] [--out DIR]\n" +
         "      runs every *.drive in DIR (default: sim/drives) on BIN with every check, the\n" +
         "      warm-start drive first: its final EEPROM is where the seasoned drives start;\n" +
         "      --jobs N runs the others N at a time; one folder and one line per drive; the\n" +
-        "      exit code is the worst verdict\n" +
+        "      exit code is the worst software/output-check verdict\n" +
         "  ms43sim compare REF CANDIDATE --drive FILE [--eeprom FILE] [--xdf FILE] [--out DIR]\n" +
         "  ms43sim compare REF CANDIDATE [--drives DIR] [--jobs N] [--xdf FILE] [--out DIR]\n" +
         "                  [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
@@ -42,7 +42,9 @@ public static class Program
         "      calmaps_ms43x.csv (found in the current folder or above) and --xdf's constants,\n" +
         "      lists code differences, and lines the runs up per engine event and per sample;\n" +
         "      writes compare-report.md, diff.csv and both runs' files (summary.md for a set);\n" +
-        "      the exit code is the worse verdict\n" +
+        "      assessment.json separates software/output checks from physical calibration safety;\n" +
+        "      the exit code is the worse software/output-check verdict\n" +
+        "      Physical calibration safety is always NotEvaluated: no engine-safe clearance\n" +
         "  ms43sim decode --listing BIN\n" +
         "      linear-sweep listing of the code regions (offset size mnemonic)";
 
@@ -220,7 +222,7 @@ public static class Program
             return UsageError(error, "--key-off-at needs a time above 0 and before the end of the run (--seconds)");
 
         outDir ??= Path.Combine("runs", "run-" + Path.GetFileNameWithoutExtension(image.Bin));
-        if (Overwritten(image.Inputs.Append(eepromFile), outDir, "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv") is { } clash)
+        if (Overwritten(image.Inputs.Append(eepromFile), outDir, "run-report.md", "inventory.csv", "eeprom.bin", "events.csv", "trace.csv", "assessment.json") is { } clash)
             return UsageError(error, $"the run would write over its input {clash}: choose another --out");
 
         var flashed = image.Build();
@@ -235,12 +237,13 @@ public static class Program
         output.WriteLine($"outcome: {result.Outcome}");
         if (result.Engine is { } e)
             output.WriteLine($"engine: {e.Describe()}");
+        output.WriteLine(AssessmentWriter.PhysicalSummary);
         output.WriteLine($"report: {Path.Combine(outDir, "run-report.md")}");
         Speed(output, result.Instructions, result.Cycles, clock.Elapsed.TotalSeconds);
         return 0;
     }
 
-    static readonly string[] DriveOutputs = { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin", "verdict.txt", "kline.csv" };
+    static readonly string[] DriveOutputs = { "drive-report.md", "events.csv", "trace.csv", "eeprom.bin", "verdict.txt", "kline.csv", "assessment.json" };
 
     static int DriveCommand(string[] args, TextWriter output, TextWriter error)
     {
@@ -280,7 +283,8 @@ public static class Program
         clock.Stop();
 
         DriveReportWriter.Write(result, outDir);
-        output.WriteLine($"{drive.Name}: {DriveReportWriter.Word(result.Verdict)}");
+        output.WriteLine($"{drive.Name}: software/output checks: {DriveReportWriter.Word(result.Verdict)}");
+        output.WriteLine(AssessmentWriter.PhysicalSummary);
         foreach (var reason in Verdict.Reasons(result.Checks, result.Coverage!).Take(5))
             output.WriteLine($"  {reason}");
         output.WriteLine($"report: {Path.Combine(outDir, "drive-report.md")}");
@@ -338,11 +342,14 @@ public static class Program
 
         var flashed = image.Build();
         var verdicts = new List<RunVerdict>();
+        var notJudged = new System.Collections.Concurrent.ConcurrentBag<string>();
         byte[]? seasoned = null;
         DriveResult RunOne(Drive drive)
         {
             var result = DriveRun.RunWithChecks(flashed, drive,
                 new DriveRunOptions(Eeprom: drive.Start == StartEeprom.Seasoned ? seasoned : null));
+            foreach (var gap in result.Coverage?.NotJudged ?? Array.Empty<string>())
+                notJudged.Add($"{drive.Name}: {gap}");
             DriveReportWriter.Write(result, Path.Combine(outDir, drive.Name));
             return result;
         }
@@ -351,7 +358,7 @@ public static class Program
             var first = RunOne(warm);
             seasoned = first.Eeprom.FinalImage;
             verdicts.Add(first.Verdict);
-            output.WriteLine($"{warm.Name}: {DriveReportWriter.Word(first.Verdict)}");
+            output.WriteLine($"{warm.Name}: software/output checks: {DriveReportWriter.Word(first.Verdict)}");
         }
         var rest = drives.Where(d => d != warm).ToArray();
         var results = new RunVerdict[rest.Length];
@@ -359,12 +366,15 @@ public static class Program
         for (var i = 0; i < rest.Length; i++)
         {
             verdicts.Add(results[i]);
-            output.WriteLine($"{rest[i].Name}: {DriveReportWriter.Word(results[i])}");
+            output.WriteLine($"{rest[i].Name}: software/output checks: {DriveReportWriter.Word(results[i])}");
         }
         var worst = verdicts.Contains(RunVerdict.Fail) ? RunVerdict.Fail
             : verdicts.Contains(RunVerdict.Incomplete) ? RunVerdict.Incomplete
             : RunVerdict.Pass;
-        output.WriteLine($"check: {DriveReportWriter.Word(worst)} ({verdicts.Count} drives; reports in {outDir})");
+        File.WriteAllText(Path.Combine(outDir, "assessment.json"), AssessmentWriter.Json(worst, new[] { flashed.Image.Sha256 },
+            notJudged.Distinct().Order(StringComparer.Ordinal).ToArray()));
+        output.WriteLine($"check: software/output checks: {DriveReportWriter.Word(worst)} ({verdicts.Count} drives; reports in {outDir})");
+        output.WriteLine(AssessmentWriter.PhysicalSummary);
         return (int)worst;
     }
 
@@ -439,7 +449,7 @@ public static class Program
         var label = driveFile != null ? drives[0].Name : "set";
         outDir ??= Path.Combine("runs", $"compare-{label}-{Path.GetFileNameWithoutExtension(bins[0])}-vs-{Path.GetFileNameWithoutExtension(bins[1])}");
         var inputs = bins.Concat(image.Inputs.Skip(1)).Append(eepromFile).Append(driveFile).Append(xdf);
-        if (Overwritten(inputs, outDir, "compare-report.md", "diff.csv", "summary.md") is { } clash)
+        if (Overwritten(inputs, outDir, "compare-report.md", "diff.csv", "summary.md", "assessment.json") is { } clash)
             return UsageError(error, $"the compare would write over its input {clash}: choose another --out");
 
         FlashedImage Build(string bin) => new ImageArgs { Bin = bin, Raw = image.Raw, PartialOnto = image.PartialOnto, EcuBoot = image.EcuBoot }.Build();
@@ -466,7 +476,8 @@ public static class Program
         foreach (var r in results)
             output.WriteLine(CompareReportWriter.Line(r));
         var worst = results.Select(r => r.Verdict).Aggregate(RunVerdict.Pass, Compare.Worse);
-        output.WriteLine($"compare: {DriveReportWriter.Word(worst)} (reports in {outDir})");
+        output.WriteLine($"compare: software/output checks: {DriveReportWriter.Word(worst)} (reports in {outDir})");
+        output.WriteLine(AssessmentWriter.PhysicalSummary);
         return (int)worst;
     }
 

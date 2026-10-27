@@ -32,6 +32,9 @@ public static class CompareReportWriter
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "compare-report.md"), Report(r));
         File.WriteAllText(Path.Combine(directory, "diff.csv"), DiffCsv(r.Behaviour));
+        File.WriteAllText(Path.Combine(directory, "assessment.json"), AssessmentWriter.Json(r.SoftwareOutputVerdict,
+            new[] { r.Reference.Image.Image.Sha256, r.Candidate.Image.Image.Sha256 },
+            (r.Reference.Coverage?.NotJudged ?? Array.Empty<string>()).Concat(r.Candidate.Coverage?.NotJudged ?? Array.Empty<string>()).Distinct().ToArray()));
         DriveReportWriter.Write(r.Reference, Path.Combine(directory, "reference"));
         DriveReportWriter.Write(r.Candidate, Path.Combine(directory, "candidate"));
     }
@@ -43,13 +46,17 @@ public static class CompareReportWriter
             Write(r, Path.Combine(directory, r.Drive));
         var worst = results.Select(r => r.Verdict).Aggregate(RunVerdict.Pass, Compare.Worse);
         var s = new StringBuilder();
-        s.AppendLine($"# Compare: {DriveReportWriter.Word(worst)}").AppendLine();
+        s.AppendLine($"# Compare: software/output checks {DriveReportWriter.Word(worst)}").AppendLine();
+        AssessmentWriter.AppendPhysicalSafety(s);
+        File.WriteAllText(Path.Combine(directory, "assessment.json"), AssessmentWriter.Json(worst,
+            results.SelectMany(r => new[] { r.Reference.Image.Image.Sha256, r.Candidate.Image.Image.Sha256 }),
+            results.SelectMany(r => (r.Reference.Coverage?.NotJudged ?? Array.Empty<string>()).Concat(r.Candidate.Coverage?.NotJudged ?? Array.Empty<string>())).Distinct().ToArray()));
         if (results.Count > 0)
         {
             s.AppendLine($"Reference: source SHA-256 {results[0].Reference.Image.SourceSha256} ({results[0].Reference.Image.Mode}).");
             s.AppendLine($"Candidate: source SHA-256 {results[0].Candidate.Image.SourceSha256} ({results[0].Candidate.Image.Mode}).").AppendLine();
         }
-        s.AppendLine("| Drive | Compare | Reference | Candidate | Calibration | Code | Behaviour |");
+        s.AppendLine("| Drive | Compare software checks | Reference software checks | Candidate software checks | Calibration | Code | Behaviour |");
         s.AppendLine("|---|---|---|---|---|---|---|");
         foreach (var r in results)
             s.AppendLine($"| {r.Drive} | {DriveReportWriter.Word(r.Verdict)} | {DriveReportWriter.Word(r.Reference.Verdict)} | {DriveReportWriter.Word(r.Candidate.Verdict)} | {r.Calibration.Count} | {r.Code.Count} | {r.Behaviour.Count} |");
@@ -68,14 +75,15 @@ public static class CompareReportWriter
     public static string Report(CompareResult r)
     {
         var s = new StringBuilder();
-        s.AppendLine($"# Compare {r.Drive}: {DriveReportWriter.Word(r.Verdict)}").AppendLine();
+        s.AppendLine($"# Compare {r.Drive}: software/output checks {DriveReportWriter.Word(r.Verdict)}").AppendLine();
         s.AppendLine($"Reference: {r.Reference.Image.Mode}, source SHA-256 {r.Reference.Image.SourceSha256}.");
         s.AppendLine($"Candidate: {r.Candidate.Image.Mode}, source SHA-256 {r.Candidate.Image.SourceSha256}.");
         s.AppendLine($"Drive: {r.Drive}; EEPROM at the first key-on: {r.Reference.Eeprom.Source} (reference), {r.Candidate.Eeprom.Source} (candidate).").AppendLine();
 
-        s.AppendLine("## Verdicts").AppendLine();
+        s.AppendLine("## Software/output-check verdicts").AppendLine();
         s.AppendLine($"- reference: **{DriveReportWriter.Word(r.Reference.Verdict)}**; candidate: **{DriveReportWriter.Word(r.Candidate.Verdict)}**; the compare: **{DriveReportWriter.Word(r.Verdict)}** (the worse of the two: fail beats incomplete beats pass)");
         s.AppendLine("- each run's reasons are in its drive-report.md, under reference/ and candidate/").AppendLine();
+        AssessmentWriter.AppendPhysicalSafety(s);
 
         s.AppendLine("## Calibration differences (0x70000–0x7FFFF, without the checksum fields)").AppendLine();
         s.AppendLine($"Names: {r.CatalogueSource}.").AppendLine();
@@ -129,7 +137,7 @@ public static class CompareReportWriter
 
     /// <summary>One line for the console: the drive, the compare's verdict, the counts, and what a code change asks of the reader.</summary>
     public static string Line(CompareResult r) =>
-        $"{r.Drive}: {DriveReportWriter.Word(r.Verdict)} ({r.Calibration.Count} calibration, {r.Code.Count} code, {r.Behaviour.Count} behaviour differences)"
+        $"{r.Drive}: software/output checks {DriveReportWriter.Word(r.Verdict)} ({r.Calibration.Count} calibration, {r.Code.Count} code, {r.Behaviour.Count} behaviour differences)"
         + (r.Code.Count == 0 ? ""
             : Drifts(r) ? "; the code changed: it needs extra scrutiny, and this drive loads the engine, where any code change drifts two runs apart: read its behaviour against a baseline"
             : "; the code changed: it needs extra scrutiny");

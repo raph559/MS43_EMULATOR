@@ -8,7 +8,7 @@ public sealed record TableEdit(int Table, string What, byte[] Copy, string Segme
 {
     public byte[] Flash => OverlayEditRuns.Flash(Table);
 
-    public ushort Sum => LiveOverlay.EditSum(Copy, Flash);
+    public uint Crc => LiveOverlay.Crc32(Copy);
 
     /// <summary>The writes that carry the edit: its changed cells, in runs of at most 120 bytes.</summary>
     public IReadOnlyList<byte[]> Writes => LiveOverlay.Edit(Table, Copy, Flash);
@@ -72,15 +72,15 @@ public sealed class OverlayAcceptance
     public static string EditDrive(TableEdit edit, EditRun run)
     {
         var writes = run == EditRun.Identical ? edit.FlashedWrites : edit.Writes;
-        var sum = run == EditRun.Live ? edit.Sum : (ushort)0;
+        var sum = LiveOverlay.Crc32(run == EditRun.Identical ? edit.Flash : edit.Copy);
         return Head($"edit-{LiveOverlay.Tables[edit.Table].Name.Replace('_', '-')}") + Send(LiveOverlay.Load(edit.Table, 0)) + string.Concat(writes.Select(Send))
             + Send(LiveOverlay.On(edit.Table, sum)) + edit.Segments;
     }
 
     /// <summary>ign98_is +2 at idle: on, all off, all on, off, on, each 2 s; then a revert and 3 s more.</summary>
     public static readonly string AB = Head("ab") + Send(LiveOverlay.Load(1, 0)) + string.Concat(Edits[1].Writes.Select(Send))
-        + Send(LiveOverlay.On(1, Edits[1].Sum)) + "2 idle\n" + Send(LiveOverlay.AllOff()) + "2 idle\n" + Send(LiveOverlay.AllOn()) + "2 idle\n"
-        + Send(LiveOverlay.Off(1)) + "2 idle\n" + Send(LiveOverlay.On(1, Edits[1].Sum)) + "2 idle\n" + Send(LiveOverlay.Revert()) + "3 idle\n";
+        + Send(LiveOverlay.On(1, Edits[1].Crc)) + "2 idle\n" + Send(LiveOverlay.AllOff()) + "2 idle\n" + Send(LiveOverlay.AllOn()) + "2 idle\n"
+        + Send(LiveOverlay.Off(1)) + "2 idle\n" + Send(LiveOverlay.On(1, Edits[1].Crc)) + "2 idle\n" + Send(LiveOverlay.Revert()) + "3 idle\n";
 
     public OverlayAcceptance()
     {

@@ -10,8 +10,8 @@ kline send 6D 01 00 00 00      # load ign98_pl at 0
 kline send 6D 01 01 01 40      # load ign98_is at 320
 1.5 crank rpm=200
 2 idle
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
 4 idle
 10 drive gear=3 speed=40..80 pedal=15   # pulling away gently in 3rd
 20 drive gear=4 speed=90 pedal=12       # cruising in 4th

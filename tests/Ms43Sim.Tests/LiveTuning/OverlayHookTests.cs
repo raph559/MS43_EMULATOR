@@ -16,16 +16,16 @@ public sealed class OverlayHookRuns
     /// and a refused sum, then ign98_is on at 7.5 s, a load of it while on, and off at 11.5 s.
     /// </summary>
     public static readonly string Commands = Head + Send(LiveOverlay.Load(1, 0)) + "1.5 crank rpm=200\n"
-        + Send(LiveOverlay.On(1, 0)) + "3 idle\n"
-        + Send(LiveOverlay.Load(5, 0)) + Send(LiveOverlay.Load(0, 373)) + Send(LiveOverlay.Load(0, 0xFF00)) + Send(LiveOverlay.Load(0, 372))
-        + Send(LiveOverlay.Load(2, 356)) + Send(LiveOverlay.On(1, 1)) + Send(LiveOverlay.On(1, 0)) + "1 idle\n"
+        + Send(LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1)))) + "3 idle\n"
+        + Send(LiveOverlay.Load(5, 0)) + Send(LiveOverlay.Load(0, 369)) + Send(LiveOverlay.Load(0, 0xFF00)) + Send(LiveOverlay.Load(0, 368))
+        + Send(LiveOverlay.Load(2, 356)) + Send(LiveOverlay.On(1, 1)) + Send(LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1)))) + "1 idle\n"
         + Send(LiveOverlay.Load(1, 0)) + "3 idle\n"
         + Send(LiveOverlay.Off(1)) + "3 idle\n";
 
     /// <summary>Two or three tables loaded at idle and on, then a part-load pull that reads them.</summary>
     public static string Sites(params (int Table, int Offset)[] tables) => Head + "1.5 crank rpm=200\n3 idle\n"
         + string.Concat(tables.Select(t => Send(LiveOverlay.Load(t.Table, t.Offset))))
-        + string.Concat(tables.Select(t => Send(LiveOverlay.On(t.Table, 0)))) + "2 idle\n"
+        + string.Concat(tables.Select(t => Send(LiveOverlay.On(t.Table, LiveOverlay.Crc32(OverlayEditRuns.Flash(t.Table)))))) + "2 idle\n"
         + "6 drive gear=3 speed=30..70 pedal=25\n4 drive gear=3 speed=70..100 pedal=70\n";
 
     public static string Send(byte[] payload) => LiveOverlay.KLineSend(payload) + "\n";
@@ -91,7 +91,7 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
         foreach (var r in reads)
         {
             var copy = r.Cycle > on && r.Cycle < off;
-            var expected = copy ? (0x1D2C, 0x10) : (0x35D4, 0x1D);
+            var expected = copy ? (0x1D30, 0x10) : (0x35D4, 0x1D);
             Assert.True((r.R12, r.R13) == expected, $"{r.Seconds:0.000} s: R12/R13 {r.R12:X4}/{r.R13:X2}, expected {expected.Item1:X4}/{expected.Item2:X2}");
         }
     }
@@ -106,7 +106,7 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
                 var on = run.Windows.First(w => w.Window.Tables[table].State == OverlayState.On).Cycle;
                 var reads = run.Reads.Where(r => r.Table.Index == table && r.Cycle > on).ToList();
                 Assert.True(reads.Count > 0, $"table {table} is never read after its switch-on");
-                Assert.All(reads, r => Assert.Equal((0x1D2C + offset, 0x10), ((int)r.R12, (int)r.R13)));
+                Assert.All(reads, r => Assert.Equal((0x1D30 + offset, 0x10), ((int)r.R12, (int)r.R13)));
                 Assert.All(run.Reads.Where(r => r.Table.Index == table && r.Cycle < on), r => Assert.False(r.FromCopy));
             }
         }
@@ -114,7 +114,7 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
 
     [Fact] public void OnWhileStarting_IsRefused()
     {
-        var step = Step(f.CommandRun, LiveOverlay.On(1, 0));
+        var step = Step(f.CommandRun, LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1))));
         Assert.Equal(OverlayReason.NotRunning, Reason(step.Exchange));
         Unchanged(step.Before, step.After);
     }
@@ -128,16 +128,16 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
 
     [Fact] public void ACopyPastTheArea_OrOverlapping_IsRefused()
     {
-        var past = Step(f.CommandRun, LiveOverlay.Load(0, 373));                         // 373 + 320 = 693 > 692
+        var past = Step(f.CommandRun, LiveOverlay.Load(0, 369));                         // 369 + 320 = 689 > 688
         Assert.Equal(OverlayReason.Range, Reason(past.Exchange));
         Unchanged(past.Before, past.After);
         var wrapped = Step(f.CommandRun, LiveOverlay.Load(0, 0xFF00));                   // FF00h + 320 is 64 in 16 bits
         Assert.Equal(OverlayReason.Range, Reason(wrapped.Exchange));
         Unchanged(wrapped.Before, wrapped.After);
-        var fits = Step(f.CommandRun, LiveOverlay.Load(0, 372));
+        var fits = Step(f.CommandRun, LiveOverlay.Load(0, 368));
         Assert.Null(Reason(fits.Exchange));
-        Assert.Equal(new OverlayEntry(OverlayState.Loaded, 372, 0), fits.After.Tables[0]);
-        var overlap = Step(f.CommandRun, LiveOverlay.Load(2, 356));                      // 356–547 meets ign98_pl at 372
+        Assert.Equal(new OverlayEntry(OverlayState.Loaded, 368, 0), fits.After.Tables[0]);
+        var overlap = Step(f.CommandRun, LiveOverlay.Load(2, 356));                      // 356–547 meets ign98_pl at 368
         Assert.Equal(OverlayReason.Overlap, Reason(overlap.Exchange));
         Unchanged(overlap.Before, overlap.After);
     }
@@ -152,11 +152,11 @@ public class OverlayHookTests(OverlayHookRuns f) : IClassFixture<OverlayHookRuns
     [Fact] public void OnWithAWrongSum_IsRefused()
     {
         var step = Step(f.CommandRun, LiveOverlay.On(1, 1));
-        Assert.Equal(OverlayReason.Sum, Reason(step.Exchange));
+        Assert.Equal(OverlayReason.Integrity, Reason(step.Exchange));
         Unchanged(step.Before, step.After);
         var off = Step(f.CommandRun, LiveOverlay.Off(1));
         Assert.Null(Reason(off.Exchange));
-        Assert.Equal(new OverlayEntry(OverlayState.Ready, 0, 0), off.After.Tables[1]);
+        Assert.Equal(new OverlayEntry(OverlayState.Ready, 0, LiveOverlay.Crc32(OverlayEditRuns.Flash(1))), off.After.Tables[1]);
     }
 
     [Fact] public void OtherSubCommands_AreRefused()
@@ -180,7 +180,7 @@ public sealed class IdenticalCopyRuns
     static string Drive(bool on, params (int Table, int Offset)[] tables) =>
         "drive warm-start\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n1.5 crank rpm=200\n3 idle\n"
         + string.Concat(tables.Select(t => OverlayHookRuns.Send(LiveOverlay.Load(t.Table, t.Offset))))
-        + string.Concat(tables.Select(t => OverlayHookRuns.Send(LiveOverlay.On(t.Table, on ? (ushort)0 : (ushort)1))))   // a wrong sum keeps it off
+        + string.Concat(tables.Select(t => OverlayHookRuns.Send(LiveOverlay.On(t.Table, on ? LiveOverlay.Crc32(OverlayEditRuns.Flash(t.Table)) : 1u))))   // a wrong sum keeps it off
         + "17 idle\n6 drive gear=3 speed=30..70 pedal=25\n4 drive gear=3 speed=70..100 pedal=70\n5 drive gear=3 speed=100..20 pedal=0\n"
         + "5 idle\nkline quiet\n15 off\n";
 
@@ -211,7 +211,7 @@ public class IdenticalCopyTests(IdenticalCopyRuns f) : IClassFixture<IdenticalCo
             foreach (var (table, offset) in set)
             {
                 var t = LiveOverlay.Tables[table];
-                Assert.Equal(new OverlayEntry(OverlayState.On, offset, 0), copies.Tables[table]);
+                Assert.Equal(new OverlayEntry(OverlayState.On, offset, LiveOverlay.Crc32(car.AsSpan(t.FileOffset, t.Bytes))), copies.Tables[table]);
                 Assert.Equal(Convert.ToHexString(car, t.FileOffset, t.Bytes), Convert.ToHexString(copies.Copies, offset, t.Bytes));
             }
             Assert.NotEmpty(on.WindowReads);

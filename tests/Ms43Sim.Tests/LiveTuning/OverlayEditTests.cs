@@ -32,12 +32,12 @@ public sealed class OverlayEditRuns
     public static string Edits()
     {
         var writes = LiveOverlay.Edit(0, PlusOne, Flash(0));
-        var sum = LiveOverlay.EditSum(PlusOne, Flash(0));
+        var sum = LiveOverlay.Crc32(PlusOne);
         return Head + Send(LiveOverlay.Load(0, 0)) + Send(writes[0]) + Send(writes[1]) + Send(LiveOverlay.On(0, sum))
             + Send(writes[2]) + Send(LiveOverlay.On(0, sum))
             + Send(LiveOverlay.Write(0, 0, PlusOne[..1]))
             + Send(LiveOverlay.Off(0)) + Send(LiveOverlay.Write(0, 0, PlusOne[..1]))
-            + Send(LiveOverlay.Load(2, 320)) + Sends(LiveOverlay.Edit(2, Leaner, Flash(2))) + Send(LiveOverlay.On(2, LiveOverlay.EditSum(Leaner, Flash(2))))
+            + Send(LiveOverlay.Load(2, 320)) + Sends(LiveOverlay.Edit(2, Leaner, Flash(2))) + Send(LiveOverlay.On(2, LiveOverlay.Crc32(Leaner)))
             + "2 idle\n";
     }
 
@@ -45,7 +45,7 @@ public sealed class OverlayEditRuns
     public static string IdleIgnition(bool edited)
     {
         var copy = Flash(1).Select(b => edited ? (byte)(b + 2) : b).ToArray();
-        return Head + Send(LiveOverlay.Load(1, 0)) + Send(LiveOverlay.Write(1, 0, copy)) + Send(LiveOverlay.On(1, LiveOverlay.EditSum(copy, Flash(1))))
+        return Head + Send(LiveOverlay.Load(1, 0)) + Send(LiveOverlay.Write(1, 0, copy)) + Send(LiveOverlay.On(1, LiveOverlay.Crc32(copy)))
             + "3 idle\n";
     }
 
@@ -105,7 +105,7 @@ public class OverlayEditTests(OverlayEditRuns f) : IClassFixture<OverlayEditRuns
     [Fact] public void AWriteWithAMissingChunk_FailsItsSum()                           // Review Focus 3
     {
         var ons = Steps(f.EditRun, 0x03).Where(s => s.Exchange.Request[4] == 0).ToList();
-        Assert.Equal(OverlayReason.Sum, Reason(ons[0].Exchange));
+        Assert.Equal(OverlayReason.Integrity, Reason(ons[0].Exchange));
         Unchanged(ons[0].Before, ons[0].After);
         Assert.Null(Reason(ons[1].Exchange));
         Assert.Equal(OverlayState.On, ons[1].After.Tables[0].State);

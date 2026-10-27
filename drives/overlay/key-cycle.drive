@@ -11,8 +11,8 @@ kline send 6D 01 01 00 00      # load ign98_is at 0
 kline send 6D 01 04 00 24      # load cam_ex at 36
 1.5 crank rpm=200
 2 idle
-kline send 6D 03 01 00 00      # on, edit sum 0
-kline send 6D 03 04 00 00
+kline send 6D 03 01 E7 80 CD 61      # on, full-copy CRC32
+kline send 6D 03 04 0C 7C 75 67
 8 idle
 15 off              # the after-run writes the EEPROM and the main relay drops
 3 on                # the next key-on: a new power cycle, the ECU back at 9,600 baud
@@ -21,6 +21,6 @@ kline send 6D 01 01 00 00
 kline send 6D 01 04 00 24
 1.5 crank rpm=200
 2 idle
-kline send 6D 03 01 00 00
-kline send 6D 03 04 00 00
+kline send 6D 03 01 E7 80 CD 61
+kline send 6D 03 04 0C 7C 75 67
 8 idle

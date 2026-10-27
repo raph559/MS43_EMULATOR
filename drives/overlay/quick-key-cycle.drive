@@ -12,12 +12,12 @@ kline send 6D 01 00 00 00      # load ign98_pl at 0
 kline send 6D 01 01 01 40      # load ign98_is at 320
 1.5 crank rpm=200
 3 idle
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
 5 idle
 3 off
 3 crank rpm=200
 3 idle
-kline send 6D 03 00 00 00      # on, edit sum 0
-kline send 6D 03 01 00 00
+kline send 6D 03 00 55 0B 59 DE      # on, full-copy CRC32
+kline send 6D 03 01 E7 80 CD 61
 3 idle

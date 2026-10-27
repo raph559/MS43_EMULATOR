@@ -22,7 +22,7 @@ public sealed class OverlayCommandRuns
 
     public static readonly string AB = Head + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Load(1, 320)) + Send(LiveOverlay.Load(2, 356))
         + Send(Longest)
-        + Send(LiveOverlay.On(0, 0)) + Send(LiveOverlay.On(1, 0)) + "1 idle\n"
+        + Send(LiveOverlay.On(0, LiveOverlay.Crc32(OverlayEditRuns.Flash(0)))) + Send(LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1)))) + "1 idle\n"
         + Send(LiveOverlay.AllOff()) + "1 idle\n"
         + Send(LiveOverlay.AllOn()) + "1 idle\n"
         + Send(LiveOverlay.Free(0)) + Send(LiveOverlay.Off(0)) + Send(LiveOverlay.Free(0)) + "1 idle\n"
@@ -88,17 +88,17 @@ public sealed class OverlayAbuseRuns
         (LiveOverlay.Write(0, 0, new byte[] { 0xAA }), 0xB1, OverlayReason.TableOn),
         (LiveOverlay.Free(1), 0xB1, OverlayReason.TableOn),
         (LiveOverlay.Write(3, 0, new byte[] { 0xAA }), 0xB1, OverlayReason.NotLoaded),
-        (LiveOverlay.On(3, 0), 0xB1, OverlayReason.NotLoaded),
-        (LiveOverlay.On(0, 1), 0xB1, OverlayReason.Sum),
-        (LiveOverlay.On(2, LiveOverlay.EditSum(OverlayEditRuns.Leaner, OverlayEditRuns.Flash(2))), 0xB1, OverlayReason.Leaner),
+        (LiveOverlay.On(3, LiveOverlay.Crc32(OverlayEditRuns.Flash(3))), 0xB1, OverlayReason.NotLoaded),
+        (LiveOverlay.On(0, 1), 0xB1, OverlayReason.Integrity),
+        (LiveOverlay.On(2, LiveOverlay.Crc32(OverlayEditRuns.Leaner)), 0xB1, OverlayReason.Leaner),
     };
 
     /// <summary>
     /// ign98_pl and ign98_is on, af98 loaded with one cell leaner, at 7.5 s; from 8.5 s each garbage frame and each refused
     /// request, a status after each; a status at the end.
     /// </summary>
-    public static readonly string Drive = Head + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Load(1, 320)) + Send(LiveOverlay.On(0, 0))
-        + Send(LiveOverlay.On(1, 0)) + Send(LiveOverlay.Load(2, 356))
+    public static readonly string Drive = Head + Send(LiveOverlay.Load(0, 0)) + Send(LiveOverlay.Load(1, 320)) + Send(LiveOverlay.On(0, LiveOverlay.Crc32(OverlayEditRuns.Flash(0))))
+        + Send(LiveOverlay.On(1, LiveOverlay.Crc32(OverlayEditRuns.Flash(1)))) + Send(LiveOverlay.Load(2, 356))
         + string.Concat(LiveOverlay.Edit(2, OverlayEditRuns.Leaner, OverlayEditRuns.Flash(2)).Select(Send)) + "1 idle\n"
         + string.Concat(Garbage.Select(g => Raw(g) + Send(LiveOverlay.Status())))
         + string.Concat(Refused.Select(r => Send(r.Payload) + Send(LiveOverlay.Status()))) + "40 idle\n";
