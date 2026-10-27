@@ -8,13 +8,15 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
   `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`,
   `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md`,
   `docs/superpowers/plans/2026-10-21-ms43-emulator-plan4-checks-drives.md` and
-  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan5-kline-compare.md`; their records
+  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan5-kline-compare.md` and
+  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan6-overlay-bin.md`; their records
   (rulings, review findings, open items) beside them
 - Devices and what is modelled: `HARDWARE.md`
 - Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up), §9.8 (warm idle), §9.9
-  (checks and drives) and §9.10 (the K-line, restarts and the compare)
+  (checks and drives), §9.10 (the K-line, restarts and the compare) and §9.11 (the live-tuning
+  overlay)
 
-**Status:** plan 5 done (2026-10-22).
+**Status:** plan 6 done (2026-10-24).
 - Plan 1 gave the CPU, bus, traps, interrupts, PEC, watchdog, timing and the boot runner.
 - Plan 2 added:
   - the ports, SSC, GPT1/2, CAPCOM, ADC, PWM, ASC0 and CAN;
@@ -44,6 +46,18 @@ power-on the way the ECU does, so a bin can be tested before it is flashed.
     in the after-run, as the firmware does it);
   - `ms43sim compare`: two bins through the same drives, with their calibration, code and
     behaviour differences.
+- Plan 6 adds:
+  - the live-tuning overlay bin (`patches/live_overlay.asm`, built by
+    `tools/build_live_overlay.py`), its contract in C# (`LiveOverlay`, DS2 command 0x6D) and its
+    program identity (`ProgramIdentity.Ms43X001LiveOverlay`), so the checks that read the
+    firmware's RAM run on it and it can pass;
+  - the overlay drives in `drives/overlay/`: the standard seven with the app's session and tables
+    on, the DS2 command and its abuse (`ds2`), `silence`, `stall` and `quick-key-cycle`;
+  - the K-line tester's three blind spots from plan 5's review: a restart no longer applies its
+    segment's `kline` lines again (M1), kline.csv keeps a timeout's partial frame and every ECU byte
+    that was no part of a reply (`stray`, M3), and an ECU byte reaches the tester only at the
+    tester's own baud (M4);
+  - `PhysicalBus.DataWatch`, an observer of data reads and writes.
 
 The car file starts up with the key on and the engine stopped: its CRC and monitor-sum tasks
 pass, the monitoring handshake completes, and its scheduler runs. A key-off runs the after-run,
@@ -58,7 +72,9 @@ With `--engine warm-idle` the car file starts warm and idles on its 900 rpm targ
 `ms43sim check` passes the car file and the release file on all seven standard drives, and fails
 three known-bad bins (REPORT.md §9.9). The car file answers the app's DS2 session on the K-line,
 restarts after a stall or a quick key cycle, and `compare` shows an ignition edit's decided advance
-exactly where its cells are read (REPORT.md §9.10).
+exactly where its cells are read (REPORT.md §9.10). The overlay bin passes the standard drives and
+its own, and a live edit gives exactly the run of the same edit baked into the flash (REPORT.md
+§9.11); it has not been flashed.
 
 ## Run it
 
@@ -189,7 +205,10 @@ set coolant=90 oil=90 intake=33 ambient=20
   The tester works like the app: one request at a time, each byte when its echo comes back. It
   listens 500 ms after a 0x91 command and 400 ms after anything else. The next request goes 20 ms
   after a reply (the app's pause after each sample) and 1 ms after a timeout. A byte at a baud rate
-  more than 3 % from ASC0's, or overlapping another, is lost and noted in kline.csv.
+  more than 3 % from the receiving end's (a tester byte for ASC0, an ECU byte for the tester), or
+  overlapping another, is lost and noted in kline.csv. An ECU byte that is no part of a reply is
+  noted `stray`, and a timeout keeps the part of a frame that came. A restart inside a power cycle
+  does not apply its segment's `kline` lines again.
 
 **The checks** (plan 4 R16) watch the machine's events, never the output capture: `traps`,
 `resets` (and a main-relay drop with the key read on), `execution` (erased flash, code outside
@@ -273,7 +292,7 @@ versions already in the local NuGet cache, so a restore works offline.
 dotnet test sim/Ms43Sim.sln
 ```
 
-Run it from the repository root. 936 tests (about 8 minutes in all):
+Run it from the repository root. 1,004 tests (about 17 minutes in all):
 - instruction semantics from the manuals, the memory map, interrupts and PEC;
 - every peripheral, board device and engine plant;
 - the boot of the real bins, the car's 5 s start-up and a 40 s key-off;
@@ -283,15 +302,19 @@ Run it from the repository root. 936 tests (about 8 minutes in all):
   and `spark-window` rules, which fail as pure rules only (the plan 4 record);
 - the K-line (the bus, the tester, the car file on the app's session), stalls and restarts, a quick
   key cycle, and the compare's parts and command;
-- in the `StandardDrives` category (24 tests): the car and release files on all seven standard
-  drives, the three known-bad bins, and the compare's acceptance (the car against itself, the
-  transparent stub, an ignition edit, the release).
+- the live-tuning overlay (`LiveTuning/`): the facts it leans on, its contract, its image, hooks,
+  edits, rules and command set;
+- in the `StandardDrives` category (49 tests): the car and release files on all seven standard
+  drives, the three known-bad bins, the compare's acceptance (the car against itself, the
+  transparent stub, an ignition edit, the release), and the overlay's safety, abuse, drive set and
+  acceptance.
 
 `dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
-(912 tests, about 4 minutes).
+(955 tests, about 7 minutes).
 
 **Speed:** 122 M emulated cycles per second on this PC (Release, the warm-start drive with every
-check, plan 5; plan 4 measured 95–111 M; it varies with the PC's load), 5.1× real time; `check` of
+check, plan 5; plan 4 measured 95–111 M; it varies with the PC's load), 5.1× real time; plan 6
+measured the overlay bin at the car file's speed (116.9 M against 111.6 M, 95.2 M against 95.1 M); `check` of
 the car's seven drives takes about 32 s with `--jobs 6`. Plan 3's 60 s warm-idle run, without checks, ran at 132.2 M.
 
 ## Assumptions and simplifications in plan 5
@@ -448,8 +471,8 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 |---|---|
 | `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`, the K-line and its tester), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners, and the compare (`Compare/`) |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
-| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build (the assembler's output only, applied in memory) |
-| `drives/` | the seven standard drive files |
+| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build, and `fixtures/live_overlay.hex`, the live-tuning overlay (the assembler's output only, both applied in memory) |
+| `drives/` | the seven standard drive files; `drives/overlay/`, the overlay's eleven |
 | `tools/` | Python helpers: manual text extraction, SFR table generation, decoder cross-check |
 | `refs/` | the two Infineon manuals and their text — local only, not committed |
 | `runs/` | `ms43sim` output — local only, not committed |
