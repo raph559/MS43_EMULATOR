@@ -49,8 +49,9 @@ public static class V7Fixture
 
 public sealed class OverlayV7ReaderTests(ITestOutputHelper output)
 {
-    [Fact]
-    public void AllWordReadersMatchStockInterpolationAndRegisterEffectsAcrossBothPoolsAndFallbacks()
+    [Theory]
+    [InlineData(7)] [InlineData(8)]
+    public void AllWordReadersMatchStockInterpolationAndRegisterEffectsAcrossBothPoolsAndFallbacks(int version)
     {
         var cases = 0;
         var overhead = new Dictionary<string, ulong>();
@@ -74,12 +75,12 @@ public sealed class OverlayV7ReaderTests(ITestOutputHelper output)
                     BinaryPrimitives.WriteUInt16LittleEndian(reference.AsSpan(at), (ushort)(physical % 0x4000));
                     BinaryPrimitives.WriteUInt16LittleEndian(reference.AsSpan(at+2), (ushort)(physical / 0x4000));
                 }
-                var image = V7Fixture.Bytes;
+                var image = version == 8 ? V8Fixture.Bytes : V7Fixture.Bytes;
                 var actual = V7Fixture.Direct(image, image.AsSpan(site, 4).ToArray());
                 var expected = V7Fixture.Direct(reference, TestBins.CarBytes.AsSpan(site, 4).ToArray());
                 foreach (var m in new[] { actual, expected })
                 {
-                    m.Bus.Poke16(0xE6B0, state == "uninitialised" ? (ushort)0 : (ushort)0xC0D7);
+                    m.Bus.Poke16(0xE6B0, state == "uninitialised" ? (ushort)0 : (ushort)(0xC0D0 + version));
                     m.Bus.Xram[0x6DB] = 255;
                     m.Bus.Poke16(0xF900, state == "stopped" ? (ushort)0 : (ushort)2);
                     m.Bus.Poke16(0xFD2C, 0x0400); m.Bus.Poke16(0xE2A6, state == "expired" ? (ushort)300 : (ushort)0);
