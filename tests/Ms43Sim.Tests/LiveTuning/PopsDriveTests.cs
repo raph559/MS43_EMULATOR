@@ -11,7 +11,7 @@ public sealed class PopsDriveFixture
 {
     public const double Lift = 16.5;
     // Switch on, 2.0 s, -15 deg, 11.5 AFR, 1,600 rpm, 70.5 deg C, 3.0 deg TPS, 20 km/h.
-    public static readonly byte[] On = [1, 20, 23, 115, 50, 158, 30, 20];
+    public static readonly byte[] On = [1, 20, 23, 184, 50, 158, 30, 20];
 
     public static byte[] Long(int index = -1, byte value = 0)
     {
@@ -19,6 +19,9 @@ public sealed class PopsDriveFixture
         if (index >= 0) settings[index] = value;
         return settings;
     }
+
+    /// <summary>The lift settings with the AFR at lambda 1 (128), the stock overrun target.</summary>
+    public static byte[] Lambda1() { var settings = On.ToArray(); settings[3] = 128; return settings; }
 
     public IReadOnlyDictionary<string, DriveResult> Runs { get; }
 
@@ -36,7 +39,7 @@ public sealed class PopsDriveFixture
     {
         var jobs = new (string Key, string Drive, byte[]? Settings)[]
         {
-            ("reference", "lift", null), ("lift", "lift", On),
+            ("reference", "lift", null), ("lift", "lift", On), ("lift-lambda1", "lift", Lambda1()),
             ("pedal-back", "pedal-back", Long()), ("clutch", "clutch", Long()),
             ("low-rpm", "low-rpm", Long(4, 100)), ("low-speed", "lift", Long(7, 90)),
             ("cold", "cold", On), ("downhill", "downhill", Long()), ("two-lifts", "two-lifts", On),
@@ -102,6 +105,20 @@ public sealed class PopsDriveTests(PopsDriveFixture fixture) : IClassFixture<Pop
         static double Next(DriveResult r, double after) => r.Injections.Select(i => i.Open / 24e6).Where(t => t > after).Min();
         Assert.True(Math.Abs(Next(run, pops + 0.1) - Next(reference, pops + 0.1)) <= 0.1,
             $"fuel returned at {Next(run, pops + 0.1):F3} s, stock at {Next(reference, pops + 0.1):F3} s");
+    }
+
+    [Fact] // final review C1: the rich target reaches the injection during the window
+    public void TheAfrSettingRichensTheWindow()
+    {
+        var rich = fixture.Runs["lift"]; var lambda1 = fixture.Runs["lift-lambda1"];
+        var window = Assert.Single(Windows(rich));
+        var samples = rich.Trace.Where(r => r.Seconds > window.Start + 0.3 && r.Seconds < window.End - 0.1).ToList();
+        Assert.NotEmpty(samples);
+        foreach (var row in samples)
+        {
+            var richMs = row.Values[Column("ti1_ms")]!.Value; var stockMs = Sample(lambda1, "ti1_ms", row.Seconds);
+            Assert.True(richMs > stockMs * 1.15, $"at {row.Seconds}: {richMs:F3} ms at 11.5 AFR against {stockMs:F3} ms at lambda 1");
+        }
     }
 
     [Theory]

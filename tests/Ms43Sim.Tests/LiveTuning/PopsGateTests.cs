@@ -13,7 +13,7 @@ public sealed class PopsGateTests
     private const uint Left = 0x41FBC, Lowest = 0x41FBE;
     private static readonly byte[] ToGate = [0xFA, 0x0A, 0xBC, 0xA7];
     // Switch on, 2.0 s, -15 deg, 11.5 AFR, 1,600 rpm (50), 70.5 deg C (158), no throttle, 20 km/h.
-    private static readonly byte[] On = [1, 20, 23, 115, 50, 158, 0, 20];
+    private static readonly byte[] On = [1, 20, 23, 184, 50, 158, 0, 20];
 
     private static byte[] Image(byte[] settings, bool donor = false)
     {
@@ -108,8 +108,8 @@ public sealed class PopsGateTests
         { "launch control", new Inputs(Features: 1), On },
         { "no-lift shift", new Inputs(Features: 2), On },
         { "rolling anti-lag", new Inputs(Features: 4), On },
-        { "cruise switch off", new Inputs(), [2, 20, 23, 115, 50, 158, 0, 20] },
-        { "cruise holding a speed", new Inputs(CruiseMain: true, CruiseHeld: true), [2, 20, 23, 115, 50, 158, 0, 20] },
+        { "cruise switch off", new Inputs(), [2, 20, 23, 184, 50, 158, 0, 20] },
+        { "cruise holding a speed", new Inputs(CruiseMain: true, CruiseHeld: true), [2, 20, 23, 184, 50, 158, 0, 20] },
     };
 
     [Theory]
@@ -134,7 +134,7 @@ public sealed class PopsGateTests
     [Fact]
     public void CruiseReadyStartsAWindow()
     {
-        var m = Seed(Image([2, 20, 23, 115, 50, 158, 0, 20]), new Inputs(CruiseMain: true));
+        var m = Seed(Image([2, 20, 23, 184, 50, 158, 0, 20]), new Inputs(CruiseMain: true));
         Assert.Equal(Stay, Run(m));
         Assert.True(Flag(m, 3));
     }
@@ -175,20 +175,52 @@ public sealed class PopsGateTests
         Assert.False(Flag(m, 3));
     }
 
-    private static Machine Tick(ushort mode, bool active, bool used, ushort left)
+    private static Machine Tick(ushort mode, bool active, bool used, ushort left, Inputs? inputs = null, byte[]? settings = null)
     {
-        var image = V8Fixture.Bytes;
+        var image = Image(settings ?? On);
         var hk = V8Fixture.Symbol("hk") & 0xFFFF;
+        var i = inputs ?? new Inputs();
         var m = V8Fixture.Direct(image, [0xFA, 0x0C, (byte)hk, (byte)(hk >> 8)]);
+        V8Fixture.PutByte(m, 0x4007F, i.Rpm);
+        V8Fixture.PutByte(m, 0x4047F, i.Speed);
+        V8Fixture.PutByte(m, 0x40433, i.Coolant);
+        m.Bus.Poke16(0xFD2E, (ushort)(i.Clutch ? 1 << 6 : 0));
+        m.Bus.Poke16(0xFD18, (ushort)((i.CruiseMain ? 2 : 0) | (i.CruiseHeld ? 4 : 0)));
         m.Bus.Poke16(0xFD2C, mode);
-        m.Bus.Poke16(0xFDF8, (ushort)((active ? 8 : 0) | (used ? 16 : 0) | 0x4000));
+        m.Bus.Poke16(0xFDF8, (ushort)((active ? 8 : 0) | (used ? 16 : 0) | 0x4000 | i.Features));
         m.Bus.Poke16(Left, left);
+        V8Fixture.PutByte(m, Lowest, i.WindowLowest == 0 ? i.Rpm : i.WindowLowest);
         m.Bus.Poke16(0xE3B0, 7);
         m.Bus.Poke16(0xFD2A, 0);
         m.Cpu.Jump(0x0C, 0x1000);
         m.Run(50_000, x => x.Cpu.Address == 0xD80DE);
         Assert.Equal(0xD80DEu, m.Cpu.Address);
         return m;
+    }
+
+    [Fact] // final review C2: the tick ends the window whichever stock path runs
+    public void TickEndsTheWindowWhenItsTimeIsUp()
+    {
+        var m = Tick(1 << 11, active: true, used: true, left: 1);
+        Assert.Equal(0, m.Bus.Peek16(Left));
+        Assert.Equal(0x4010, m.Bus.Peek16(0xFDF8));
+    }
+
+    [Theory]
+    [MemberData(nameof(Failing))]
+    public void TickEndsTheWindowWhenAConditionFails(string name, Inputs inputs, byte[] settings)
+    {
+        var m = Tick(1 << 11, active: true, used: true, left: 50, inputs, settings);
+        Assert.True((m.Bus.Peek16(0xFDF8) & 8) == 0, name);
+        Assert.True((m.Bus.Peek16(0xFDF8) & 16) != 0, name);
+    }
+
+    [Theory]
+    [InlineData(105, false)] [InlineData(104, true)]
+    public void TickEndsTheWindowWhenTheRpmRises(byte rpm, bool stays)
+    {
+        var m = Tick(1 << 11, active: true, used: true, left: 50, new Inputs(Rpm: rpm, WindowLowest: 100));
+        Assert.Equal(stays, (m.Bus.Peek16(0xFDF8) & 8) != 0);
     }
 
     [Fact]

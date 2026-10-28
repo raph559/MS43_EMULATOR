@@ -9,7 +9,7 @@ namespace Ms43Sim.Tests.LiveTuning;
 public static class V8Fixture
 {
     public const int Defaults = 0x4FF80;
-    public static readonly byte[] Flashed = [0x00, 0x14, 0x17, 0x73, 0x32, 0x9E, 0x00, 0x14];
+    public static readonly byte[] Flashed = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 
     public static byte[] Bytes
     {
@@ -125,7 +125,7 @@ public sealed class OverlayV8Tests
     }
 
     [Theory]
-    [InlineData(0, 3)] [InlineData(1, 0)] [InlineData(1, 51)] [InlineData(3, 99)] [InlineData(3, 148)]
+    [InlineData(0, 3)] [InlineData(1, 0)] [InlineData(1, 51)] [InlineData(3, 127)] [InlineData(3, 211)]
     [InlineData(4, 49)] [InlineData(4, 220)] [InlineData(5, 143)] [InlineData(6, 51)]
     public void Group138RejectsEachOutOfRangeByteWithReason4(int index, byte value)
     {
@@ -141,7 +141,7 @@ public sealed class OverlayV8Tests
     }
 
     [Theory]
-    [InlineData(0, 0)] [InlineData(0, 2)] [InlineData(1, 1)] [InlineData(1, 50)] [InlineData(3, 100)] [InlineData(3, 147)]
+    [InlineData(0, 0)] [InlineData(0, 2)] [InlineData(1, 1)] [InlineData(1, 50)] [InlineData(3, 128)] [InlineData(3, 210)]
     [InlineData(4, 50)] [InlineData(4, 219)] [InlineData(5, 144)] [InlineData(5, 255)] [InlineData(6, 0)] [InlineData(6, 50)]
     [InlineData(7, 0)] [InlineData(7, 255)]
     public void Group138AcceptsBoundaryValues(int index, byte value)
@@ -167,7 +167,7 @@ public sealed class OverlayV8Tests
     [Fact]
     public void PopsSettingClampsFlashedValues()
     {
-        byte[] expected = [0, 1, 0, 147, 50, 144, 50, 0];
+        byte[] expected = [0, 1, 0, 210, 50, 144, 50, 0];
         for (var index = 0; index < 8; index++)
         {
             var image = V8Fixture.Bytes;

@@ -11,7 +11,7 @@ namespace Ms43Sim.Tests.LiveTuning;
 public sealed class PopsHookTests
 {
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
-    private static readonly byte[] Settings = [1, 20, 23, 115, 50, 158, 30, 20];
+    private static readonly byte[] Settings = [1, 20, 23, 184, 50, 158, 30, 20];
 
     private sealed record Hook(string Name, byte Segment, ushort Offset, uint[] Ends);
 
@@ -102,7 +102,7 @@ public sealed class PopsHookTests
     {
         var m = Seed(Image(Settings, donor: false), Overrun, 0x4008, 0x0800, 0);
         Assert.Equal(0xBD456u, Run(m, Afr));
-        Assert.Equal(115, m.Cpu.R(12)); Assert.Equal(115, m.Cpu.R(13));
+        Assert.Equal(184, m.Cpu.R(12)); Assert.Equal(184, m.Cpu.R(13));
         m = Seed(Image(Settings, donor: false), Overrun, 0x400C, 0x0800, 0);
         Assert.Equal(0xBD44Eu, Run(m, Afr));
     }
@@ -119,12 +119,31 @@ public sealed class PopsHookTests
         Assert.Equal(expected, m.Bus.Peek16(0x406A4));
     }
 
+    [Theory] // final review C1: with the pedal released the stock code skips the target path; a window runs it
+    [InlineData(true, (ushort)(1 << 11), (ushort)0x4008, 0xBD3BAu)]
+    [InlineData(true, (ushort)(1 << 11), (ushort)0x4000, 0xBD476u)]
+    [InlineData(true, (ushort)(1 << 10), (ushort)0x4008, 0xBD476u)]
+    [InlineData(false, (ushort)(1 << 10), (ushort)0x4000, 0xBD3BAu)]
+    public void PedalReleasedRunsTheTargetPathOnlyDuringAWindow(bool released, ushort mode, ushort fdf8, uint expected)
+    {
+        foreach (var donor in new[] { false, true })
+        {
+            var m = Seed(Image(Settings, donor), mode, fdf8, 0x0803, 0);
+            m.Bus.Poke16(0xFD44, (ushort)(released ? 8 : 0));
+            m.Cpu.Jump(0x0B, 0xD3B2);
+            m.Run(1_000, x => x.Cpu.Address is 0xBD3BA or 0xBD476);
+            var stock = released ? 0xBD476u : 0xBD3BAu;
+            Assert.Equal(donor ? stock : expected, m.Cpu.Address);
+            Assert.Equal(0x0803, m.Cpu.Psw);
+        }
+    }
+
     [Theory]
     [InlineData(50, true)] [InlineData(49, false)]
     public void RichTargetSwitchesTheLambdaLoopOffFrom1600Rpm(byte rpm, bool open)
     {
         var m = Seed(Image(Settings, donor: false), Overrun, 0x4008, 0x0800, 0);
-        m.Cpu.SetR(6, 0x90);
+        m.Cpu.SetR(6, 0x80);   // the stock overrun target: lambda 1
         V8Fixture.PutByte(m, 0x4007F, rpm);
         m.Bus.Poke16(0xFD34, 0); m.Bus.Poke16(0xFD9A, 0); m.Bus.Poke16(0xFD42, 0); m.Bus.Poke16(0x40C5E, 0);
         m.Cpu.Jump(0x0B, 0xD42C);
