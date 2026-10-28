@@ -1,0 +1,11 @@
+# Pops: a lift (16.5 s) with the engine speed falling 3,600 to 2,800 rpm over 4 s: 3,200 rpm at 18.5 s.
+drive pops-low-rpm
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..110 pedal=30
+4 drive gear=4 rpm=3600..2800 speed=110..90 pedal=0
+3 drive gear=N rpm=2800..900 speed=90..30 pedal=0 clutch=1
+3 idle

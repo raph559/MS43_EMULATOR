@@ -45,7 +45,7 @@ public sealed record CompareTolerances(double SparkAdvanceDeg, double SparkDwell
             foreach (var name in names)
                 columns[name] = tolerance;
         }
-        Set(0, "f900", "fd2c", "fd9c", "fd0c", "e17a", "lambda_cfg", "tps_sp_deg", "cam_in_sp_deg", "cam_ex_sp_deg",
+        Set(0, "f900", "fd2c", "fd9c", "fd0c", "fdf8", "e17a", "lambda_cfg", "tps_sp_deg", "cam_in_sp_deg", "cam_ex_sp_deg",
             "idle_target_rpm", "ti1_ms", "ti2_ms", "deadtime_ms", "iga1_deg", "dwell_ms");
         Set(5, "rpm_fed", "rpm_ecu");
         Set(0.5, "coolant_c", "intake_c", "oil_c");
@@ -54,6 +54,7 @@ public sealed record CompareTolerances(double SparkAdvanceDeg, double SparkDwell
         Set(1, "throttle_drive_pct", "pedal_pct", "vanos_in_pct", "vanos_ex_pct", "idle_valve_pct", "idle_i_pct");
         Set(0.05, "battery_v");
         Set(0.5, "maf_kgh");
+        Set(1, "vs_ecu_kmh");
         Set(1, "cam_in_raw", "cam_ex_raw");
         return columns;
     }

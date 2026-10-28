@@ -26,6 +26,14 @@ public static class ProgramIdentity
     public const string Ms43X001LiveOverlayV6 = "926eee3dcfa194841424601167a298c4f233dcd3218410a49da6cfa944717c0e";
     public const string Ms43X001LiveOverlayV7 = "a55ba742d87193fd48b42e72261cc28826e683f4d7d590221b73141f93ee8a42";
 
+    /// <summary>
+    /// The live-tuning overlay 8 (pops on lift-off), as tools/build_live_overlay_v8.py builds it. Its eight flashed pops
+    /// settings at 0x4FF80 are calibration the owner writes into the bin, so they do not change which program it is.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV8 = "9d8444f7b94c314414a1a1a2900e3d9a29d50c020087b81a25b773e83a10d751";
+
+    static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0x73, 0x32, 0x9E, 0x00, 0x14];
+
     public static string Of(FirmwareImage image)
     {
         using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -47,8 +55,19 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV5 => "MS43X001 with the live-tuning overlay 5",
         Ms43X001LiveOverlayV6 => "MS43X001 with the live-tuning overlay 6",
         Ms43X001LiveOverlayV7 => "MS43X001 with the live-tuning overlay 7",
+        Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
+        _ when OfWithFlashedPops(image) == Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
         _ => null,
     };
+
+    /// <summary>The identity with the V8 pops settings put back to their built values, and the checksums with them.</summary>
+    static string OfWithFlashedPops(FirmwareImage image)
+    {
+        var bytes = image.Bytes.ToArray();
+        PopsDefaults.CopyTo(bytes, 0x4FF80);
+        Checksums.Fix(bytes);
+        return Of(FirmwareImage.FromBytes(bytes));
+    }
 
     /// <summary>The program keeps MS43X001's RAM: the checks that read it can run.</summary>
     public static bool HasMs43X001Ram(FirmwareImage image) => Name(image) is not null;

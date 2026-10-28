@@ -1,0 +1,12 @@
+# Pops: a lift at 80 km/h (16.5 s), then downhill from 19.0 s: the road speed rises with the pedal at 0.
+drive pops-downhill
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..80 pedal=30
+2.5 drive gear=4 speed=80..76 pedal=0
+3 drive gear=4 speed=76..91 pedal=0
+3 drive gear=N rpm=2900..900 speed=91..30 pedal=0 clutch=1
+3 idle

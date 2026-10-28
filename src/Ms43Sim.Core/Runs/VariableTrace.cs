@@ -54,6 +54,8 @@ public static class VariableTrace
         new("lambda_cfg", (m, _) => Byte(m, Area.External, 0x80F7)),
         new("e17a", (m, _) => Byte(m, Area.Xram, 0xE17A)),
         new("fd0c", (m, _) => Word(m, Area.Iram, 0xFD0C), Hex: true),
+        new("vs_ecu_kmh", (m, _) => Byte(m, Area.External, 0x847F)),   // the road speed the firmware uses (LC, NLS, pops)
+        new("fdf8", (m, _) => Word(m, Area.Iram, 0xFDF8), Hex: true),   // LC, NLS, RAL and (V8) the pops window bits 3 and 4
     };
 
     /// <summary>The Reference facts' trace table, in order (time_s is the row's own field).</summary>
