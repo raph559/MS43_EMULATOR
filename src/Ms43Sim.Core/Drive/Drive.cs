@@ -8,7 +8,7 @@ namespace Ms43Sim.Core;
 public enum DriveMode { On, Off, Crank, Idle, Drive, Stall }
 
 /// <summary>What a <c>kline</c> line asks of the scripted K-line tester (plan 5).</summary>
-public enum KLineVerb { Connect, Disconnect, Poll, Quiet, Send, Every, Raw }
+public enum KLineVerb { Connect, Disconnect, Poll, Quiet, Send, Every, Raw, Pause }
 
 /// <summary>
 /// One <c>kline</c> line: its verb, its bytes (the DS2 payload from the command byte on for Send and

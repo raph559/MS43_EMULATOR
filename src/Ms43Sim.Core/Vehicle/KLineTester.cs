@@ -34,7 +34,8 @@ public sealed record KLineExchange(ulong SentAt, IReadOnlyList<byte> Request, in
 /// <item>One request at a time. Its bytes go back to back at the tester's <see cref="Baud"/>: each leaves when the
 /// echo of the one before comes back (<c>own: true</c>), whatever became of it on the line.</item>
 /// <item>The next request leaves 20 ms after a reply [obs: the app's LiveLogger pauses 20 ms after each sample; after a
-/// connect the app polls at once, and the 20 ms stand for its serial cable's latency there, assumption], 1 ms after a
+/// connect the app polls at once, and the 20 ms stand for its serial cable's latency there, assumption], or the wait a
+/// <c>kline pause MS</c> line set (owner, 2026-10-28: the app without its pause), 1 ms after a
 /// timeout or a malformed answer [assumption: the app sends again at once], or at once if the tester has been idle longer.</item>
 /// <item>The queue: the one-shot requests told so far (connect, disconnect, send, raw) in the order told, then an
 /// <c>every</c> that is due, in the order told, then the poll while polling.</item>
@@ -59,6 +60,7 @@ public sealed class KLineTester : IKLineDevice
     const int LowBaud = 9_600, HighBaud = 125_000;
     const ulong GapCycles = 24_000;                              // 1 ms: after a timeout or a malformed answer
     const ulong PauseCycles = 480_000;                           // 20 ms: after a reply, the app's pause after each sample
+    ulong pauseCycles = PauseCycles;                             // what a kline pause line set
     const ulong NormalListenCycles = 9_600_000;                  // 400 ms
     const ulong SpeedSwitchListenCycles = 12_000_000;            // 500 ms
     const double LongestPeriodSeconds = 60;
@@ -162,6 +164,9 @@ public sealed class KLineTester : IKLineDevice
                 break;
             case KLineVerb.Every:
                 everys.Add(new Every(new Request(Ds2.Frame(action.Bytes)), PeriodCycles(action.Period), scheduler.Now));
+                break;
+            case KLineVerb.Pause:
+                pauseCycles = (ulong)Math.Round(action.Period * CpuHz);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(action), action.Verb, "not a K-line verb");
@@ -287,7 +292,7 @@ public sealed class KLineTester : IKLineDevice
         Log(f, outcome, at, reply);
         if (outcome == KLineOutcome.Replied && f.Request.Kind != RequestKind.Plain && reply is { Length: > 3 } && reply[2] == Acknowledged)
             Baud = f.Request.Kind == RequestKind.Connect ? HighBaud : LowBaud;
-        notBefore = scheduler.Now + (outcome == KLineOutcome.Replied ? PauseCycles : GapCycles);
+        notBefore = scheduler.Now + (outcome == KLineOutcome.Replied ? pauseCycles : GapCycles);
         PlanNext();
     }
 

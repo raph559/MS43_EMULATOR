@@ -39,7 +39,7 @@ public static partial class DriveParser
 
     const string ModeNames = "on, off, crank, idle, drive or stall";
 
-    const string KLineVerbNames = "connect, disconnect, poll, quiet, send, every or raw";
+    const string KLineVerbNames = "connect, disconnect, poll, quiet, send, every, raw or pause";
 
     /// <summary>
     /// A DS2 frame is the address, the length, the payload and the xor, and the length byte counts them
@@ -204,6 +204,7 @@ public static partial class DriveParser
             "send" => KLineVerb.Send,
             "every" => KLineVerb.Every,
             "raw" => KLineVerb.Raw,
+            "pause" => KLineVerb.Pause,
             _ => throw Fail(line, $"unknown kline verb '{tokens[1]}': {KLineVerbNames}"),
         };
         var arguments = tokens[2..];
@@ -221,6 +222,11 @@ public static partial class DriveParser
                 if (period > MaxEverySeconds)
                     throw Fail(line, $"kline every: the period must be at most {N(MaxEverySeconds)} seconds, not {arguments[0]}");
                 return new KLineAction(verb, KLineBytes(verb, arguments[1..], line), period, line);
+            case KLineVerb.Pause:
+                // The tester's wait after a reply, in milliseconds (the app's LiveLogger pause); kept as seconds, as Every's.
+                if (arguments.Length != 1 || !TryNumber(arguments[0], out var ms) || ms < 0 || ms > 1000)
+                    throw Fail(line, "kline pause takes the wait after each reply in milliseconds, 0 to 1000");
+                return new KLineAction(verb, Array.Empty<byte>(), ms / 1000, line);
             default:
                 if (arguments.Length > 0)
                     throw Fail(line, $"kline {tokens[1]} takes no arguments, not '{arguments[0]}'");
