@@ -131,6 +131,21 @@ public sealed class PopsGateTests
         Assert.True(Flag(m, 4), name);
     }
 
+    [Theory] // switch 80h..9Fh: bit 4 the message (ASC 153h at EF47, A/C 615h at EF37), bit 3 the polarity, bits 0..2 the bit
+    [InlineData(0x97, 0x00, 0xC0, true)] [InlineData(0x97, 0x00, 0x00, false)]
+    [InlineData(0x82, 0x04, 0x00, true)] [InlineData(0x82, 0x00, 0xFF, false)]
+    [InlineData(0x8A, 0x00, 0x00, true)] [InlineData(0x8A, 0x04, 0x00, false)]
+    [InlineData(0x9E, 0x00, 0x80, true)] [InlineData(0x9E, 0x00, 0x40, false)]
+    public void ACanBitSwitchStartsAWindowOnlyWhenItsBitMatches(byte switchValue, byte asc, byte ac, bool starts)
+    {
+        var settings = On.ToArray(); settings[0] = switchValue;
+        var m = Seed(Image(settings), new Inputs());
+        V8Fixture.PutByte(m, 0xEF47, asc);
+        V8Fixture.PutByte(m, 0xEF37, ac);
+        Assert.Equal(starts ? Stay : Cut, Run(m));
+        Assert.Equal(starts, Flag(m, 3));
+    }
+
     [Fact]
     public void CruiseReadyStartsAWindow()
     {

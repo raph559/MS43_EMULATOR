@@ -125,7 +125,7 @@ public sealed class OverlayV8Tests
     }
 
     [Theory]
-    [InlineData(0, 3)] [InlineData(1, 0)] [InlineData(1, 51)] [InlineData(3, 127)] [InlineData(3, 211)]
+    [InlineData(0, 3)] [InlineData(0, 0x7F)] [InlineData(0, 0xA0)] [InlineData(0, 0xFF)] [InlineData(1, 0)] [InlineData(1, 51)] [InlineData(3, 127)] [InlineData(3, 211)]
     [InlineData(4, 49)] [InlineData(4, 220)] [InlineData(5, 143)] [InlineData(6, 51)]
     public void Group138RejectsEachOutOfRangeByteWithReason4(int index, byte value)
     {
@@ -141,7 +141,7 @@ public sealed class OverlayV8Tests
     }
 
     [Theory]
-    [InlineData(0, 0)] [InlineData(0, 2)] [InlineData(1, 1)] [InlineData(1, 50)] [InlineData(3, 128)] [InlineData(3, 210)]
+    [InlineData(0, 0)] [InlineData(0, 2)] [InlineData(0, 0x80)] [InlineData(0, 0x9F)] [InlineData(1, 1)] [InlineData(1, 50)] [InlineData(3, 128)] [InlineData(3, 210)]
     [InlineData(4, 50)] [InlineData(4, 219)] [InlineData(5, 144)] [InlineData(5, 255)] [InlineData(6, 0)] [InlineData(6, 50)]
     [InlineData(7, 0)] [InlineData(7, 255)]
     public void Group138AcceptsBoundaryValues(int index, byte value)
@@ -162,6 +162,17 @@ public sealed class OverlayV8Tests
         Assert.Equal(928, Free(m));
         Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(138, 692))[0]);
         Assert.Equal(920, Free(m));
+    }
+
+    [Theory] // the switch keeps a CAN-bit value (80h..9Fh) and reads anything else above 2 as off
+    [InlineData(0x85, 0x85)] [InlineData(0x9F, 0x9F)] [InlineData(0xA0, 0)] [InlineData(0x7F, 0)] [InlineData(2, 2)]
+    public void PopsSettingKeepsACanBitSwitch(byte flashed, int expected)
+    {
+        var image = V8Fixture.Bytes; image[V8Fixture.Defaults] = flashed;
+        var m = V8Fixture.Direct(image, V8Fixture.CallA("pops_setting"));
+        m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(3, 0);
+        V8Fixture.Execute(m);
+        Assert.Equal(expected, m.Cpu.R(4));
     }
 
     [Fact]

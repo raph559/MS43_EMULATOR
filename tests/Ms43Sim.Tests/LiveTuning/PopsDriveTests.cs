@@ -23,6 +23,9 @@ public sealed class PopsDriveFixture
     /// <summary>The lift settings with the AFR at lambda 1 (128), the stock overrun target.</summary>
     public static byte[] Lambda1() { var settings = On.ToArray(); settings[3] = 128; return settings; }
 
+    /// <summary>The lift settings with the switch on the A/C frame's bit 7 (615h byte 0), on while it is 1.</summary>
+    public static byte[] AcSwitch() { var settings = On.ToArray(); settings[0] = 0x97; return settings; }
+
     public IReadOnlyDictionary<string, DriveResult> Runs { get; }
 
     public static FlashedImage Image(byte[]? settings)
@@ -39,7 +42,7 @@ public sealed class PopsDriveFixture
     {
         var jobs = new (string Key, string Drive, byte[]? Settings)[]
         {
-            ("reference", "lift", null), ("lift", "lift", On), ("lift-lambda1", "lift", Lambda1()),
+            ("reference", "lift", null), ("lift", "lift", On), ("lift-lambda1", "lift", Lambda1()), ("ac-on", "lift-ac", AcSwitch()), ("ac-off", "lift", AcSwitch()),
             ("pedal-back", "pedal-back", Long()), ("clutch", "clutch", Long()),
             ("low-rpm", "low-rpm", Long(4, 100)), ("low-speed", "lift", Long(7, 90)),
             ("cold", "cold", On), ("downhill", "downhill", Long()), ("two-lifts", "two-lifts", On),
@@ -141,6 +144,13 @@ public sealed class PopsDriveTests(PopsDriveFixture fixture) : IClassFixture<Pop
         Assert.True(window.Start < 19.0, $"the window started at {window.Start}");
         Assert.True(window.End > 19.0 && window.End < 20.6, $"the window ended at {window.End}");
         Assert.True(Sample(run, "rpm_ecu", window.End) > Sample(run, "rpm_ecu", 19.0) + 100);
+    }
+
+    [Fact] // the A/C button as the switch: the emulated cluster sends 615h byte 0 = C0h with the A/C on
+    public void TheAcBitSwitchesPopsOnAndOff()
+    {
+        Assert.Single(Windows(fixture.Runs["ac-on"]));
+        Assert.Empty(Windows(fixture.Runs["ac-off"]));
     }
 
     [Fact]

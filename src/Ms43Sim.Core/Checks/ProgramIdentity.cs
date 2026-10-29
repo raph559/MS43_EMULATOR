@@ -30,7 +30,7 @@ public static class ProgramIdentity
     /// The live-tuning overlay 8 (pops on lift-off), as tools/build_live_overlay_v8.py builds it. Its eight flashed pops
     /// settings at 0x4FF80 are calibration the owner writes into the bin, so they do not change which program it is.
     /// </summary>
-    public const string Ms43X001LiveOverlayV8 = "23d6044eedab3d9bc9ff6fa5d92e22b71f36f7a346ebf6c6f927a0a4eacd3fd1";
+    public const string Ms43X001LiveOverlayV8 = "8aa73c9a28926becfee02a6424de42151f7daa1902283c7e2fc231e659b4aeb1";
 
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 
