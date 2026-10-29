@@ -8,8 +8,11 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// branch (0B:D434) and the throttle opening (09:B138). Direct CPU tests from the real sites against the donor.
 /// "Active" is FDF8.3 with the engine in fuelled overrun (FD2C.11).
 /// </summary>
-public sealed class PopsHookTests
+public abstract class PopsHookTests
 {
+    /// <summary>The overlay image under test: V8, or V9, which must behave the same.</summary>
+    protected abstract OverlayFixture Fixture { get; }
+
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
     private static readonly byte[] Settings = [1, 20, 23, 184, 50, 158, 30, 20];
 
@@ -19,9 +22,9 @@ public sealed class PopsHookTests
     private static readonly Hook Afr = new("afr", 0x0B, 0xD434, [0xBD438, 0xBD44E, 0xBD456, 0xBD464]);
     private static readonly Hook Throttle = new("throttle", 0x09, 0xB138, [0x9B13C]);
 
-    private static byte[] Image(byte[] settings, bool donor)
+    private byte[] Image(byte[] settings, bool donor)
     {
-        var image = donor ? TestBins.CarBytes : V8Fixture.Bytes;
+        var image = donor ? TestBins.CarBytes : Fixture.Bytes();
         if (!donor) settings.CopyTo(image, V8Fixture.Defaults);
         return image;
     }
@@ -152,3 +155,6 @@ public sealed class PopsHookTests
         Assert.Equal(open, (m.Bus.Peek16(0xFD9A) & 1 << 10) != 0);
     }
 }
+
+public sealed class PopsHookTestsOnV8 : PopsHookTests { protected override OverlayFixture Fixture => OverlayFixture.V8; }
+public sealed class PopsHookTestsOnV9 : PopsHookTests { protected override OverlayFixture Fixture => OverlayFixture.V9; }

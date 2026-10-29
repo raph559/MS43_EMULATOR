@@ -50,7 +50,7 @@ public static class V7Fixture
 public sealed class OverlayV7ReaderTests(ITestOutputHelper output)
 {
     [Theory]
-    [InlineData(7)] [InlineData(8)]
+    [InlineData(7)] [InlineData(8)] [InlineData(9)]
     public void AllWordReadersMatchStockInterpolationAndRegisterEffectsAcrossBothPoolsAndFallbacks(int version)
     {
         var cases = 0;
@@ -75,7 +75,7 @@ public sealed class OverlayV7ReaderTests(ITestOutputHelper output)
                     BinaryPrimitives.WriteUInt16LittleEndian(reference.AsSpan(at), (ushort)(physical % 0x4000));
                     BinaryPrimitives.WriteUInt16LittleEndian(reference.AsSpan(at+2), (ushort)(physical / 0x4000));
                 }
-                var image = version == 8 ? V8Fixture.Bytes : V7Fixture.Bytes;
+                var image = version == 9 ? V9Fixture.Bytes : version == 8 ? V8Fixture.Bytes : V7Fixture.Bytes;
                 var actual = V7Fixture.Direct(image, image.AsSpan(site, 4).ToArray());
                 var expected = V7Fixture.Direct(reference, TestBins.CarBytes.AsSpan(site, 4).ToArray());
                 foreach (var m in new[] { actual, expected })

@@ -119,7 +119,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(6)] [InlineData(8)]
+    [InlineData(6)] [InlineData(8)] [InlineData(9)]
     public void AllCompiledFeatureHooksMatchOriginalInstructionsAcrossFallbacksAndAllocations(int version)
     {
         var readers = V6FeatureFixture.Readers;
@@ -173,6 +173,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     [InlineData(3, false, 6)] [InlineData(3, true, 6)]
     [InlineData(16, false, 6)] [InlineData(16, true, 6)]
     [InlineData(3, false, 8)] [InlineData(16, true, 8)]
+    [InlineData(3, false, 9)] [InlineData(16, true, 9)]
     public void EveryCompiledPairKeepsItsTwoLoadsTogetherAcrossInterruptAndPecRequests(int page, bool pec, int version)
     {
         foreach (var read in V6FeatureFixture.Readers.Where(r => r.Operation == "PAIR"))

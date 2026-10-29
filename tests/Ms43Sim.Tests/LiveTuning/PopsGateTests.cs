@@ -7,17 +7,20 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// The pops window at the overrun-cut gate (0A:A7BC) and its 10 ms tick in housekeeping. Direct CPU tests: the
 /// state the gate reads is seeded, and the run stops at the stock "stay fuelled" (0A:B0F2) or "cut" (0A:A7C8) exit.
 /// </summary>
-public sealed class PopsGateTests
+public abstract class PopsGateTests
 {
+    /// <summary>The overlay image under test: V8, or V9, which must behave the same.</summary>
+    protected abstract OverlayFixture Fixture { get; }
+
     private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
     private const uint Left = 0x41FBC, Lowest = 0x41FBE;
     private static readonly byte[] ToGate = [0xFA, 0x0A, 0xBC, 0xA7];
     // Switch on, 2.0 s, -15 deg, 11.5 AFR, 1,600 rpm (50), 70.5 deg C (158), no throttle, 20 km/h.
     private static readonly byte[] On = [1, 20, 23, 184, 50, 158, 0, 20];
 
-    private static byte[] Image(byte[] settings, bool donor = false)
+    private byte[] Image(byte[] settings, bool donor = false)
     {
-        var image = donor ? TestBins.CarBytes : V8Fixture.Bytes;
+        var image = donor ? TestBins.CarBytes : Fixture.Bytes();
         if (!donor) settings.CopyTo(image, V8Fixture.Defaults);
         return image;
     }
@@ -190,10 +193,10 @@ public sealed class PopsGateTests
         Assert.False(Flag(m, 3));
     }
 
-    private static Machine Tick(ushort mode, bool active, bool used, ushort left, Inputs? inputs = null, byte[]? settings = null)
+    private Machine Tick(ushort mode, bool active, bool used, ushort left, Inputs? inputs = null, byte[]? settings = null)
     {
         var image = Image(settings ?? On);
-        var hk = V8Fixture.Symbol("hk") & 0xFFFF;
+        var hk = Fixture.Symbol("hk") & 0xFFFF;
         var i = inputs ?? new Inputs();
         var m = V8Fixture.Direct(image, [0xFA, 0x0C, (byte)hk, (byte)(hk >> 8)]);
         V8Fixture.PutByte(m, 0x4007F, i.Rpm);
@@ -273,3 +276,6 @@ public sealed class PopsGateTests
         Assert.Equal(0x4010, m.Bus.Peek16(0xFDF8));
     }
 }
+
+public sealed class PopsGateTestsOnV8 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V8; }
+public sealed class PopsGateTestsOnV9 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V9; }
