@@ -65,7 +65,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         return m;
     }
 
-    private static void Execute(Machine m, int length = 4)
+    internal static void Execute(Machine m, int length = 4)
     {
         var end = Trampoline + (uint)length;
         m.Cpu.Jump(0x0C, 0x1000);
@@ -149,6 +149,8 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
             for (var cv = 0; cv < 4; cv++)
             {
                 Allocation(actual, read.Group, live, poolB, extra, state, version);
+                // From V9 an activation byte of 80h and up is a trigger, by design: TriggerTests covers it, not the raw read.
+                if (version >= 9 && read.Offset == 0 && (state == "live" ? live : flash)[0] >= 0x80) continue;
                 var expected = state == "live" ? edited : flashed;
                 var psw = (ushort)(0x0459 | cv << 1);
                 var operand = new byte[] { 0, 0x7F, 0x80, 0xFF }[cv];
@@ -211,7 +213,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         }
     }
 
-    private static byte[] FeatureData(int group) => group switch
+    internal static byte[] FeatureData(int group) => group switch
     {
         124 => [1, 30, 100, 140, 75, 128, 85, 128],
         125 => [1, 20, 100, 132, 75, 128, 85, 128],
@@ -219,14 +221,15 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         _ => throw new ArgumentOutOfRangeException(nameof(group)),
     };
 
-    private static Machine Feature(int group, byte[]? data = null, bool flashedDisabled = false,
-        string state = "live")
+    internal static Machine Feature(int group, byte[]? data = null, bool flashedDisabled = false,
+        string state = "live", int version = 6, byte? flashed = null)
     {
-        var image = V6FeatureFixture.Bytes;
+        var image = V6FeatureFixture.BytesOf(version);
         if (flashedDisabled) image[V6FeatureFixture.Address(group)] = 0;
+        if (flashed is { } config) image[V6FeatureFixture.Address(group)] = config;
         var function = group switch { 124 => 0xFCF2, 125 => 0xFD44, 126 => 0xFDA4, _ => throw new ArgumentOutOfRangeException(nameof(group)) };
         var m = Direct(image, [0xDA, 0x0B, (byte)function, (byte)(function >> 8)]);
-        Allocation(m, group, data ?? FeatureData(group), state: state);
+        Allocation(m, group, data ?? FeatureData(group), state: state, version: version);
         Inputs(m);
         return m;
     }
@@ -238,7 +241,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         m.Bus.Poke16(address & ~1u, (ushort)((word & ~(255 << shift)) | value << shift));
     }
 
-    private static void Inputs(Machine m, byte speed = 30, byte pedal = 100, bool clutch = true,
+    internal static void Inputs(Machine m, byte speed = 30, byte pedal = 100, bool clutch = true,
         byte cruise = 6, bool sport = false, byte rpm = 100)
     {
         PutByte(m, 0x4047F, speed);
@@ -249,13 +252,14 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         m.Bus.Poke16(0xFD18, sport ? (ushort)2 : (ushort)0);
     }
 
-    private static void Active(Machine m, int group, bool expected) =>
+    internal static void Active(Machine m, int group, bool expected) =>
         Assert.Equal(expected, (m.Bus.Peek16(0xFDF8) & 1 << (group - 124)) != 0);
 
-    [Fact]
-    public void LaunchControlUsesLiveEntryAndExitThresholdsAndRetainsItsClutchReleaseBehavior()
+    [Theory]
+    [InlineData(6)] [InlineData(9)]
+    public void LaunchControlUsesLiveEntryAndExitThresholdsAndRetainsItsClutchReleaseBehavior(int version)
     {
-        var m = Feature(124);
+        var m = Feature(124, version: version);
         Inputs(m, speed: 0, pedal: 99);
         Execute(m); Active(m, 124, false);
         Inputs(m, speed: 1);
@@ -276,10 +280,11 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Execute(m); Active(m, 124, false);
     }
 
-    [Fact]
-    public void NoLiftShiftUsesLiveEntryGatesAndReleasesOnClutchOrPedal()
+    [Theory]
+    [InlineData(6)] [InlineData(9)]
+    public void NoLiftShiftUsesLiveEntryGatesAndReleasesOnClutchOrPedal(int version)
     {
-        var m = Feature(125);
+        var m = Feature(125, version: version);
         Inputs(m, speed: 19);
         Execute(m); Active(m, 125, false);
         Inputs(m, speed: 20, pedal: 99);
@@ -299,10 +304,11 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Execute(m); Active(m, 125, false);
     }
 
-    [Fact]
-    public void RollingAntiLagUsesLivePedalThresholdAndReleasesOnEveryOriginalGate()
+    [Theory]
+    [InlineData(6)] [InlineData(9)]
+    public void RollingAntiLagUsesLivePedalThresholdAndReleasesOnEveryOriginalGate(int version)
     {
-        var m = Feature(126);
+        var m = Feature(126, version: version);
         Inputs(m, sport: true);
         Execute(m); Active(m, 126, false);
         Inputs(m, cruise: 5);
@@ -321,11 +327,11 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124)] [InlineData(125)]
-    public void ConditionalConfigurationRequiresItsOriginalEntryGate(int group)
+    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(124, 9)] [InlineData(125, 9)]
+    public void ConditionalConfigurationRequiresItsOriginalEntryGate(int group, int version)
     {
         var data = FeatureData(group); data[0] = 2;
-        var m = Feature(group, data);
+        var m = Feature(group, data, version: version);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30);
         Execute(m); Active(m, group, false);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30, sport: true);
@@ -335,10 +341,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124)] [InlineData(125)] [InlineData(126)]
-    public void LiveConfigurationZeroReleasesOnlyItsOwnLatchAndCanBeEnabledAgain(int group)
+    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(126, 6)] [InlineData(124, 9)] [InlineData(125, 9)] [InlineData(126, 9)]
+    public void LiveConfigurationZeroReleasesOnlyItsOwnLatchAndCanBeEnabledAgain(int group, int version)
     {
-        var m = Feature(group);
+        var m = Feature(group, version: version);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30);
         Execute(m); Active(m, group, true);
         m.Bus.Poke16(0xFDF8, 0xA5F7);
@@ -354,12 +360,12 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124)] [InlineData(125)] [InlineData(126)]
-    public void FallingBackToFlashedConfigurationZeroAlsoReleasesTheActiveLatch(int group)
+    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(126, 6)] [InlineData(124, 9)] [InlineData(125, 9)] [InlineData(126, 9)]
+    public void FallingBackToFlashedConfigurationZeroAlsoReleasesTheActiveLatch(int group, int version)
     {
         foreach (var state in new[] { "uninitialised", "disabled", "expired" })
         {
-            var m = Feature(group, flashedDisabled: true, state: state);
+            var m = Feature(group, flashedDisabled: true, state: state, version: version);
             m.Bus.Poke16(0xFDF8, 0xA5F7);
             Execute(m);
             Assert.Equal((ushort)(0xA5F7 & ~(1 << (group - 124))), m.Bus.Peek16(0xFDF8));
