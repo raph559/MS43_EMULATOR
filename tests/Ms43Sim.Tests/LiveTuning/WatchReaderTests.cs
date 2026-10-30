@@ -40,11 +40,10 @@ public sealed class WatchReaderTests
             Watch.OtherMap => ((ushort)0x1F, (ushort)0x169C),
             Watch.OtherOffset => (Page, (ushort)(Offset + 2)),
             Watch.This => (r13, r12),
+            Watch.LiveCopy => ((ushort)0x1F, (ushort)0x169C),        // the flash map is elsewhere; the read is its live copy
             _ => ((ushort)0xFFFF, (ushort)0),
         };
-        m.Bus.Poke16(V9Fixture.WPage, page); m.Bus.Poke16(V9Fixture.WOff, offset);
-        m.Bus.Poke16(V9Fixture.APage, watch == Watch.LiveCopy ? r13 : (ushort)0xFFFF);
-        m.Bus.Poke16(V9Fixture.AOff, watch == Watch.LiveCopy ? r12 : (ushort)0);
+        V9Fixture.Arm(m, page, offset, watch == Watch.LiveCopy ? r13 : (ushort)0xFFFF, watch == Watch.LiveCopy ? r12 : (ushort)0);
         return m;
     }
 

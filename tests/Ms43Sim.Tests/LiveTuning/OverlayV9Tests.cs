@@ -14,6 +14,19 @@ public static class V9Fixture
     public const uint WOff = 0x41FA8, WPage = 0x41FAA, AOff = 0x41FAC, APage = 0x41FAE, Kind = 0x41FB0, Count = 0x41FB1,
         Row = 0x41FB2, RowF = 0x41FB4, Col = 0x41FB6, ColF = 0x41FB8, Cols = 0x41FBA, RowIx = 0x41FBB;
 
+    // The hooks' fast state: FDF8.5 a watch is set, FDF8.6 it has a live copy.
+    public const uint Flags = 0xFDF8;
+
+    /// <summary>Sets the watch as watch_set and watch_alias leave it, for a CPU test that starts inside a reader.</summary>
+    public static void Arm(Machine m, ushort page, ushort offset, ushort copyPage = 0xFFFF, ushort copyOffset = 0)
+    {
+        m.Bus.Poke16(WPage, page); m.Bus.Poke16(WOff, offset); m.Bus.Poke16(APage, copyPage); m.Bus.Poke16(AOff, copyOffset);
+        var flags = (ushort)(m.Bus.Peek16(Flags) & ~0x60);
+        if (page != 0xFFFF) flags |= 0x20;
+        if (page != 0xFFFF && copyPage != 0xFFFF) flags |= 0x40;
+        m.Bus.Poke16(Flags, flags);
+    }
+
     public static byte[] Bytes
     {
         get
@@ -178,6 +191,44 @@ public sealed class OverlayV9Tests
         Watch(m, 0x775D4);
         Assert.Equal(new byte[] { 0xA0, 0, 0, 0 }, Watch(m, 0));
         Assert.Equal(0xFFFF, m.Bus.Peek16(V9Fixture.WPage));
+    }
+
+    internal static bool Armed(Machine m) => (m.Bus.Peek16(V9Fixture.Flags) & 0x20) != 0;
+
+    internal static bool HasCopy(Machine m) => (m.Bus.Peek16(V9Fixture.Flags) & 0x40) != 0;
+
+    [Fact]
+    public void WatchArmsTheHooksFastCompareAndClearingDisarmsIt()
+    {
+        var m = Start();
+        Assert.False(Armed(m));
+        Watch(m, 0x775D4);
+        Assert.True(Armed(m));
+        Watch(m, 0);
+        Assert.False(Armed(m));
+    }
+
+    [Fact]
+    public void HousekeepingClearsAnArmBitLeftWithNoWatch()
+    {
+        var m = Start();
+        Watch(m, 0);
+        m.Bus.Poke16(V9Fixture.Flags, (ushort)(m.Bus.Peek16(V9Fixture.Flags) | 0x60));   // FDF8 as it may power up
+        Housekeeping(m, 1);
+        Assert.False(Armed(m));
+        Assert.False(HasCopy(m));
+    }
+
+    [Theory] // owner, 2026-10-29: 20.0 deg TPS
+    [InlineData(200, true)] [InlineData(201, false)] [InlineData(255, false)]
+    public void PopsThrottleOpeningGoesTo200(byte value, bool accepted)
+    {
+        var m = Start();
+        var copy = V8Fixture.Flashed.ToArray(); copy[6] = value;
+        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(138, 704))[0]);
+        var reply = Mutate(m, [0x6D, 2, 138, 0, 0, .. copy]);
+        if (accepted) Assert.Equal(0xA0, reply[0]);
+        else Assert.Equal(new byte[] { 0xB1, 4 }, reply);
     }
 
     [Fact]

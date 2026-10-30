@@ -81,7 +81,7 @@ public sealed class WatchLogTests
         isr.ToArray().CopyTo(image, 0x41030);
         var m = OverlayV9Tests.Boot(image);
         SeedRecord(m);
-        m.Bus.Poke16(V9Fixture.WPage, Page); m.Bus.Poke16(V9Fixture.WOff, Offset); m.Bus.Poke16(V9Fixture.APage, 0xFFFF);
+        V9Fixture.Arm(m, Page, Offset);
         V9Fixture.PutByte(m, 0xFB6B, 3); m.Bus.Poke16(0xE390, 0x8000); V9Fixture.PutByte(m, 0xFB6C, 5);
         m.Bus.Poke16(0xE392, 0x4000); V9Fixture.PutByte(m, 0xFB6D, 12);
         m.Cpu.Psw = 0x0800;

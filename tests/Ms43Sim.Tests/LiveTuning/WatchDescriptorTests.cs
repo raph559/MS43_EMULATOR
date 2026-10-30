@@ -42,8 +42,7 @@ public sealed class WatchDescriptorTests
         m.Cpu.SetR(13, Inputs[sample].Row); m.Cpu.SetR(14, Inputs[sample].Col);
         m.Cpu.Psw = 0xF800;
         var (page, offset) = watched ? Data(lookup) : ((ushort)0x1F, (ushort)0x169C);
-        m.Bus.Poke16(V9Fixture.WPage, page); m.Bus.Poke16(V9Fixture.WOff, offset);
-        m.Bus.Poke16(V9Fixture.APage, 0xFFFF); m.Bus.Poke16(V9Fixture.AOff, 0);
+        V9Fixture.Arm(m, page, offset);
         return m;
     }
 
@@ -71,7 +70,7 @@ public sealed class WatchDescriptorTests
         {
             var expected = Seed(TestBins.CarBytes, lookup, sample, false);
             var actual = Seed(V9Fixture.Bytes, lookup, sample, false);
-            if (watch == "none") foreach (var m in new[] { expected, actual }) m.Bus.Poke16(V9Fixture.WPage, 0xFFFF);
+            if (watch == "none") foreach (var m in new[] { expected, actual }) V9Fixture.Arm(m, 0xFFFF, 0);
             ushort dppExpected = 0, dppActual = 0;
             var after = lookup.Site + 4;
             expected.OnInstruction(after, x => dppExpected = x.Cpu.Dpp(0));
@@ -131,8 +130,7 @@ public sealed class WatchDescriptorTests
             m.Bus.Poke16(0xE6D8, (ushort)(131 << 8 | 3)); m.Bus.Poke16(0xE6DA, 0xFF00);      // On, at logical 0
             for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
             m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(12, (ushort)descriptor); m.Cpu.SetR(13, 1000); m.Cpu.SetR(14, 128);
-            m.Bus.Poke16(V9Fixture.WPage, (ushort)(address / 0x4000)); m.Bus.Poke16(V9Fixture.WOff, (ushort)(address % 0x4000));
-            m.Bus.Poke16(V9Fixture.APage, alias ? (ushort)0x10 : (ushort)0xFFFF); m.Bus.Poke16(V9Fixture.AOff, 0x1D00);
+            V9Fixture.Arm(m, (ushort)(address / 0x4000), (ushort)(address % 0x4000), alias ? (ushort)0x10 : (ushort)0xFFFF, 0x1D00);
             V7Fixture.Execute(m);
             return V9Fixture.Byte(m, V9Fixture.Count);
         }

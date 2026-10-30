@@ -36,7 +36,7 @@ public static class ProgramIdentity
     /// The live-tuning overlay 9 (V8, the watched map and the LC/NLS/RAL triggers), as tools/build_live_overlay_v9.py
     /// builds it. Its flashed pops settings are calibration, as V8's are.
     /// </summary>
-    public const string Ms43X001LiveOverlayV9 = "fdf282dfe78c1b24432a24d05f6eceeedfdcc381b82251b9b1d680dbb92ea745";
+    public const string Ms43X001LiveOverlayV9 = "5906167bdfeb39851fe1d59b2c32eab4197d6ba63d5296be60906b14d05569c1";
 
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 

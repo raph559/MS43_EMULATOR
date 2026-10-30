@@ -39,6 +39,7 @@ public sealed class WatchAliasTests
         var a = Watched(40);
         Assert.Equal(0x10, a.Bus.Peek16(V9Fixture.APage));
         Assert.Equal(0x1D28, a.Bus.Peek16(V9Fixture.AOff));
+        Assert.True(OverlayV9Tests.HasCopy(a));
 
         var b = Watched(712);
         Assert.Equal(3, b.Bus.Peek16(V9Fixture.APage));
@@ -59,6 +60,7 @@ public sealed class WatchAliasTests
         };
         Assert.Equal(0xA0, reply[0]);
         Assert.Equal(0xFFFF, m.Bus.Peek16(V9Fixture.APage));
+        Assert.False(OverlayV9Tests.HasCopy(m));
         if (change == "all off") return;
         Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(2, 40))[0]);  // another table takes the same RAM
         Assert.Equal(0, ReadAt(m, 0x10, 0x1D28));
@@ -83,5 +85,6 @@ public sealed class WatchAliasTests
         OverlayV9Tests.Watch(m, 0x70002);
         OverlayV9Tests.Housekeeping(m, 1);
         Assert.Equal(0xFFFF, m.Bus.Peek16(V9Fixture.APage));
+        Assert.False(OverlayV9Tests.HasCopy(m));
     }
 }

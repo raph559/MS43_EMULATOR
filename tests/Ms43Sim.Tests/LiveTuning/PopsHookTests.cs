@@ -13,6 +13,9 @@ public abstract class PopsHookTests
     /// <summary>The overlay image under test: V8, or V9, which must behave the same.</summary>
     protected abstract OverlayFixture Fixture { get; }
 
+    /// <summary>The throttle opening's limit (0.1 °TPS) and the 86A4 units it adds: V8 5.0, V9 20.0 (owner, 2026-10-29).</summary>
+    protected abstract (byte Limit, int Add) ThrottleLimit { get; }
+
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
     private static readonly byte[] Settings = [1, 20, 23, 184, 50, 158, 30, 20];
 
@@ -111,7 +114,7 @@ public abstract class PopsHookTests
     }
 
     [Theory]
-    [InlineData(1000, 30, 2638)] [InlineData(0xFF00, 50, 0xFFFF)] [InlineData(1000, 255, 3731)]
+    [InlineData(1000, 30, 2638)] [InlineData(0xFF00, 50, 0xFFFF)]
     public void ThrottleAddsTheSetOpening(int r4, byte opening, int expected)
     {
         var settings = Settings.ToArray(); settings[6] = opening;
@@ -120,6 +123,17 @@ public abstract class PopsHookTests
         Assert.Equal(0x9B13Cu, Run(m, Throttle));
         Assert.Equal(expected, m.Cpu.R(4));
         Assert.Equal(expected, m.Bus.Peek16(0x406A4));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void ThrottleAtOrAboveItsLimitAddsTheLimit(bool above)
+    {
+        var settings = Settings.ToArray(); settings[6] = above ? (byte)255 : ThrottleLimit.Limit;
+        var m = Seed(Image(settings, donor: false), Overrun, 0x4008, 0x0800, 0);
+        m.Cpu.SetR(4, 1000);
+        Assert.Equal(0x9B13Cu, Run(m, Throttle));
+        Assert.Equal(1000 + ThrottleLimit.Add, m.Cpu.R(4));
     }
 
     [Theory] // final review C1: with the pedal released the stock code skips the target path; a window runs it
@@ -156,5 +170,14 @@ public abstract class PopsHookTests
     }
 }
 
-public sealed class PopsHookTestsOnV8 : PopsHookTests { protected override OverlayFixture Fixture => OverlayFixture.V8; }
-public sealed class PopsHookTestsOnV9 : PopsHookTests { protected override OverlayFixture Fixture => OverlayFixture.V9; }
+public sealed class PopsHookTestsOnV8 : PopsHookTests
+{
+    protected override OverlayFixture Fixture => OverlayFixture.V8;
+    protected override (byte Limit, int Add) ThrottleLimit => (50, 2731);
+}
+
+public sealed class PopsHookTestsOnV9 : PopsHookTests
+{
+    protected override OverlayFixture Fixture => OverlayFixture.V9;
+    protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);    // 54.625 X by shifts
+}
