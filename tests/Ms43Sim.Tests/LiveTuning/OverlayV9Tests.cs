@@ -59,11 +59,12 @@ public sealed record OverlayFixture(string Name, Func<byte[]> Bytes, Func<string
 
 public sealed class OverlayV9Tests
 {
-    private static Machine Boot(byte[]? image = null)
+    internal static Machine Boot(byte[]? image = null)
     {
         var bytes = image ?? V9Fixture.Bytes; bytes.AsSpan(0x1FC8A, 4).CopyTo(bytes.AsSpan(0x41000));
         var hk = V9Fixture.Symbol("hk") & 0xFFFF;                    // 0C:1010 enters housekeeping, which ends at 0D:80DE
         new byte[] { 0xFA, 0x0C, (byte)hk, (byte)(hk >> 8) }.CopyTo(bytes, 0x41010);
+        new byte[] { 0xDA, 0x0D, 0x9A, 0x02 }.CopyTo(bytes, 0x41020);  // 0C:1020 calls reader 0D:029A, back at 0C:1024
         var m = Machine.Create(FlashImageBuilder.Raw(FirmwareImage.FromBytes(bytes)));
         m.PowerOn(); m.Watchdog.Disable(); m.Bus.XperipheralsEnabled = true;
         m.Sfrs.Write16(0xFE1A, 0x0401); m.Sfrs.Write16(0xFF16, 0x04AF);
@@ -72,7 +73,7 @@ public sealed class OverlayV9Tests
         return m;
     }
 
-    private static Machine Start(byte[]? image = null)
+    internal static Machine Start(byte[]? image = null)
     {
         var m = Boot(image);
         Assert.Equal(0xA0, Command(m, V3Fixture.Open())[0]);
@@ -92,12 +93,12 @@ public sealed class OverlayV9Tests
     internal static byte[] Watch(Machine m, uint address) =>
         Command(m, [0x6D, 0x0C, (byte)(address >> 16), (byte)(address >> 8), (byte)address]);
 
-    private static uint Revision(Machine m) => BinaryPrimitives.ReadUInt32LittleEndian(m.Bus.Xram.AsSpan(0x7C4));
-    private static byte[] Mutate(Machine m, byte[] payload) => Command(m, V3Fixture.Mutate(payload, Revision(m)));
+    internal static uint Revision(Machine m) => BinaryPrimitives.ReadUInt32LittleEndian(m.Bus.Xram.AsSpan(0x7C4));
+    internal static byte[] Mutate(Machine m, byte[] payload) => Command(m, V3Fixture.Mutate(payload, Revision(m)));
     private static int Free(Machine m) => BinaryPrimitives.ReadUInt16BigEndian(Command(m, [0x6D, 0]).AsSpan(47, 2));
 
     /// <summary>Runs the housekeeping entry once, with the 10 ms counter at <paramref name="ticks"/>.</summary>
-    private static void Housekeeping(Machine m, ushort ticks)
+    internal static void Housekeeping(Machine m, ushort ticks)
     {
         m.Bus.Poke16(0xE2A6, ticks);
         m.Cpu.SetR(0, 0xF780);
