@@ -79,6 +79,7 @@ public sealed class KLineTester : IKLineDevice
     IKLinePort? port;
     ulong origin;                                                // the drive's cycle at which the scheduler reads 0
     bool polling;
+    Request pollRequest = PollRequest;                           // what a kline poll line polls with
     Flight? flight;
     ulong notBefore;                                             // no request leaves before this cycle: the gap or the pause after the last exchange
     long startToken;                                             // a start event of an older token has been superseded
@@ -150,6 +151,7 @@ public sealed class KLineTester : IKLineDevice
                 break;
             case KLineVerb.Poll:
                 polling = true;
+                pollRequest = action.Bytes.Count > 0 ? new Request(Ds2.Frame(action.Bytes)) : PollRequest;
                 break;
             case KLineVerb.Quiet:
                 Quiet();
@@ -241,7 +243,7 @@ public sealed class KLineTester : IKLineDevice
                 return every.Request;
             }
         }
-        return polling ? PollRequest : null;
+        return polling ? pollRequest : null;
     }
 
     void Begin(Request request)

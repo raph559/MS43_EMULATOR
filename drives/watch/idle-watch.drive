@@ -1,0 +1,16 @@
+# The idle drive with V9's watch on the RON98 idle ignition map (0x775D4): read at idle, not during the blip.
+drive idle-watch
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+kline connect
+kline pause 0
+kline poll 6D 0B
+1 idle                                 # the first request after the speed switch can be lost: watch once polling runs
+kline watch 775D4
+19 idle
+5 idle ac=1                            # the A/C request
+3 drive gear=N rpm=2500 speed=0        # a blip in neutral at a standstill
+2 drive gear=N rpm=2500..900 speed=0   # eased back to idle
+20 idle

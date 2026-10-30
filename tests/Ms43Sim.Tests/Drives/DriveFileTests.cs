@@ -116,7 +116,9 @@ public class DriveFileTests
     [InlineData("drive k\n\n# a note\nkline fetch   # not a verb\n3 on", 4, "unknown")]
     // a verb is needed, and the four plain verbs take nothing
     [InlineData("drive k\nkline\n3 on", 2, "verb")]
-    [InlineData("drive k\nkline poll now\n3 on", 2, "no arguments")]
+    [InlineData("drive k\nkline poll now\n3 on", 2, "is not a hex byte")]
+    [InlineData("drive k\nkline watch\n3 on", 2, "one hex address")]
+    [InlineData("drive k\nkline watch 80000\n3 on", 2, "one hex address")]
     [InlineData("drive k\nkline connect 12 08\n3 on", 2, "no arguments")]
     // a byte is exactly two hex digits
     [InlineData("drive k\nkline send 6D 0\n3 on", 2, "hex")]

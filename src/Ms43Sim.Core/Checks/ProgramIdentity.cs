@@ -32,6 +32,12 @@ public static class ProgramIdentity
     /// </summary>
     public const string Ms43X001LiveOverlayV8 = "8aa73c9a28926becfee02a6424de42151f7daa1902283c7e2fc231e659b4aeb1";
 
+    /// <summary>
+    /// The live-tuning overlay 9 (V8, the watched map and the LC/NLS/RAL triggers), as tools/build_live_overlay_v9.py
+    /// builds it. Its flashed pops settings are calibration, as V8's are.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV9 = "fdf282dfe78c1b24432a24d05f6eceeedfdcc381b82251b9b1d680dbb92ea745";
+
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 
     public static string Of(FirmwareImage image)
@@ -56,8 +62,13 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV6 => "MS43X001 with the live-tuning overlay 6",
         Ms43X001LiveOverlayV7 => "MS43X001 with the live-tuning overlay 7",
         Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
-        _ when OfWithFlashedPops(image) == Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
-        _ => null,
+        Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
+        _ => OfWithFlashedPops(image) switch
+        {
+            Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
+            Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
+            _ => null,
+        },
     };
 
     /// <summary>The identity with the V8 pops settings put back to their built values, and the checksums with them.</summary>

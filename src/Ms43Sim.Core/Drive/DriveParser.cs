@@ -39,7 +39,7 @@ public static partial class DriveParser
 
     const string ModeNames = "on, off, crank, idle, drive or stall";
 
-    const string KLineVerbNames = "connect, disconnect, poll, quiet, send, every, raw or pause";
+    const string KLineVerbNames = "connect, disconnect, poll, quiet, send, every, raw, pause or watch";
 
     /// <summary>
     /// A DS2 frame is the address, the length, the payload and the xor, and the length byte counts them
@@ -186,8 +186,10 @@ public static partial class DriveParser
     }
 
     /// <summary>
-    /// A <c>kline</c> line (plan 5): <c>connect</c>, <c>disconnect</c>, <c>poll</c> and <c>quiet</c> take
-    /// nothing; <c>send HH…</c> is a DS2 request's payload (1–252 bytes, from the command byte on),
+    /// A <c>kline</c> line (plan 5): <c>connect</c>, <c>disconnect</c> and <c>quiet</c> take nothing; <c>poll</c> takes
+    /// nothing (the app's 0B B0) or the payload it polls with instead (V9: <c>poll 6D 0B</c>); <c>watch ADDR</c> sets V9's
+    /// watch to the hex address ADDR (6D 0C a2 a1 a0, sent before the next poll);
+    /// <c>send HH…</c> is a DS2 request's payload (1–252 bytes, from the command byte on),
     /// <c>every SECONDS HH…</c> the same payload sent again every SECONDS (above 0, at most 60) and
     /// <c>raw HH…</c> bytes put on the line as they stand (1–255). A byte is two hex digits.
     /// </summary>
@@ -205,11 +207,20 @@ public static partial class DriveParser
             "every" => KLineVerb.Every,
             "raw" => KLineVerb.Raw,
             "pause" => KLineVerb.Pause,
+            "watch" => KLineVerb.Send,
             _ => throw Fail(line, $"unknown kline verb '{tokens[1]}': {KLineVerbNames}"),
         };
         var arguments = tokens[2..];
+        if (tokens[1] == "watch")
+        {
+            if (arguments.Length != 1 || !uint.TryParse(arguments[0], System.Globalization.NumberStyles.HexNumber, null, out var address)
+                || address >= 0x80000)
+                throw Fail(line, "kline watch takes one hex address below 80000, the map's data address (0 stops the watch)");
+            return new KLineAction(verb, new byte[] { 0x6D, 0x0C, (byte)(address >> 16), (byte)(address >> 8), (byte)address }, 0, line);
+        }
         switch (verb)
         {
+            case KLineVerb.Poll when arguments.Length > 0:
             case KLineVerb.Send or KLineVerb.Raw:
                 return new KLineAction(verb, KLineBytes(verb, arguments, line), 0, line);
             case KLineVerb.Every:

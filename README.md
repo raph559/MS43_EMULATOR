@@ -210,7 +210,13 @@ set coolant=90 oil=90 intake=33 ambient=20
     moves the tester to 125,000;
   - `kline disconnect`: `12 08 91 00 25 80 00 2E` at the current baud; A0 moves it to 9,600;
   - `kline poll`: the app's `12 05 0B B0 AC`, again and again until `kline quiet`, which drops what
-    is queued (a request on the line still finishes);
+    is queued (a request on the line still finishes); `kline poll BYTES` polls with that payload
+    instead, e.g. `kline poll 6D 0B` for the V9 overlay's log with the watch record;
+  - `kline watch ADDR`: the V9 overlay's `6D 0C a2 a1 a0`, which watches the map at the hex data
+    address ADDR (below 80000; 0 stops the watch). It is queued like a send, so it goes before the
+    next poll. The first request after the connect's speed switch can be lost, so a drive sends it
+    once polling runs (see `sim/drives/watch`);
+  - `kline pause MS`: the wait after each reply, 0 to 1000 ms (default 20);
   - `kline send BYTES`: one DS2 frame with these payload bytes; `kline raw BYTES`: these exact bytes,
     unframed; `kline every SECONDS BYTES`: that frame every SECONDS (above 0, at most 60). The first
     token after `every` is always the period, so `kline every 12 05 0B B0` is every 12 s with

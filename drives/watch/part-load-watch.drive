@@ -1,0 +1,16 @@
+# The part-load drive with V9's watch on the RON98 part-load ignition map (0x77315), logging with sub 11 at full speed.
+drive part-load-watch
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+kline connect
+kline pause 0
+kline poll 6D 0B
+1 idle                                 # the first request after the speed switch can be lost: watch once polling runs
+kline watch 77315
+5 idle
+10 drive gear=3 speed=40..80 pedal=15   # pulling away gently in 3rd
+20 drive gear=4 speed=90 pedal=12       # cruising in 4th
+5 drive gear=4 speed=90..20 pedal=0     # the coast
+5 idle

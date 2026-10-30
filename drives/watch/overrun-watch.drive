@@ -1,0 +1,16 @@
+# The overrun drive with V9's watch on the overrun-cut ignition map ip_iga_puc__n__tco (0x7717D), read only while the cut is on.
+drive overrun-watch
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+kline connect
+kline pause 0
+kline poll 6D 0B
+1 idle                                 # the first request after the speed switch can be lost: watch once polling runs
+kline watch 7717D
+5 idle
+6 drive gear=4 speed=25..110 pedal=30    # accelerating in 4th
+10 drive gear=4 speed=110..30 pedal=0    # the lift: the overrun fuel cut
+2 drive gear=4 speed=30 pedal=0 clutch=1 # the clutch in
+5 idle
