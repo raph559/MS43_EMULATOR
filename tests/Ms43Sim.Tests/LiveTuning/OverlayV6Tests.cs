@@ -119,7 +119,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(6)] [InlineData(8)] [InlineData(9)]
+    [InlineData(6)] [InlineData(8)] [InlineData(9)] [InlineData(10)]
     public void AllCompiledFeatureHooksMatchOriginalInstructionsAcrossFallbacksAndAllocations(int version)
     {
         var readers = V6FeatureFixture.Readers;
@@ -256,7 +256,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Assert.Equal(expected, (m.Bus.Peek16(0xFDF8) & 1 << (group - 124)) != 0);
 
     [Theory]
-    [InlineData(6)] [InlineData(9)]
+    [InlineData(6)] [InlineData(9)] [InlineData(10)]
     public void LaunchControlUsesLiveEntryAndExitThresholdsAndRetainsItsClutchReleaseBehavior(int version)
     {
         var m = Feature(124, version: version);
@@ -281,7 +281,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(6)] [InlineData(9)]
+    [InlineData(6)] [InlineData(9)] [InlineData(10)]
     public void NoLiftShiftUsesLiveEntryGatesAndReleasesOnClutchOrPedal(int version)
     {
         var m = Feature(125, version: version);
@@ -305,7 +305,7 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(6)] [InlineData(9)]
+    [InlineData(6)] [InlineData(9)] [InlineData(10)]
     public void RollingAntiLagUsesLivePedalThresholdAndReleasesOnEveryOriginalGate(int version)
     {
         var m = Feature(126, version: version);

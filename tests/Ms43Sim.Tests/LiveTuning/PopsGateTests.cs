@@ -279,3 +279,4 @@ public abstract class PopsGateTests
 
 public sealed class PopsGateTestsOnV8 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V8; }
 public sealed class PopsGateTestsOnV9 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V9; }
+public sealed class PopsGateTestsOnV10 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V10; }

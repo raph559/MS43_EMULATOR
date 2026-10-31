@@ -181,3 +181,9 @@ public sealed class PopsHookTestsOnV9 : PopsHookTests
     protected override OverlayFixture Fixture => OverlayFixture.V9;
     protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);    // 54.625 X by shifts
 }
+
+public sealed class PopsHookTestsOnV10 : PopsHookTests
+{
+    protected override OverlayFixture Fixture => OverlayFixture.V10;
+    protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);
+}

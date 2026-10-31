@@ -1,0 +1,244 @@
+using System.Buffers.Binary;
+using System.Text.Json;
+using Ms43Sim.Core;
+using Ms43Sim.Tests.Support;
+
+namespace Ms43Sim.Tests.LiveTuning;
+
+/// <summary>
+/// The V10 image: V9 plus pops' throttle stabs and the downshift blip, with four new 8-byte settings groups (139
+/// pops stabs, 140 blip, 141 its gears and tap, 142 its ratios). Its machines and helpers are V8's.
+/// </summary>
+public static class V10Fixture
+{
+    public const int Defaults = V8Fixture.Defaults;
+
+    /// <summary>Groups 138..142 as flashed: pops (4.0 s, 10.0 °TPS), stabs, blip, gears and tap, ratios.</summary>
+    public static readonly byte[] Flashed =
+    [
+        0x00, 0x28, 0x17, 0xB8, 0x32, 0x9E, 0x64, 0x14,
+        0x14, 0x4B, 0x0F, 0x19, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x4B, 0x19, 0x5A,
+        0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x00, 0x00,
+        0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    public static byte[] Group(int id) => Flashed.AsSpan((id - 138) * 8, 8).ToArray();
+
+    // V10's state at the end of pool A (logical 668..679), below the watch record, and its FDF8 bits.
+    public const uint PopsT = 0x41F9C, BlipAdd = 0x41F9E, BlipLeft = 0x41FA0, PopsPh = 0x41FA2, BlipCl = 0x41FA3,
+        BlipTgt = 0x41FA4, BlipTap = 0x41FA5, Flags = 0xFDF8;
+    public const int PopsStab = 7, BlipOn = 8, BlipUsed = 9, BlipArmed = 10, BlipTapping = 11, BlipHold = 12, Guard = 13;
+
+    public static byte[] Bytes
+    {
+        get
+        {
+            var image = TestBins.CarBytes;
+            foreach (var (at, data) in LiveOverlayBin.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+                         "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex")))) data.CopyTo(image, at);
+            return image;
+        }
+    }
+
+    public static int Symbol(string name)
+    {
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+            "defs/live_overlay_v10_symbols.json")));
+        return json.RootElement.GetProperty(name).GetInt32();
+    }
+
+    public static Machine Direct(byte[] image, byte[] call) => V8Fixture.Direct(image, call);
+
+    public static byte[] CallA(string symbol)
+    {
+        var target = Symbol(symbol) & 0xFFFF;
+        return [0xCA, 0x00, (byte)target, (byte)(target >> 8)];
+    }
+
+    public static void Execute(Machine m, uint end = 0xC1004, ulong cycles = 100_000) => V8Fixture.Execute(m, end, cycles);
+
+    public static void PutByte(Machine m, uint address, byte value) => V8Fixture.PutByte(m, address, value);
+
+    public static byte Byte(Machine m, uint address) => V9Fixture.Byte(m, address);
+
+    public static bool Flag(Machine m, int bit) => (m.Bus.Peek16(Flags) & 1 << bit) != 0;
+}
+
+public sealed class OverlayV10Tests
+{
+    private static Machine Start(byte[]? image = null) => OverlayV9Tests.Start(image ?? V10Fixture.Bytes, V10Fixture.Symbol);
+    private static byte[] Command(Machine m, byte[] payload) => OverlayV9Tests.Command(m, payload);
+    private static byte[] Mutate(Machine m, byte[] payload) => OverlayV9Tests.Mutate(m, payload);
+    private static uint Revision(Machine m) => OverlayV9Tests.Revision(m);
+    private static int Free(Machine m) => BinaryPrimitives.ReadUInt16BigEndian(Command(m, [0x6D, 0]).AsSpan(47, 2));
+    private static byte[] Write(int id, byte[] bytes) => [0x6D, 2, (byte)id, 0, 0, .. bytes];
+
+    private static byte[] With(int id, params (int Index, byte Value)[] changes)
+    {
+        var bytes = V10Fixture.Group(id);
+        foreach (var (index, value) in changes) bytes[index] = value;
+        return bytes;
+    }
+
+    [Fact]
+    public void HeaderIsVersion10With143EntriesAndMagicC0DA()
+    {
+        var image = V10Fixture.Bytes;
+        Assert.Equal("LTOV"u8.ToArray(), image.AsSpan(0x4B544, 4).ToArray());
+        Assert.Equal(10, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
+        Assert.Equal(0xFFA8, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B54E)));
+        Assert.Equal(143, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B550)));
+        Assert.Equal(0xC0DA, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B552)));
+    }
+
+    [Fact]
+    public void PoolAAllocationsMayNotReachTheV10State()
+    {
+        var m = Start();
+        Assert.Equal(896, Free(m));
+        Assert.NotEqual(0xA0, Mutate(m, V5Fixture.Load(138, 664))[0]);
+        Assert.Equal(896, Free(m));
+        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(138, 660))[0]);
+        Assert.Equal(888, Free(m));
+    }
+
+    [Theory, MemberData(nameof(OverlayV9Tests.FittingSets), MemberType = typeof(OverlayV9Tests))] // RF5, at 668
+    public void V8sFittingCombinationsStillFit(int[] ids, int[] offsets)
+    {
+        var m = Start();
+        for (var i = 0; i < ids.Length; i++)
+        {
+            Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(ids[i], offsets[i]))[0]);
+            Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(ids[i], LiveOverlay.Crc32(V5Fixture.Flash(ids[i]))))[0]);
+        }
+    }
+
+    [Fact]
+    public void TheFlashedDefaultsAreTheSpecs()
+    {
+        var image = V10Fixture.Bytes;
+        Assert.Equal(V10Fixture.Flashed, image.AsSpan(V10Fixture.Defaults, 40).ToArray());
+        var tables = 0x40000 + BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B54C));
+        for (var id = 138; id <= 142; id++)
+        {
+            var entry = image.AsSpan(tables + id * 8, 8);
+            Assert.Equal(0x33, BinaryPrimitives.ReadUInt16LittleEndian(entry));
+            Assert.Equal(0x3F80 + 8 * (id - 138), BinaryPrimitives.ReadUInt16LittleEndian(entry[2..]));
+            Assert.Equal(8, BinaryPrimitives.ReadUInt16LittleEndian(entry[4..]));
+            Assert.Equal(2, BinaryPrimitives.ReadUInt16LittleEndian(entry[6..]));
+        }
+        Assert.Equal(0x0CFFA7u, BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(0x6FE00)));
+        for (var id = 139; id <= 142; id++)
+        for (var index = 0; index < 8; index++)
+            Assert.True(V10Fixture.Group(id)[index] == Setting(image, id, index), $"{id}/{index}");
+    }
+
+    private static int Setting(byte[] image, int id, int index)
+    {
+        var m = V10Fixture.Direct(image, V10Fixture.CallA("v10_setting"));
+        m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(2, (ushort)id); m.Cpu.SetR(3, (ushort)index);
+        V10Fixture.Execute(m);
+        return m.Cpu.R(4);
+    }
+
+    public static TheoryData<int, int, byte> OutOfRange => new()
+    {
+        { 139, 0, 51 }, { 139, 1, 151 }, { 139, 2, 4 }, { 139, 2, 31 }, { 139, 3, 9 }, { 139, 3, 101 },
+        { 140, 0, 3 }, { 140, 0, 0x7F }, { 140, 0, 0xA0 }, { 140, 0, 0xFF }, { 140, 1, 0 }, { 140, 1, 4 },
+        { 140, 2, 9 }, { 140, 3, 62 }, { 140, 3, 188 }, { 140, 4, 2 }, { 140, 4, 31 }, { 140, 5, 151 },
+        { 140, 6, 151 }, { 140, 7, 62 }, { 140, 7, 144 },
+        { 141, 0, 2 }, { 141, 1, 2 }, { 141, 2, 2 }, { 141, 3, 2 }, { 141, 4, 10 }, { 141, 4, 86 }, { 141, 5, 9 },
+        { 141, 5, 61 },
+        { 142, 0, 179 }, { 142, 1, 99 }, { 142, 1, 161 }, { 142, 2, 69 }, { 142, 2, 111 }, { 142, 3, 49 }, { 142, 3, 86 },
+    };
+
+    [Theory, MemberData(nameof(OutOfRange))]
+    public void EachSettingOutsideItsLimitsIsRefusedWithReason4(int id, int index, byte value) =>
+        Refused(id, With(id, (index, value)));
+
+    public static TheoryData<int, int, byte> AtTheLimits => new()
+    {
+        { 139, 0, 0 }, { 139, 0, 50 }, { 139, 1, 0 }, { 139, 1, 150 }, { 139, 2, 5 }, { 139, 2, 30 }, { 139, 3, 10 },
+        { 139, 3, 100 },
+        { 140, 0, 0 }, { 140, 0, 2 }, { 140, 0, 0x80 }, { 140, 0, 0x97 }, { 140, 0, 0x9F }, { 140, 1, 1 }, { 140, 1, 3 },
+        { 140, 2, 10 }, { 140, 2, 255 }, { 140, 3, 63 }, { 140, 3, 187 }, { 140, 4, 3 }, { 140, 4, 30 }, { 140, 5, 150 },
+        { 140, 6, 0 }, { 140, 7, 63 }, { 140, 7, 143 },
+        { 141, 0, 0 }, { 141, 3, 1 }, { 141, 4, 11 }, { 141, 4, 85 }, { 141, 5, 10 }, { 141, 5, 60 },
+        { 142, 0, 180 }, { 142, 0, 255 }, { 142, 1, 100 }, { 142, 1, 160 }, { 142, 2, 70 }, { 142, 2, 110 },
+        { 142, 3, 50 }, { 142, 3, 85 },
+    };
+
+    [Theory, MemberData(nameof(AtTheLimits))]
+    public void EachSettingAtItsLimitsIsAccepted(int id, int index, byte value) => Accepted(id, With(id, (index, value)));
+
+    [Fact]
+    public void AHoldOpeningAboveTheBlipOpeningIsRefused()
+    {
+        Refused(140, With(140, (5, 50), (6, 51)));
+        Accepted(140, With(140, (5, 50), (6, 50)));
+    }
+
+    public static TheoryData<int, int> Reserved => new()
+    {
+        { 139, 4 }, { 139, 5 }, { 139, 6 }, { 139, 7 }, { 141, 6 }, { 141, 7 }, { 142, 4 }, { 142, 5 }, { 142, 6 }, { 142, 7 },
+    };
+
+    [Theory, MemberData(nameof(Reserved))]
+    public void ReservedBytesMustBeZero(int id, int index) => Refused(id, With(id, (index, 1)));
+
+    /// <summary>A bad copy is refused on Write and on Patch with reason 4, and the copy stays as it was.</summary>
+    private static void Refused(int id, byte[] bad)
+    {
+        var m = Start(); var flashed = V10Fixture.Group(id);
+        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(id, 704))[0]);
+        var revision = Revision(m);
+        Assert.Equal(new byte[] { 0xB1, 4 }, Mutate(m, Write(id, bad)));
+        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V5Fixture.Read(m, 0xE6E0, 8));
+        Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(id, LiveOverlay.Crc32(flashed)))[0]);
+        revision = Revision(m);
+        Assert.Equal(new byte[] { 0xB1, 4 }, Command(m, V5Fixture.Patch(id, 0, bad, revision)));
+        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V5Fixture.Read(m, 0xE6E0, 8));
+    }
+
+    private static void Accepted(int id, byte[] good)
+    {
+        var m = Start();
+        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(id, 704))[0]);
+        Assert.Equal(0xA0, Mutate(m, Write(id, good))[0]);
+        Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(id, LiveOverlay.Crc32(good)))[0]);
+        Assert.Equal(good, V5Fixture.Read(m, 0xE6E0, 8));
+    }
+
+    [Fact]
+    public void FlashedValuesBeyondALimitAreClamped()
+    {
+        var image = V10Fixture.Bytes;
+        image[V10Fixture.Defaults + 2 * 8 + 3] = 250;     // 140/3, highest 187
+        image[V10Fixture.Defaults + 1 * 8 + 1] = 200;     // 139/1, highest 150
+        image[V10Fixture.Defaults + 1 * 8 + 2] = 1;       // 139/2, lowest 5
+        Assert.Equal(187, Setting(image, 140, 3));
+        Assert.Equal(150, Setting(image, 139, 1));
+        Assert.Equal(5, Setting(image, 139, 2));
+    }
+
+    [Theory] // as pops_setting: the switch keeps a CAN-bit value (80h..9Fh) and reads anything else above 2 as off
+    [InlineData(0x85, 0x85)] [InlineData(0x9F, 0x9F)] [InlineData(0xA0, 0)] [InlineData(0x7F, 0)] [InlineData(2, 2)]
+    public void TheBlipSwitchKeepsACanBit(byte flashed, int expected)
+    {
+        var image = V10Fixture.Bytes; image[V10Fixture.Defaults + 2 * 8] = flashed;
+        Assert.Equal(expected, Setting(image, 140, 0));
+    }
+
+    [Fact]
+    public void V10SettingPreservesEveryOtherRegister()
+    {
+        var m = V10Fixture.Direct(V10Fixture.Bytes, V10Fixture.CallA("v10_setting"));
+        for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
+        m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(2, 141); m.Cpu.SetR(3, 4);
+        var before = Enumerable.Range(0, 16).Select(r => m.Cpu.R(r)).ToArray();
+        V10Fixture.Execute(m);
+        Assert.Equal(0x15, m.Cpu.R(4));
+        for (var r = 0; r < 16; r++) if (r != 4) Assert.True(before[r] == m.Cpu.R(r), $"R{r} changed");
+    }
+}

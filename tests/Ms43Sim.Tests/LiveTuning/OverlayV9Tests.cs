@@ -69,14 +69,15 @@ public sealed record OverlayFixture(string Name, Func<byte[]> Bytes, Func<string
     public static readonly OverlayFixture V8 = new("V8", () => V8Fixture.Bytes, V8Fixture.Symbol);
     public static readonly OverlayFixture V9 = new("V9", () => V9Fixture.Bytes, V9Fixture.Symbol);
     public static readonly OverlayFixture V85 = new("V8.5", () => V85Fixture.Bytes, V85Fixture.Symbol);
+    public static readonly OverlayFixture V10 = new("V10", () => V10Fixture.Bytes, V10Fixture.Symbol);
 }
 
 public sealed class OverlayV9Tests
 {
-    internal static Machine Boot(byte[]? image = null)
+    internal static Machine Boot(byte[]? image = null, Func<string, int>? symbol = null)
     {
         var bytes = image ?? V9Fixture.Bytes; bytes.AsSpan(0x1FC8A, 4).CopyTo(bytes.AsSpan(0x41000));
-        var hk = V9Fixture.Symbol("hk") & 0xFFFF;                    // 0C:1010 enters housekeeping, which ends at 0D:80DE
+        var hk = (symbol ?? V9Fixture.Symbol)("hk") & 0xFFFF;                    // 0C:1010 enters housekeeping, which ends at 0D:80DE
         new byte[] { 0xFA, 0x0C, (byte)hk, (byte)(hk >> 8) }.CopyTo(bytes, 0x41010);
         new byte[] { 0xDA, 0x0D, 0x9A, 0x02 }.CopyTo(bytes, 0x41020);  // 0C:1020 calls reader 0D:029A, back at 0C:1024
         var m = Machine.Create(FlashImageBuilder.Raw(FirmwareImage.FromBytes(bytes)));
@@ -87,9 +88,9 @@ public sealed class OverlayV9Tests
         return m;
     }
 
-    internal static Machine Start(byte[]? image = null)
+    internal static Machine Start(byte[]? image = null, Func<string, int>? symbol = null)
     {
-        var m = Boot(image);
+        var m = Boot(image, symbol);
         Assert.Equal(0xA0, Command(m, V3Fixture.Open())[0]);
         return m;
     }
@@ -162,10 +163,16 @@ public sealed class OverlayV9Tests
         }
     }
 
-    [Fact]
-    public void WatchSetStoresTheAddressAndClearsTheRecord()
+    /// <summary>The watch and log facts run on every image that carries the watch: V9, and V10 on top of it.</summary>
+    public static TheoryData<string> Watching => new() { "V9", "V10" };
+
+    private static Machine StartOn(string version) =>
+        version == "V10" ? Start(V10Fixture.Bytes, V10Fixture.Symbol) : Start();
+
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchSetStoresTheAddressAndClearsTheRecord(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         V9Fixture.PutByte(m, V9Fixture.Kind, 1); V9Fixture.PutByte(m, V9Fixture.Count, 9);
         Assert.Equal(new byte[] { 0xA0, 0x07, 0x75, 0xD4 }, Watch(m, 0x775D4));
         Assert.Equal(0x1D, m.Bus.Peek16(V9Fixture.WPage));
@@ -174,10 +181,10 @@ public sealed class OverlayV9Tests
         Assert.Equal(0, V9Fixture.Byte(m, V9Fixture.Count));
     }
 
-    [Fact]
-    public void WatchSetFindsTheCatalogueRow()
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchSetFindsTheCatalogueRow(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         var row0 = (uint)V9Fixture.Catalog[0].GetProperty("address").GetInt32();
         Watch(m, row0);
         Assert.Equal(0, V9Fixture.Byte(m, V9Fixture.RowIx));
@@ -185,10 +192,10 @@ public sealed class OverlayV9Tests
         Assert.Equal(0xFF, V9Fixture.Byte(m, V9Fixture.RowIx));
     }
 
-    [Fact]
-    public void WatchAddressZeroClears()
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchAddressZeroClears(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         Watch(m, 0x775D4);
         Assert.Equal(new byte[] { 0xA0, 0, 0, 0 }, Watch(m, 0));
         Assert.Equal(0xFFFF, m.Bus.Peek16(V9Fixture.WPage));
@@ -198,10 +205,10 @@ public sealed class OverlayV9Tests
 
     internal static bool HasCopy(Machine m) => (m.Bus.Peek16(V9Fixture.Flags) & 0x40) != 0;
 
-    [Fact]
-    public void WatchArmsTheHooksFastCompareAndClearingDisarmsIt()
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchArmsTheHooksFastCompareAndClearingDisarmsIt(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         Assert.False(Armed(m));
         Watch(m, 0x775D4);
         Assert.True(Armed(m));
@@ -209,10 +216,10 @@ public sealed class OverlayV9Tests
         Assert.False(Armed(m));
     }
 
-    [Fact]
-    public void HousekeepingClearsAnArmBitLeftWithNoWatch()
+    [Theory, MemberData(nameof(Watching))]
+    public void HousekeepingClearsAnArmBitLeftWithNoWatch(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         Watch(m, 0);
         m.Bus.Poke16(V9Fixture.Flags, (ushort)(m.Bus.Peek16(V9Fixture.Flags) | 0x60));   // FDF8 as it may power up
         Housekeeping(m, 1);
@@ -232,28 +239,28 @@ public sealed class OverlayV9Tests
         else Assert.Equal(new byte[] { 0xB1, 4 }, reply);
     }
 
-    [Fact]
-    public void WatchAddressOutOfRangeIsRefusedWithReason4()
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchAddressOutOfRangeIsRefusedWithReason4(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         Watch(m, 0x775D4);
         Assert.Equal(new byte[] { 0xB0, 4 }, Watch(m, 0x80000));
         Assert.Equal(0x1D, m.Bus.Peek16(V9Fixture.WPage));
         Assert.Equal(0x35D4, m.Bus.Peek16(V9Fixture.WOff));
     }
 
-    [Fact]
-    public void WatchNeedsNoSession()
+    [Theory, MemberData(nameof(Watching))]
+    public void WatchNeedsNoSession(string version)
     {
-        var m = Boot();
+        var m = version == "V10" ? Boot(V10Fixture.Bytes, V10Fixture.Symbol) : Boot();
         Assert.Equal(new byte[] { 0xA0, 0x07, 0x75, 0xD4 }, Watch(m, 0x775D4));
         Assert.Equal(0x1D, m.Bus.Peek16(V9Fixture.WPage));
     }
 
-    [Fact] // RF3
-    public void WatchEndsAfterThreeSecondsOfSilenceButNotAtEngineOff()
+    [Theory, MemberData(nameof(Watching))] // RF3
+    public void WatchEndsAfterThreeSecondsOfSilenceButNotAtEngineOff(string version)
     {
-        var m = Start();
+        var m = StartOn(version);
         m.Bus.Poke16(0xE2A6, 1000);
         Watch(m, 0x775D4);
         Housekeeping(m, 1299);
@@ -273,8 +280,8 @@ public sealed class OverlayV9Tests
         Assert.Equal(0x1D, m.Bus.Peek16(V9Fixture.WPage));
     }
 
-    [Fact]
-    public void StockLogRequestIsUnchanged()
+    [Theory, MemberData(nameof(Watching))]
+    public void StockLogRequestIsUnchanged(string version)
     {
         byte[] Reply(byte[] image)
         {
@@ -283,6 +290,6 @@ public sealed class OverlayV9Tests
             V9Fixture.Execute(m, cycles: 400_000);
             return V5Fixture.Read(m, 0xF74E, 77);
         }
-        Assert.Equal(Reply(V8Fixture.Bytes), Reply(V9Fixture.Bytes));
+        Assert.Equal(Reply(V8Fixture.Bytes), Reply(version == "V10" ? V10Fixture.Bytes : V9Fixture.Bytes));
     }
 }
