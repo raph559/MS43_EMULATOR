@@ -12,18 +12,21 @@ public sealed class PopsV9DriveTests
 {
     private static int Column(string name) => VariableTrace.Columns.ToList().IndexOf(name);
 
-    private static DriveResult Run(byte[]? settings)
+    private static DriveResult Run(byte[] image, byte[]? settings)
     {
-        var bytes = V9Fixture.Bytes;
+        var bytes = image;
         settings?.CopyTo(bytes, V9Fixture.Defaults);
         return DriveRun.RunWithChecks(TestImages.AsFlashed(bytes), PopsDriveFixture.Load("lift"));
     }
 
-    [Fact]
-    public void TwentyDegreesTpsIsAddedAndNothingIsStored()
+    public static TheoryData<string> Overlays => new() { "V9", "V8.5" };
+
+    [Theory, MemberData(nameof(Overlays))]
+    public void TwentyDegreesTpsIsAddedAndNothingIsStored(string overlay)
     {
+        byte[] Image() => overlay == "V9" ? V9Fixture.Bytes : V85Fixture.Bytes;
         var settings = PopsDriveFixture.On.ToArray(); settings[6] = 200;
-        var results = new[] { (byte[]?)null, settings }.AsParallel().AsOrdered().Select(Run).ToArray();
+        var results = new[] { (byte[]?)null, settings }.Select(s => Run(Image(), s)).ToArray();
         var (reference, run) = (results[0], results[1]);
 
         Assert.Equal(RunVerdict.Pass, run.Verdict);

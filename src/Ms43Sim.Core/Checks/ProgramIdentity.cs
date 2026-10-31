@@ -33,6 +33,12 @@ public static class ProgramIdentity
     public const string Ms43X001LiveOverlayV8 = "8aa73c9a28926becfee02a6424de42151f7daa1902283c7e2fc231e659b4aeb1";
 
     /// <summary>
+    /// The live-tuning overlay 8.5 (V8 with the pops throttle opening up to 20.0 deg TPS), as tools/build_live_overlay_v85.py
+    /// builds it. Its flashed pops settings are calibration, as V8's are.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV85 = "9765fe8be83a90bbe6c75c2c98cf07b446a45feb6e6157213852e677e2e94da9";
+
+    /// <summary>
     /// The live-tuning overlay 9 (V8, the watched map and the LC/NLS/RAL triggers), as tools/build_live_overlay_v9.py
     /// builds it. Its flashed pops settings are calibration, as V8's are.
     /// </summary>
@@ -62,10 +68,12 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV6 => "MS43X001 with the live-tuning overlay 6",
         Ms43X001LiveOverlayV7 => "MS43X001 with the live-tuning overlay 7",
         Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
+        Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
         Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
         _ => OfWithFlashedPops(image) switch
         {
             Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
+            Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
             Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
             _ => null,
         },

@@ -68,6 +68,7 @@ public sealed record OverlayFixture(string Name, Func<byte[]> Bytes, Func<string
 {
     public static readonly OverlayFixture V8 = new("V8", () => V8Fixture.Bytes, V8Fixture.Symbol);
     public static readonly OverlayFixture V9 = new("V9", () => V9Fixture.Bytes, V9Fixture.Symbol);
+    public static readonly OverlayFixture V85 = new("V8.5", () => V85Fixture.Bytes, V85Fixture.Symbol);
 }
 
 public sealed class OverlayV9Tests
