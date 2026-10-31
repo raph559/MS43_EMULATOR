@@ -18,13 +18,13 @@ public sealed record WatchRead(ulong Cycle, byte Kind, ushort Row, ushort RowF, 
 /// </summary>
 public sealed class WatchOracle
 {
-    static readonly (uint At, bool Map)[] Readers =
+    internal static readonly (uint At, bool Map)[] Readers =
     [
         (0xD022A, false), (0xD0262, false), (0xD0454, false), (0xD042E, false),
         (0xD0168, true), (0xD029A, true), (0xD03D2, true), (0xD043A, true),
     ];
 
-    static readonly (uint At, bool Map)[] Descriptors =
+    internal static readonly (uint At, bool Map)[] Descriptors =
     [
         (0xD04B0, true), (0xD05C8, true), (0xD0776, true), (0xD089E, true), (0xD09BC, true), (0xD0B60, true),
         (0xD0C88, true), (0xD0EC2, true), (0xD1092, true),
