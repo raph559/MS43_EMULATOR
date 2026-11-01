@@ -1,0 +1,155 @@
+using Ms43Sim.Core;
+using Ms43Sim.Tests.Support;
+
+namespace Ms43Sim.Tests.LiveTuning;
+
+/// <summary>
+/// V10's blip at pops' three hook sites: the throttle store (09:B138) adds BLIP_ADD while GUARD is clear, the
+/// overrun-cut gate (0A:A7BC) holds the cut off, and the spark call (0A:D424) fires at 140's angle in fuelled
+/// overrun. With the blip off, every hook decides as V9's does (RF5). Direct CPU tests from the real sites.
+/// </summary>
+public sealed class BlipHookTests
+{
+    private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
+    private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
+    private static readonly byte[] Pops = [1, 20, 23, 184, 50, 158, 30, 20];
+
+    private sealed record Hook(string Name, byte Segment, ushort Offset, uint[] Ends);
+
+    private static readonly Hook Spark = new("spark", 0x0A, 0xD424, [0xAD428]);
+    private static readonly Hook Throttle = new("throttle", 0x09, 0xB138, [0x9B13C]);
+    private static readonly Hook Gate = new("gate", 0x0A, 0xA7BC, [Stay, Cut]);
+
+    private static byte[] Image(bool v10, Action<byte[]>? change = null)
+    {
+        var image = v10 ? V10Fixture.Bytes : V9Fixture.Bytes;
+        Pops.CopyTo(image, V8Fixture.Defaults);
+        change?.Invoke(image);
+        return image;
+    }
+
+    private static Machine Seed(byte[] image, ushort mode, ushort fdf8, ushort psw, int sample, ushort fd2e = 0, ushort fd30 = 1 << 2)
+    {
+        var m = V8Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
+        for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19 + sample * 0x0101));
+        m.Cpu.SetR(0, 0xF780);
+        m.Cpu.SetR(4, (ushort)(1000 + sample * 9000));
+        m.Cpu.Psw = psw;
+        V8Fixture.PutByte(m, 0x4007F, 100);
+        V8Fixture.PutByte(m, 0x4047F, 80);
+        V8Fixture.PutByte(m, 0x40433, 200);
+        m.Bus.Poke16(0xFD2E, fd2e);
+        m.Bus.Poke16(0xFD30, fd30);
+        m.Bus.Poke16(0xFD2C, mode);
+        m.Bus.Poke16(0xFDF8, fdf8);
+        m.Bus.Poke16(0x41FBC, 50);
+        V8Fixture.PutByte(m, 0x41FBE, 100);
+        m.Bus.Poke16(0xE2B4, (ushort)((10 + sample * 45) << 8));
+        m.Bus.Poke16(0xE2B6, (ushort)((10 + sample * 45) << 8));
+        return m;
+    }
+
+    private static uint Run(Machine m, Hook hook)
+    {
+        m.Cpu.Jump(hook.Segment, hook.Offset);
+        m.Run(200_000, x => hook.Ends.Contains(x.Cpu.Address));
+        Assert.True(hook.Ends.Contains(m.Cpu.Address), $"{hook.Name} stopped at {m.Cpu.Address:X5}");
+        return m.Cpu.Address;
+    }
+
+    private static byte[] Memory(Machine m) =>
+    [
+        .. BitConverter.GetBytes(m.Bus.Peek16(0xE2B4)), .. BitConverter.GetBytes(m.Bus.Peek16(0x406A4)),
+        .. BitConverter.GetBytes(m.Bus.Peek16(0xFDF8)), .. BitConverter.GetBytes(m.Bus.Peek16(0x41FBC)),
+    ];
+
+    [Fact] // RF5
+    public void WithTheBlipOffEveryHookIsV9s()
+    {
+        var cases = 0;
+        foreach (var hook in new[] { Spark, Throttle, Gate })
+        foreach (var (mode, fdf8) in new (ushort, ushort)[] { (Overrun, 0x4000), (Overrun, 0x4008), (PartLoad, 0x4008), (Idle, 0x4000), (Overrun, 0x4018) })
+        foreach (var fd2e in new ushort[] { 0, 1 << 13, 1 << 6 })
+        for (var cv = 0; cv < 4; cv++)
+        for (var sample = 0; sample < 3; sample++)
+        {
+            var psw = (ushort)(0x0801 | cv << 1);
+            var expected = Seed(Image(v10: false), mode, fdf8, psw, sample, fd2e);
+            var actual = Seed(Image(v10: true), mode, fdf8, psw, sample, fd2e);
+            var context = $"{hook.Name} mode {mode:X4} FDF8 {fdf8:X4} FD2E {fd2e:X4} CV {cv} sample {sample}";
+            Assert.True(Run(expected, hook) == Run(actual, hook), context + ": exit");
+            for (var r = 0; r < 16; r++)
+                Assert.True(expected.Cpu.R(r) == actual.Cpu.R(r), $"{context}: R{r} {expected.Cpu.R(r):X4} != {actual.Cpu.R(r):X4}");
+            Assert.True(expected.Cpu.Psw == actual.Cpu.Psw, context + ": PSW");
+            Assert.Equal(expected.Cpu.Sp, actual.Cpu.Sp);
+            Assert.True(Memory(expected).SequenceEqual(Memory(actual)), context + ": memory");
+            cases++;
+        }
+        Assert.True(cases > 400);
+    }
+
+    private static Machine Blipping(ushort mode = Overrun, ushort add = 5000, bool guard = false, Action<byte[]>? change = null,
+        ushort fd2e = 1 << 6, ushort fd30 = 1 << 2)
+    {
+        var m = Seed(Image(v10: true, change), mode, (ushort)(0x4000 | 1 << V10Fixture.BlipOn | (guard ? 1 << V10Fixture.Guard : 0)),
+            0x0800, 0, fd2e, fd30);
+        m.Bus.Poke16(V10Fixture.BlipAdd, add);
+        return m;
+    }
+
+    [Theory]
+    [InlineData((ushort)1000, (ushort)5000, (ushort)6000)] [InlineData((ushort)0xF000, (ushort)0x2000, (ushort)0xFFFF)]
+    public void DuringABlipTheThrottleAddsBlipAdd(ushort pedalMap, ushort add, ushort expected)
+    {
+        var m = Blipping(add: add);
+        m.Cpu.SetR(4, pedalMap);
+        Run(m, Throttle);
+        Assert.Equal(expected, m.Bus.Peek16(0x406A4));
+    }
+
+    [Fact] // RF4
+    public void TheGuardZeroesTheBlipsAdd()
+    {
+        var m = Blipping(guard: true);
+        m.Cpu.SetR(4, 1000);
+        Run(m, Throttle);
+        Assert.Equal(1000, m.Bus.Peek16(0x406A4));
+    }
+
+    [Theory]
+    [InlineData((ushort)(1 << 13), (ushort)0)] [InlineData((ushort)0, (ushort)(1 << 2))]
+    public void DuringABlipTheGateStaysFuelled(ushort immediate, ushort request)
+    {
+        // pops is off and the clutch is in: the pops conditions fail, yet the blip keeps the fuel on
+        var m = Blipping(change: b => b[V8Fixture.Defaults] = 0, fd2e: (ushort)(1 << 6 | immediate), fd30: request);
+        var before = Enumerable.Range(0, 16).Select(r => m.Cpu.R(r)).ToArray();
+        var psw = m.Cpu.Psw;
+        Assert.Equal(Stay, Run(m, Gate));
+        for (var r = 0; r < 16; r++) Assert.True(before[r] == m.Cpu.R(r), $"R{r} changed");
+        Assert.Equal(psw, m.Cpu.Psw);
+    }
+
+    [Fact]
+    public void DuringABlipTheSparkIsTheBlipAngle()
+    {
+        var m = Blipping();
+        Run(m, Spark);
+        Assert.Equal(90, m.Bus.Peek16(0xE2B4) >> 8);
+        Assert.Equal(0, m.Bus.Peek16(0xE2B4) & 255);
+
+        var notFuelled = Blipping(mode: 1 << 12);                    // in the overrun cut: the stock angle
+        var stock = notFuelled.Bus.Peek16(0xE2B4);
+        Run(notFuelled, Spark);
+        Assert.Equal(stock, notFuelled.Bus.Peek16(0xE2B4));
+    }
+
+    [Fact] // RF2
+    public void AfterTheBlipTheStockStoreReturns()
+    {
+        var m = Blipping();
+        m.Bus.Poke16(0xFDF8, 0x4000);                               // BLIP_ON clear, BLIP_ADD left over
+        m.Cpu.SetR(4, 1234);
+        Run(m, Throttle);
+        Assert.Equal(1234, m.Bus.Peek16(0x406A4));
+    }
+}
