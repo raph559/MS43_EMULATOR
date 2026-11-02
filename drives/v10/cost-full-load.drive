@@ -1,0 +1,18 @@
+# V10's CPU cost against V9's: a full-load hold in 3rd at 100 km/h with the logger polling sub 11 at full speed and a
+# watch on the RON98 part-load ignition map, as docs/live-overlay-v9.md measured the watch.
+drive v10-cost-full-load
+start seasoned
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+kline connect
+kline pause 0
+kline poll 6D 0B
+1 idle
+kline watch 77315
+5 idle
+8 drive gear=3 speed=40..100 pedal=60
+20 drive gear=3 speed=100 pedal=95       # the full-load hold
+5 drive gear=3 speed=100..30 pedal=0
+2 drive gear=N clutch=1 rpm=1500..800 speed=30..0 pedal=0
+5 idle clutch=0
