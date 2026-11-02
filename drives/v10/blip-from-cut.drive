@@ -1,0 +1,15 @@
+# V10 blip from the overrun fuel cut: 4th, lifted at 16.5 s and coasting to the stock cut, then the clutch in and the
+# brake at 20.5 s with the engine scripted up to 3rd's speed, then 3rd with the clutch out at 21.5 s.
+drive v10-blip-from-cut
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..80 pedal=30
+4 drive gear=4 speed=80..65 pedal=0
+0.4 drive gear=N clutch=1 brake=1 rpm=2100..2850 speed=65..63
+0.6 drive gear=N clutch=1 brake=1 rpm=2850 speed=63..62
+2 drive gear=3 clutch=0 brake=0 speed=62..45 pedal=0
+2 drive gear=N clutch=1 rpm=2000..800 speed=45..0 pedal=0
+3 idle clutch=0

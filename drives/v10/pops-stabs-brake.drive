@@ -1,0 +1,13 @@
+# V10 pops stabs and the brake: the lift at 16.5 s, the brake from 19.5 s for 1 s, the pedal still released.
+drive v10-pops-stabs-brake
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..110 pedal=30
+3 drive gear=4 speed=110..95 pedal=0
+1 drive gear=4 speed=95..85 pedal=0 brake=1
+6 drive gear=4 speed=85..40 pedal=0 brake=0
+2 drive gear=N clutch=1 rpm=1400..800 speed=40..0 pedal=0
+3 idle clutch=0

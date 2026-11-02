@@ -1,0 +1,15 @@
+# V10 blip while braking: 4th at 60 km/h, the clutch in and the brake at 18.5 s, the engine scripted up to 3rd's speed,
+# then 3rd with the clutch out at 19.5 s.
+drive v10-blip-braking
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..60 pedal=20
+2 drive gear=4 speed=60 pedal=0
+0.4 drive gear=N clutch=1 brake=1 rpm=1300..2700 speed=60..58
+0.6 drive gear=N clutch=1 brake=1 rpm=2700 speed=58..57
+2 drive gear=3 clutch=0 brake=0 speed=57..40 pedal=0
+2 drive gear=N clutch=1 rpm=1800..800 speed=40..0 pedal=0
+3 idle clutch=0

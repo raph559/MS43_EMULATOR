@@ -1,0 +1,15 @@
+# V10, an upshift never blips: 2nd at 4,000 rpm and pedal 60, the clutch in at 18.5 s with the pedal at 0, the pedal
+# back to 40 for the last 0.3 s with the clutch still in, then 3rd with the clutch out at 19.3 s.
+drive v10-blip-upshift
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=2 speed=25..60 pedal=60
+0.5 drive gear=N clutch=1 rpm=4000..3000 speed=60 pedal=0
+0.3 drive gear=N clutch=1 rpm=3000..2700 speed=60 pedal=40
+2 drive gear=3 clutch=0 speed=60..70 pedal=40
+1 drive gear=3 speed=70..65 pedal=0
+2 drive gear=N clutch=1 rpm=2900..800 speed=65..0 pedal=0
+3 idle clutch=0

@@ -44,7 +44,21 @@ public static class ProgramIdentity
     /// </summary>
     public const string Ms43X001LiveOverlayV9 = "5906167bdfeb39851fe1d59b2c32eab4197d6ba63d5296be60906b14d05569c1";
 
+    /// <summary>
+    /// The live-tuning overlay 10 (V9, pops' throttle stabs and the downshift blip), as tools/build_live_overlay_v10.py
+    /// builds it. Its flashed settings, groups 138..142 (40 bytes at 0x4FF80), are calibration, as V8's pops settings are.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV10 = "51d7ddd61def3eaafd9453d2644a15b6630972fb447b5565f36ff34c5c8498fc";
+
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
+
+    /// <summary>V10's built settings: pops, pops stabs, the blip, its gears and tap, its gear ratios.</summary>
+    static readonly byte[] V10Defaults =
+    [
+        0x00, 0x28, 0x17, 0xB8, 0x32, 0x9E, 0x64, 0x14, 0x14, 0x4B, 0x0F, 0x19, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x4B, 0x19, 0x5A, 0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x00, 0x00,
+        0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
+    ];
 
     public static string Of(FirmwareImage image)
     {
@@ -70,20 +84,24 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
         Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
         Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
+        Ms43X001LiveOverlayV10 => "MS43X001 live overlay V10",
         _ => OfWithFlashedPops(image) switch
         {
             Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
             Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
             Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
-            _ => null,
+            _ => OfWithFlashed(image, V10Defaults) == Ms43X001LiveOverlayV10 ? "MS43X001 live overlay V10" : null,
         },
     };
 
     /// <summary>The identity with the V8 pops settings put back to their built values, and the checksums with them.</summary>
-    static string OfWithFlashedPops(FirmwareImage image)
+    static string OfWithFlashedPops(FirmwareImage image) => OfWithFlashed(image, PopsDefaults);
+
+    /// <summary>The identity with the flashed settings from 0x4FF80 put back to their built values, and the checksums with them.</summary>
+    static string OfWithFlashed(FirmwareImage image, byte[] defaults)
     {
         var bytes = image.Bytes.ToArray();
-        PopsDefaults.CopyTo(bytes, 0x4FF80);
+        defaults.CopyTo(bytes, 0x4FF80);
         Checksums.Fix(bytes);
         return Of(FirmwareImage.FromBytes(bytes));
     }

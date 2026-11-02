@@ -1,0 +1,17 @@
+# V10 blip on a tap: 5th at 90 km/h, the clutch in at 20.5 s, the pedal at 25 from 20.6 s for 0.2 s, the engine
+# scripted up to 4th's speed, then 4th with the clutch out at 21.4 s.
+drive v10-blip-tap
+start blank
+set coolant=90 oil=90 intake=33 ambient=20
+3 on
+1.5 crank rpm=200
+6 idle
+6 drive gear=4 speed=25..90 pedal=25
+4 drive gear=5 speed=90 pedal=20
+0.1 drive gear=N clutch=1 rpm=2400 speed=90 pedal=0
+0.2 drive gear=N clutch=1 rpm=2400..2600 speed=90 pedal=25
+0.6 drive gear=N clutch=1 rpm=2600..3050 speed=90..89 pedal=0
+2 drive gear=4 clutch=0 speed=89..85 pedal=10
+1 drive gear=4 speed=85..80 pedal=0
+2 drive gear=N clutch=1 rpm=2700..800 speed=80..0 pedal=0
+3 idle clutch=0
