@@ -143,6 +143,50 @@ public sealed class BlipHookTests
         Assert.Equal(stock, notFuelled.Bus.Peek16(0xE2B4));
     }
 
+    /// <summary>
+    /// The in-cut handler (0A:A9EE) re-checks the engine speed at 0A:AAA0 and refuels only below the re-entry rpm (81AB).
+    /// A blip that starts during a running cut takes the stock re-entry at 0A:AABA at once (Task 7's finding).
+    /// </summary>
+    private static Machine InCut(bool blip)
+    {
+        var m = Seed(Image(v10: true), 1 << 12, (ushort)(0x4000 | (blip ? 1 << V10Fixture.BlipOn : 0)), 0x0800, 0, 1 << 6);
+        m.Bus.Poke16(0xFD9A, 0); m.Bus.Poke16(0xFD48, 0); m.Bus.Poke16(0xFD36, 0);
+        V8Fixture.PutByte(m, 0x4007F, 100);                          // 3,200 rpm, above the re-entry rpm
+        V8Fixture.PutByte(m, 0x401AB, 40);
+        return m;
+    }
+
+    [Fact]
+    public void DuringABlipARunningCutTakesTheStockReentry()
+    {
+        var m = InCut(blip: true);
+        m.Cpu.Jump(0x0A, 0xAAA0);
+        m.Run(2_000, x => x.Cpu.Address is 0xAAABA or 0xAAAA4 or 0xAB0F2);
+        Assert.Equal(0xAAABAu, m.Cpu.Address);
+    }
+
+    [Fact] // RF5
+    public void WithTheBlipOffTheCutCheckIsStock()
+    {
+        foreach (var (fd9a, fd48) in new (ushort, ushort)[] { (0, 0), (1 << 11, 0), (0, 1 << 2), (1 << 11, 1 << 2) })
+        foreach (var psw in new ushort[] { 0x0800, 0x0805, 0x080A })
+        {
+            Machine Prepare(byte[] image)
+            {
+                var m = Seed(image, 1 << 12, 0x4000, psw, 0, 1 << 6);
+                m.Bus.Poke16(0xFD9A, fd9a); m.Bus.Poke16(0xFD48, fd48);
+                m.Cpu.Jump(0x0A, 0xAAA0);
+                m.Run(2_000, x => x.Cpu.Address == 0xAAAA4);
+                Assert.Equal(0xAAAA4u, m.Cpu.Address);
+                return m;
+            }
+            var expected = Prepare(TestBins.CarBytes); var actual = Prepare(Image(v10: true));
+            var context = $"FD9A {fd9a:X4} FD48 {fd48:X4} PSW {psw:X4}";
+            Assert.True(expected.Cpu.Psw == actual.Cpu.Psw, context + ": PSW");
+            for (var r = 0; r < 16; r++) Assert.True(expected.Cpu.R(r) == actual.Cpu.R(r), $"{context}: R{r}");
+        }
+    }
+
     [Fact] // RF2
     public void AfterTheBlipTheStockStoreReturns()
     {
