@@ -12,10 +12,13 @@ public sealed class BlipTests
 {
     private const int Blip = V10Fixture.Defaults + 16, Gears = V10Fixture.Defaults + 24, Ratios = V10Fixture.Defaults + 32;
 
-    /// <summary>A V10 machine with the blip always on (140 byte 0 = 1) and the defaults otherwise.</summary>
-    private static Machine Machine(Action<byte[]>? change = null, byte gear = 4, byte speed = 60, byte rpm = 40)
+    /// <summary>
+    /// A machine with the blip always on (140 byte 0 = 1) and V10's settings otherwise (<see cref="V10Fixture.Classic"/>:
+    /// a 15.0 °TPS blip opening, no lead), or V10.1's flashed settings when <paramref name="v101"/> is set.
+    /// </summary>
+    private static Machine Machine(Action<byte[]>? change = null, byte gear = 4, byte speed = 60, byte rpm = 40, bool v101 = false)
     {
-        var image = V10Fixture.Bytes;
+        var image = v101 ? V10Fixture.Bytes : V10Fixture.ClassicBytes;
         image[Blip] = 1;
         change?.Invoke(image);
         var m = OverlayV9Tests.Boot(image, V10Fixture.Symbol);
@@ -323,5 +326,112 @@ public sealed class BlipTests
         PopsStabTests.Tick(m);
         Assert.Equal(100, m.Bus.Peek16(0xE3B0));
         Assert.NotEqual(0, m.Bus.Peek16(0xFD2A) & 1 << 12);
+    }
+
+    [Fact] // V10.1's default blip opening, 20.0 deg TPS (owner, 2026-11-05: "do it by default")
+    public void V101BlipsWithTwentyDegrees()
+    {
+        var m = Machine(v101: true);
+        Braking(m); PopsStabTests.Tick(m);
+        Assert.True(On(m));
+        Assert.InRange(Add(m), 10923, 10927);
+    }
+
+    /// <summary>The rpm at which the hold began, the rpm climbing one 807F unit (32 rpm) a tick from 50 toward 83.</summary>
+    private static int HoldBeganAt(byte lead)
+    {
+        var m = Machine(b => b[Gears + 6] = lead, rpm: 50, v101: true);
+        Braking(m); PopsStabTests.Tick(m);
+        Assert.True(On(m));
+        for (var rpm = 51; rpm < 83; rpm++)
+        {
+            V8Fixture.PutByte(m, 0x4007F, (byte)rpm); PopsStabTests.Tick(m);
+            Assert.True(On(m), $"{rpm}");
+            if (V10Fixture.Flag(m, V10Fixture.BlipHold)) return rpm;
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// V10.1's lead (141/6, 10 ms): the rise ends when the rpm, climbing at its filtered rate (16 x the rise a tick, ~1/4
+    /// of the step each tick), would be within 192 rpm of the target this long from now. At one unit a tick the rate
+    /// settles at 16 after 8 ticks, so a 150 ms lead ends the rise 15 units (480 rpm) earlier; 0 is V10's rule.
+    /// </summary>
+    [Fact] // RF2
+    public void TheLeadEndsTheRiseEarlier()
+    {
+        Assert.Equal(77, HoldBeganAt(0));                           // 77 + 6 reaches 83, as V10
+        Assert.Equal(62, HoldBeganAt(15));                          // 62 + 6 + 15 x 16 / 16
+        Assert.Equal(72, HoldBeganAt(5));                           // 72 + 6 + 5 x 16 / 16
+    }
+
+    /// <summary>blip_lead itself: R5 the rpm now; BLIP_PREV, BLIP_RATE before; R4 the expected rise within the lead.</summary>
+    private static (int Gain, int Rate, int Prev, ushort[] Registers) Rate(byte prev, byte rate, ushort rpm, byte lead = 15)
+    {
+        var image = V10Fixture.Bytes; image[Gears + 6] = lead;
+        var m = V10Fixture.Direct(image, V10Fixture.CallA("blip_lead"));
+        for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
+        m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(5, rpm);
+        V8Fixture.PutByte(m, V10Fixture.BlipPrev, prev); V8Fixture.PutByte(m, V10Fixture.BlipRate, rate);
+        V10Fixture.Execute(m);
+        return (m.Cpu.R(4), V10Fixture.Byte(m, V10Fixture.BlipRate), V10Fixture.Byte(m, V10Fixture.BlipPrev),
+            [.. Enumerable.Range(0, 16).Select(r => m.Cpu.R(r))]);
+    }
+
+    [Theory]
+    [InlineData(70, 0, 60, 15, 0, 0)]                               // falling: no rise, no lead
+    [InlineData(70, 40, 60, 15, 30, 28)]                            // falling: the rate only decays
+    [InlineData(60, 0, 61, 15, 4, 3)]                               // the first unit
+    [InlineData(60, 16, 61, 15, 16, 15)]                            // settled at one unit a tick
+    [InlineData(60, 250, 70, 15, 228, 213)]
+    [InlineData(0, 255, 100, 15, 255, 239)]                         // the rate saturates at 255
+    [InlineData(60, 255, 100, 30, 255, 478)]                        // the longest lead
+    [InlineData(60, 200, 100, 0, 255, 0)]                           // lead 0: no lead, whatever the rate
+    public void TheRateFollowsTheRiseAndScalesTheLead(byte prev, byte rate, ushort rpm, byte lead, int newRate, int gain)
+    {
+        var (g, r, p, registers) = Rate(prev, rate, rpm, lead);
+        Assert.Equal(newRate, r);
+        Assert.Equal(gain, g);
+        Assert.Equal(rpm, p);
+        foreach (var reg in new[] { 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 })
+            Assert.True(registers[reg] == (reg == 5 ? rpm : (ushort)(0x9100 + reg * 19)), $"R{reg} changed");
+        Assert.Equal(0xF780, registers[0]);
+    }
+
+    [Theory] // the target indexes 142 with the gear: a gear outside 2..5 during a blip stops it
+    [InlineData(0)] [InlineData(1)] [InlineData(6)] [InlineData(7)]
+    public void AGearOutsideTwoToFiveStopsTheBlip(byte gear)
+    {
+        var m = Machine();
+        Braking(m); PopsStabTests.Tick(m);
+        Assert.True(On(m));
+        V8Fixture.PutByte(m, 0x401AE, gear);
+        PopsStabTests.Tick(m);
+        Assert.False(On(m), $"gear {gear}");
+        Assert.Equal(0, Add(m));
+    }
+
+    [Theory] // bt_go: the throttle store must never see BLIP_ON with the last blip's values
+    [InlineData(false)] [InlineData(true)]
+    public void BlipOnIsSetLast(bool v101)
+    {
+        var m = Machine(v101: v101);
+        m.Bus.Poke16(V10Fixture.BlipLeft, 7); m.Bus.Poke16(0xFDF8, 0x4000 | 1 << V10Fixture.BlipHold);
+        Braking(m);
+        (int Add, int Left, bool Hold)? seen = null;
+        m.Cpu.SetR(0, 0xF780);
+        m.Cpu.Jump(0x0C, 0x1010);
+        m.Run(200_000, x =>
+        {
+            if (seen is null && (x.Bus.Peek16(0xFDF8) & 1 << V10Fixture.BlipOn) != 0)
+                seen = (x.Bus.Peek16(V10Fixture.BlipAdd), x.Bus.Peek16(V10Fixture.BlipLeft),
+                    (x.Bus.Peek16(0xFDF8) & 1 << V10Fixture.BlipHold) != 0);
+            return x.Cpu.Address == 0xD80DE;
+        });
+        Assert.Equal(0xD80DEu, m.Cpu.Address);
+        Assert.NotNull(seen);
+        Assert.InRange(seen.Value.Add, v101 ? 10923 : 8191, v101 ? 10927 : 8195);
+        Assert.Equal(150, seen.Value.Left);
+        Assert.False(seen.Value.Hold);
     }
 }

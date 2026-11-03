@@ -10,10 +10,10 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// </summary>
 public sealed class V10DriveFixture
 {
-    /// <summary>V10's 40 flashed bytes (groups 138..142), changed by <paramref name="change"/>.</summary>
+    /// <summary>V10's 40 flashed bytes (groups 138..142, <see cref="V10Fixture.Classic"/>), changed by <paramref name="change"/>.</summary>
     public static byte[] Settings(Action<byte[]>? change = null)
     {
-        var settings = V10Fixture.Flashed.ToArray();
+        var settings = V10Fixture.Classic.ToArray();
         change?.Invoke(settings);
         return settings;
     }

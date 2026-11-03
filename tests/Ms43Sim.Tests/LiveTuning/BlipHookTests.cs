@@ -165,6 +165,34 @@ public sealed class BlipHookTests
         Assert.Equal(0xAAABAu, m.Cpu.Address);
     }
 
+    /// <summary>
+    /// V10.1: the blip path runs the stock BCMP FD9Ah.11, FD48h.2 and BMOV FD9Ah.11, PSW.2 before it jumps to the
+    /// re-entry, so FD9A.11 and the flags at 0A:AABA are what a stock pass leaves at 0A:AAA8.
+    /// </summary>
+    [Fact]
+    public void DuringABlipTheCutCheckStillUpdatesFd9aAsStock()
+    {
+        foreach (var (fd9a, fd48) in new (ushort, ushort)[] { (0, 0), (1 << 11, 0), (0, 1 << 2), (1 << 11, 1 << 2) })
+        foreach (var psw in new ushort[] { 0x0800, 0x0805, 0x080A, 0x081F })
+        {
+            Machine CutCheck(byte[] image, ushort fdf8, uint end)
+            {
+                var m = Seed(image, 1 << 12, fdf8, psw, 0, 1 << 6);
+                m.Bus.Poke16(0xFD9A, fd9a); m.Bus.Poke16(0xFD48, fd48);
+                m.Cpu.Jump(0x0A, 0xAAA0);
+                m.Run(2_000, x => x.Cpu.Address == end);
+                Assert.Equal(end, m.Cpu.Address);
+                return m;
+            }
+            var stock = CutCheck(TestBins.CarBytes, 0x4000, 0xAAAA8);
+            var blip = CutCheck(Image(v10: true), 0x4000 | 1 << V10Fixture.BlipOn, 0xAAABA);
+            var context = $"FD9A {fd9a:X4} FD48 {fd48:X4} PSW {psw:X4}";
+            Assert.True(stock.Bus.Peek16(0xFD9A) == blip.Bus.Peek16(0xFD9A), context + ": FD9A");
+            Assert.True(stock.Cpu.Psw == blip.Cpu.Psw, $"{context}: PSW {stock.Cpu.Psw:X4} != {blip.Cpu.Psw:X4}");
+            for (var r = 0; r < 16; r++) Assert.True(stock.Cpu.R(r) == blip.Cpu.R(r), $"{context}: R{r}");
+        }
+    }
+
     [Fact] // RF5
     public void WithTheBlipOffTheCutCheckIsStock()
     {
