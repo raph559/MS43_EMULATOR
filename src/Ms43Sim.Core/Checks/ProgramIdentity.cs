@@ -50,6 +50,12 @@ public static class ProgramIdentity
     /// </summary>
     public const string Ms43X001LiveOverlayV10 = "51d7ddd61def3eaafd9453d2644a15b6630972fb447b5565f36ff34c5c8498fc";
 
+    /// <summary>
+    /// The live-tuning overlay 10.1 (V10 with the owner's pops and blip defaults, the rise allowed once stabbing and the
+    /// blip lead), as tools/build_live_overlay_v10.py builds it since 2026-11-05. Its flashed settings are calibration.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV101 = "171121a5b2b5e53268989c1a7b59d605ce24c3ecede3efd6785993a7ff9fea8a";
+
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 
     /// <summary>V10's built settings: pops, pops stabs, the blip, its gears and tap, its gear ratios.</summary>
@@ -57,6 +63,14 @@ public static class ProgramIdentity
     [
         0x00, 0x28, 0x17, 0xB8, 0x32, 0x9E, 0x64, 0x14, 0x14, 0x4B, 0x0F, 0x19, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x4B, 0x19, 0x5A, 0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x00, 0x00,
+        0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    /// <summary>V10.1's built settings, in the same five groups.</summary>
+    static readonly byte[] V101Defaults =
+    [
+        0x00, 0x28, 0x00, 0xD2, 0x7D, 0x9E, 0x1E, 0x14, 0x14, 0x19, 0x0F, 0x19, 0x0F, 0x00, 0x00, 0x00,
+        0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x64, 0x19, 0x5A, 0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x0F, 0x00,
         0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
     ];
 
@@ -85,12 +99,14 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
         Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
         Ms43X001LiveOverlayV10 => "MS43X001 live overlay V10",
+        Ms43X001LiveOverlayV101 => "MS43X001 live overlay V10.1",
         _ => OfWithFlashedPops(image) switch
         {
             Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
             Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
             Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
-            _ => OfWithFlashed(image, V10Defaults) == Ms43X001LiveOverlayV10 ? "MS43X001 live overlay V10" : null,
+            _ => OfWithFlashed(image, V10Defaults) == Ms43X001LiveOverlayV10 ? "MS43X001 live overlay V10"
+                : OfWithFlashed(image, V101Defaults) == Ms43X001LiveOverlayV101 ? "MS43X001 live overlay V10.1" : null,
         },
     };
 

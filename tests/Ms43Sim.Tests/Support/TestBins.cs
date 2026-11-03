@@ -28,6 +28,10 @@ public static class TestBins
     public static byte[] E85CamPortBytes => Read("candidates/CAR_43X001_SP95_STAGE1_E85CAMPORT.bin",
         "d21849afaca64db518ae35155e024ab54f391d2d18f4ce31920f58d59df89466");
 
+    /// <summary>The live overlay V10 as built at fe5054f and sent to the owner on 2026-11-05.</summary>
+    public static byte[] LiveOverlayV10Bytes => Read("bins/CAR_43X001_SP95_STAGE1_LIVE_OVERLAY_V10.bin",
+        "708f767fd673ef4390c2c067e5b147af0d6005e2164c0efda80a2e363d8581f0");
+
     static byte[] Read(string relative, string expectedSha256)
     {
         lock (cache)
