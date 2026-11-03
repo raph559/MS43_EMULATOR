@@ -54,7 +54,7 @@ public static class ProgramIdentity
     /// The live-tuning overlay 10.1 (V10 with the owner's pops and blip defaults, the rise allowed once stabbing and the
     /// blip lead), as tools/build_live_overlay_v10.py builds it since 2026-11-05. Its flashed settings are calibration.
     /// </summary>
-    public const string Ms43X001LiveOverlayV101 = "171121a5b2b5e53268989c1a7b59d605ce24c3ecede3efd6785993a7ff9fea8a";
+    public const string Ms43X001LiveOverlayV101 = "dccf68a2dd88474d1a42d8561360a8e7d432aec0ad676e0783ab345eb978b055";
 
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 

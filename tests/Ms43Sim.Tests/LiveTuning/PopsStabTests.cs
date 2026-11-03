@@ -226,6 +226,41 @@ public sealed class PopsStabTests
         Assert.False(Window(m));
     }
 
+    /// <summary>The overrun-cut gate (0A:A7BC) with the stock cut requested, for a window that runs: Stay or Cut.</summary>
+    private static uint GateExit(Machine m)
+    {
+        m.Cpu.SetR(0, 0xF780); m.Cpu.Psw = 0x0805;
+        m.Cpu.Jump(0x0C, 0x1030);
+        m.Run(50_000, x => x.Cpu.Address is Stay or Cut);
+        return m.Cpu.Address;
+    }
+
+    /// <summary>
+    /// The V10.1 review's finding: the gate checks the rise too, on every request of the stock cut, so it must allow 139/4
+    /// once stabbing as the tick does; with V8's +5 there, each stabbing window still ended 160 rpm above its lowest.
+    /// </summary>
+    [Theory] // RF1
+    [InlineData(150, 4, true)] [InlineData(150, 5, false)] [InlineData(260, 7, true)] [InlineData(260, 14, true)]
+    [InlineData(260, 15, false)]
+    public void TheGateAllowsTheSetRiseOnceStabbing(int ticks, byte rise, bool kept)
+    {
+        var m = StartedV101();
+        for (var tick = 1; tick <= ticks; tick++) Tick(m);
+        V8Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
+        Assert.Equal(kept ? Stay : Cut, GateExit(m));
+        Assert.Equal(kept, Window(m));
+    }
+
+    [Fact] // RF5: with stab size 0 the gate's rule is V8's for the whole window
+    public void WithoutStabsTheGateEndsTheWindowAt160Rpm()
+    {
+        var m = StartedV101(b => b[V10Fixture.Defaults + 9] = 0);
+        for (var tick = 1; tick <= 260; tick++) Tick(m);
+        V8Fixture.PutByte(m, 0x4007F, 135);
+        Assert.Equal(Cut, GateExit(m));
+        Assert.False(Window(m));
+    }
+
     [Fact]
     public void V101sStabsAreFiveDegreesOnTopOfThreeDegrees()
     {

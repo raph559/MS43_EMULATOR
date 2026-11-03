@@ -27,6 +27,7 @@ public sealed class V10DriveFixture
     /// <summary>V10.1's own flashed settings with pops on, and with the blip on.</summary>
     public static readonly byte[] V101Pops = V101(s => s[0] = 1);
     public static readonly byte[] V101Blip = V101(s => s[16] = 1);
+    public static readonly byte[] V101Pops160 = V101(s => { s[0] = 1; s[12] = 5; });             // V10's 160 rpm once stabbing
 
     static byte[] V101(Action<byte[]> change)
     {
@@ -81,6 +82,8 @@ public sealed class V10DriveFixture
             ("stabs-off", "pops-stabs", null), ("stabs-brake-off", "pops-stabs-brake", null), ("tap-off", "blip-tap", null),
             ("upshift-off", "blip-upshift", null), ("stop-off", "blip-stop-in-2nd", null),
             ("v101-pops", "pops-v101", V101Pops), ("v101-pops-off", "pops-v101", null), ("v101-braking", "blip-braking", V101Blip),
+            ("v101-downhill", "pops-downhill-v101", V101Pops), ("v101-downhill-160", "pops-downhill-v101", V101Pops160),
+            ("v101-downhill-off", "pops-downhill-v101", null),
         };
         // Two at a time: the owner games on this PC.
         Runs = jobs.AsParallel().WithDegreeOfParallelism(2).Select(j => (j.Key, Run: Record(j.Settings, j.Drive)))
@@ -157,6 +160,22 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         Assert.All(sparks, s => Assert.True(Math.Abs(s.DecidedAdvance + 23.625) <= 0.01 && Math.Abs(s.Advance + 23.625) <= 1.0,
             $"spark at {s.Fire / 24e6:F3} s: decided {s.DecidedAdvance}, fired {s.Advance}"));
         Assert.Empty(Spans(fixture.Runs["v101-pops-off"], 3));
+    }
+
+    /// <summary>
+    /// The V10.1 review's finding, end to end: on a slope that raises the rpm about 270 rpm once the stabs have begun, the
+    /// window runs its 4.0 s with V10.1's 480 rpm allowed, both at the tick and at the overrun-cut gate; with 139/4 = 5
+    /// (V10's 160 rpm) it ends on the slope, after the load.
+    /// </summary>
+    [Fact] // RF1
+    public void OnASlopeTheWindowOutlivesARiseBelowTheAllowance()
+    {
+        var window = Assert.Single(Spans(fixture.Runs["v101-downhill"], 3));
+        Assert.True(Math.Abs(window.End - window.Start - 4.0) <= 0.02, $"a window of {window.End - window.Start:F3} s");
+        Assert.Equal(5, Spans(fixture.Runs["v101-downhill"], V10Fixture.PopsStab).Count);
+        var cut = Assert.Single(Spans(fixture.Runs["v101-downhill-160"], 3));
+        Assert.True(cut.End - cut.Start > 2.3 && cut.End - cut.Start < 3.8, $"with 160 rpm a window of {cut.End - cut.Start:F3} s");
+        Assert.True(cut.End > 19.5 && cut.End < window.End - 0.1, $"with 160 rpm the window ended at {cut.End:F3} s");
     }
 
     [Fact]
@@ -262,7 +281,7 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         { "stabs", "stabs-off" }, { "no-stabs", "stabs-off" }, { "floor", "stabs-off" }, { "stabs-brake", "stabs-brake-off" },
         { "braking", "braking-off" }, { "tap", "tap-off" }, { "upshift", "upshift-off" }, { "stop", "stop-off" },
         { "stop-21", "stop-off" }, { "from-cut", "from-cut-off" }, { "v101-pops", "v101-pops-off" },
-        { "v101-braking", "braking-off" },
+        { "v101-braking", "braking-off" }, { "v101-downhill", "v101-downhill-off" }, { "v101-downhill-160", "v101-downhill-off" },
     };
 
     // The fault labels of paths 111, 112, 113 (the throttle controller), 117, 118 (the brake) and 149 (the torque check).
