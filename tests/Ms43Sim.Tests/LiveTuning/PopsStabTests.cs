@@ -261,6 +261,29 @@ public sealed class PopsStabTests
         Assert.False(Window(m));
     }
 
+    /// <summary>
+    /// V10.1: the stabs begun in the window are counted in pops' spare byte (09FBF, after POPS_MIN) for the app's log, which
+    /// reads it twice a second: FDF8.7 alone shows a 150 ms stab to about one read in five. A window's start clears it, and
+    /// it keeps the window's count after the window ends.
+    /// </summary>
+    [Fact]
+    public void TheStabsBegunAreCountedForTheLog()
+    {
+        var m = Machine(Image(V10Fixture.Bytes), V10Fixture.Symbol);
+        V8Fixture.PutByte(m, 0x4007F, 130);
+        V8Fixture.PutByte(m, V10Fixture.PopsStabs, 7);                  // left from an earlier window
+        Gate(m);
+        Assert.Equal(0, V10Fixture.Byte(m, V10Fixture.PopsStabs));
+        var counts = new List<int>();
+        while (Window(m) && counts.Count < 500) { Tick(m); counts.Add(V10Fixture.Byte(m, V10Fixture.PopsStabs)); }
+        Assert.Equal(0, counts[199]);                                    // still loading at tick 200
+        Assert.Equal(1, counts[200]);                                    // the first stab begins at tick 201
+        Assert.Equal(1, counts[239]);
+        Assert.Equal(2, counts[240]);                                    // the next 400 ms later
+        Assert.Equal(5, counts[^1]);                                     // five in the 4.0 s window, kept after it
+        Assert.False(Window(m));
+    }
+
     [Fact]
     public void V101sStabsAreFiveDegreesOnTopOfThreeDegrees()
     {

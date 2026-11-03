@@ -47,6 +47,9 @@ public static class V10Fixture
     // V10's state at the end of pool A (logical 668..679), below the watch record, and its FDF8 bits.
     public const uint PopsT = 0x41F9C, BlipAdd = 0x41F9E, BlipLeft = 0x41FA0, PopsPh = 0x41FA2, BlipCl = 0x41FA3,
         BlipTgt = 0x41FA4, BlipTap = 0x41FA5, BlipPrev = 0x41FA6, BlipRate = 0x41FA7, Flags = 0xFDF8;
+
+    /// <summary>V10.1: the stabs begun in the current pops window, in pops' spare byte after POPS_MIN, for the log.</summary>
+    public const uint PopsStabs = 0x41FBF;
     public const int PopsStab = 7, BlipOn = 8, BlipUsed = 9, BlipArmed = 10, BlipTapping = 11, BlipHold = 12, Guard = 13;
 
     public static byte[] Bytes
