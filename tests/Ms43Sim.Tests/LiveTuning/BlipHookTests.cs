@@ -94,6 +94,7 @@ public sealed class BlipHookTests
         var m = Seed(Image(v10: true, change), mode, (ushort)(0x4000 | 1 << V10Fixture.BlipOn | (guard ? 1 << V10Fixture.Guard : 0)),
             0x0800, 0, fd2e, fd30);
         m.Bus.Poke16(V10Fixture.BlipAdd, add);
+        V8Fixture.PutByte(m, V10Fixture.BlipTgt, 120);                 // a running blip has its target: 3,840 rpm, above the 3,200
         return m;
     }
 
@@ -141,6 +142,57 @@ public sealed class BlipHookTests
         var stock = notFuelled.Bus.Peek16(0xE2B4);
         Run(notFuelled, Spark);
         Assert.Equal(stock, notFuelled.Bus.Peek16(0xE2B4));
+    }
+
+    /// <summary>
+    /// V10.2's cap: while a blip runs, the spark is 141's cap angle (flashed 0, −23.625°) whenever the engine speed (807F) is
+    /// above the blip's target (BLIP_TGT, both in 32 rpm units), and 140's blip angle (0x75, +20.25°) at or below it.
+    /// </summary>
+    private static Machine Capping(byte target, byte rpm, byte cap = 0)
+    {
+        var m = Blipping(change: b => b[V8Fixture.Defaults + 3 * 8 + 7] = cap);
+        V8Fixture.PutByte(m, V10Fixture.BlipTgt, target);
+        V8Fixture.PutByte(m, 0x4007F, rpm);
+        return m;
+    }
+
+    [Theory]
+    [InlineData((byte)75, (byte)76)] [InlineData((byte)75, (byte)90)] [InlineData((byte)70, (byte)72)]
+    public void TheCapAngleFiresAboveTheTarget(byte target, byte rpm)
+    {
+        var m = Capping(target, rpm);
+        Run(m, Spark);
+        Assert.Equal(0x0000, m.Bus.Peek16(0xE2B4));                   // E2B5 = 0, −23.625°; E2B4 = 0 as for every fixed angle
+    }
+
+    [Theory]
+    [InlineData((byte)75, (byte)75)] [InlineData((byte)75, (byte)74)] [InlineData((byte)75, (byte)60)]
+    public void TheCapNeverFiresAtOrBelowTheTarget(byte target, byte rpm)
+    {
+        var m = Capping(target, rpm);
+        Run(m, Spark);
+        Assert.Equal(0x7500, m.Bus.Peek16(0xE2B4));                   // the blip angle, +20.25°
+    }
+
+    [Theory] // 0x75 is the blip angle itself: the cap is off and the spark is V10.1's
+    [InlineData((byte)0x40)] [InlineData((byte)0x75)]
+    public void TheCapAngleIsTheSetting(byte cap)
+    {
+        var m = Capping(75, 90, cap);
+        Run(m, Spark);
+        Assert.Equal(cap << 8, m.Bus.Peek16(0xE2B4));
+    }
+
+    [Fact]
+    public void NoBlipNoCap()
+    {
+        // no blip and no window, the speed above a stale target: the stock path leaves the angle as it came
+        var m = Seed(Image(v10: true), Overrun, 0x4000, 0x0800, 0, 1 << 6);
+        V8Fixture.PutByte(m, V10Fixture.BlipTgt, 75);
+        V8Fixture.PutByte(m, 0x4007F, 90);
+        var stock = m.Bus.Peek16(0xE2B4);
+        Run(m, Spark);
+        Assert.Equal(stock, m.Bus.Peek16(0xE2B4));
     }
 
     /// <summary>
