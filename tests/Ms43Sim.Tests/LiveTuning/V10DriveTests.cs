@@ -178,15 +178,21 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         Assert.True(cut.End > 19.5 && cut.End < window.End - 0.1, $"with 160 rpm the window ended at {cut.End:F3} s");
     }
 
+    /// <summary>V10.1's default blip (owner, 2026-11-06: "Make it the default"): 30.0 deg TPS, fired at +20.25 deg.</summary>
     [Fact]
-    public void V101BlipsWithTwentyDegreesOnABrakingDownshift()
+    public void V101BlipsWithThirtyDegreesAtTwentyDegreesOfSpark()
     {
         var run = fixture.Runs["v101-braking"];
         var blip = Assert.Single(Spans(run, V10Fixture.BlipOn));
         Assert.True(blip.Start >= 18.5 && blip.Start <= 18.6, $"the blip started at {blip.Start:F3} s");
         var rise = run.Stores.Where(s => s.Seconds > blip.Start + 0.01 && s.Seconds < blip.Start + 0.05).ToList();
         Assert.NotEmpty(rise);
-        Assert.All(rise, s => Assert.True(Math.Abs(s.Added - 10925) <= 4, $"+{s.Added} at {s.Seconds:F3} s"));
+        Assert.All(rise, s => Assert.True(Math.Abs(s.Added - 16387) <= 4, $"+{s.Added} at {s.Seconds:F3} s"));
+        var sparks = run.Result.Sparks.Where(s => s.Main && s.Fire / 24e6 > blip.Start + 0.05 && s.Fire / 24e6 < blip.End - 0.02).ToList();
+        Assert.NotEmpty(sparks);
+        Assert.All(sparks, s => Assert.True(Math.Abs(s.DecidedAdvance - 20.25) <= 0.01 && Math.Abs(s.Advance - 20.25) <= 1.0,
+            $"spark at {s.Fire / 24e6:F3} s: decided {s.DecidedAdvance}, fired {s.Advance}"));
+        Assert.DoesNotContain(run.Ticks, t => (t.Fdf8 & 1 << V10Fixture.BlipOn) != 0 && (t.Fdf8 & 1 << V10Fixture.Guard) != 0);
     }
 
     [Fact] // RF3

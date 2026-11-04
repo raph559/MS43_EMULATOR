@@ -328,13 +328,13 @@ public sealed class BlipTests
         Assert.NotEqual(0, m.Bus.Peek16(0xFD2A) & 1 << 12);
     }
 
-    [Fact] // V10.1's default blip opening, 20.0 deg TPS (owner, 2026-11-05: "do it by default")
-    public void V101BlipsWithTwentyDegrees()
+    [Fact] // V10.1's default blip opening, 30.0 deg TPS, the most the limits allow (owner, 2026-11-06: "Make it the default")
+    public void V101BlipsWithThirtyDegrees()
     {
         var m = Machine(v101: true);
         Braking(m); PopsStabTests.Tick(m);
         Assert.True(On(m));
-        Assert.InRange(Add(m), 10923, 10927);
+        Assert.InRange(Add(m), 16385, 16389);
     }
 
     /// <summary>The rpm at which the hold began, the rpm climbing one 807F unit (32 rpm) a tick from 50 toward 83.</summary>
@@ -430,7 +430,7 @@ public sealed class BlipTests
         });
         Assert.Equal(0xD80DEu, m.Cpu.Address);
         Assert.NotNull(seen);
-        Assert.InRange(seen.Value.Add, v101 ? 10923 : 8191, v101 ? 10927 : 8195);
+        Assert.InRange(seen.Value.Add, v101 ? 16385 : 8191, v101 ? 16389 : 8195);
         Assert.Equal(150, seen.Value.Left);
         Assert.False(seen.Value.Hold);
     }

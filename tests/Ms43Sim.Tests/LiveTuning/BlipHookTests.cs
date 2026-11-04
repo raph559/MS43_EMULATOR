@@ -134,7 +134,7 @@ public sealed class BlipHookTests
     {
         var m = Blipping();
         Run(m, Spark);
-        Assert.Equal(90, m.Bus.Peek16(0xE2B4) >> 8);
+        Assert.Equal((int)V10Fixture.Group(140)[7], m.Bus.Peek16(0xE2B4) >> 8);         // the flashed blip angle, +20.25 deg on V10.1
         Assert.Equal(0, m.Bus.Peek16(0xE2B4) & 255);
 
         var notFuelled = Blipping(mode: 1 << 12);                    // in the overrun cut: the stock angle
