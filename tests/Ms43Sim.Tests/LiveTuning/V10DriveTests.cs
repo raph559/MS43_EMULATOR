@@ -109,11 +109,11 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     }
 
     [Fact]
-    public void V101ImagesAreKnownWhateverTheirSettings()
+    public void V102ImagesAreKnownWhateverTheirSettings()
     {
-        Assert.Equal("MS43X001 live overlay V10.1", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
-        Assert.Equal("MS43X001 live overlay V10.1", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Stabs).Image));
-        Assert.Equal("MS43X001 live overlay V10.1", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
+        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
+        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Stabs).Image));
+        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
     }
 
     [Fact]

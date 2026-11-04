@@ -116,27 +116,80 @@ public sealed class OverlayV10Tests
         return bytes;
     }
 
-    [Fact] // V10.1: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
-    public void HeaderIsVersion10Minor1With143EntriesAndMagicC0DA()
+    [Fact] // V10.2: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
+    public void TheV102HeaderSaysMinor2()
     {
         var image = V10Fixture.Bytes;
         Assert.Equal("LTOV"u8.ToArray(), image.AsSpan(0x4B544, 4).ToArray());
-        Assert.Equal(0x010A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
+        Assert.Equal(0x020A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
         Assert.Equal(0xFFA8, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B54E)));
         Assert.Equal(143, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B550)));
         Assert.Equal(0xC0DA, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B552)));
     }
 
-    [Fact] // V10.1 beside V10: each program is known whatever its flashed settings, which are calibration
-    public void V101IsKnownBesideTheSentV10()
+    [Fact] // V10.2 beside the sent V10.1 and V10: each program is known whatever its flashed settings, which are calibration
+    public void ProgramIdentityNamesV102()
     {
         static string? Name(byte[] bytes) => ProgramIdentity.Name(TestImages.AsFlashed(bytes).Image);
-        Assert.Equal("MS43X001 live overlay V10.1", Name(V10Fixture.Bytes));
-        Assert.Equal("MS43X001 live overlay V10.1", Name(V10Fixture.ClassicBytes));
+        Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.Bytes));
+        Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.ClassicBytes));
+        var fastBlip = TestBins.LiveOverlayV101FastBlipBytes;
+        Assert.Equal("MS43X001 live overlay V10.1", Name(fastBlip));
+        V10Fixture.Flashed.CopyTo(fastBlip, V10Fixture.Defaults);
+        Assert.Equal("MS43X001 live overlay V10.1", Name(fastBlip));
         var sent = TestBins.LiveOverlayV10Bytes;
         Assert.Equal("MS43X001 live overlay V10", Name(sent));
         V10Fixture.Flashed.CopyTo(sent, V10Fixture.Defaults);
         Assert.Equal("MS43X001 live overlay V10", Name(sent));
+    }
+
+    [Fact] // V10.2: the start's pre-injection (ip_tipr_cst__tco) is stock X001's again; the car file has it x 1.6
+    public void TheStartPreInjectionIsStockX001()
+    {
+        byte[] stock = [0x62, 0x9D, 0x02, 0x79, 0x33, 0x53, 0x2A, 0x37, 0x0A, 0x27, 0x6B, 0x17, 0xDA, 0x0E, 0x82, 0x0A];
+        Assert.Equal(stock, V10Fixture.Bytes.AsSpan(0x7DE64, 16).ToArray());
+        Assert.Equal(stock, TestBins.ReleaseBytes.AsSpan(0x7DE64, 16).ToArray());
+        Assert.NotEqual(stock, TestBins.CarBytes.AsSpan(0x7DE64, 16).ToArray());
+    }
+
+    /// <summary>
+    /// The built V10.2, checksums corrected as a full write does, against the V10.1 fast-blip bin sent to the owner: the
+    /// only differences are the overlay block, the new hook at 0x3D4D4, the start table and the checksum words.
+    /// </summary>
+    [Fact]
+    public void V102DiffersFromV101OnlyWhereThePlanSays()
+    {
+        var built = TestImages.AsFlashed(V10Fixture.Bytes).Image.Bytes.ToArray();
+        var sent = TestBins.LiveOverlayV101FastBlipBytes;
+        (int Start, int End)[] allowed =
+        [
+            (0x4B544, 0x4FFE6),      // the overlay block, its code and its flashed settings
+            (0x3D4D4, 0x3D4D8),      // the AFR display join's JMPS
+            (0x7DE64, 0x7DE74),      // ip_tipr_cst__tco, back to stock
+            .. ChecksumWords,
+        ];
+        var outside = Enumerable.Range(0, built.Length)
+            .Where(i => built[i] != sent[i] && !allowed.Any(a => i >= a.Start && i < a.End) && !IsHookTarget(built, sent, i))
+            .Select(i => $"{i:X5}").ToList();
+        Assert.True(outside.Count == 0, "differences outside the plan's ranges: " + string.Join(" ", outside.Take(20)));
+        Assert.Contains(Enumerable.Range(0x7DE64, 16), i => built[i] != sent[i]);
+        Assert.Contains(Enumerable.Range(0x3D4D4, 4), i => built[i] != sent[i]);
+    }
+
+    /// <summary>The five stored checksums (tools/ms43_checksums.py): boot, program and calibration CRCs, program and cal sums.</summary>
+    private static readonly (int Start, int End)[] ChecksumWords =
+        [(0x3C24, 0x3C26), (0x6FDE0, 0x6FDE2), (0x73FE0, 0x73FE2), (0x6FDAE, 0x6FDB2), (0x72FFC, 0x73000)];
+
+    /// <summary>
+    /// A byte of an existing hook's target: a CALLS or JMPS into segment 0C at the same site in both images, whose offset
+    /// moved because the overlay's code grew.
+    /// </summary>
+    private static bool IsHookTarget(byte[] built, byte[] sent, int i)
+    {
+        foreach (var site in new[] { i - 2, i - 3 })
+            if (site >= 0 && built[site] is 0xDA or 0xFA && built[site + 1] == 0x0C && sent[site] == built[site] && sent[site + 1] == 0x0C)
+                return true;
+        return false;
     }
 
     [Fact]

@@ -32,6 +32,10 @@ public static class TestBins
     public static byte[] LiveOverlayV10Bytes => Read("bins/CAR_43X001_SP95_STAGE1_LIVE_OVERLAY_V10.bin",
         "708f767fd673ef4390c2c067e5b147af0d6005e2164c0efda80a2e363d8581f0");
 
+    /// <summary>The live overlay V10.1 with the faster blip, as built at ac30012 and sent to the owner on 2026-11-06.</summary>
+    public static byte[] LiveOverlayV101FastBlipBytes => Read("bins/CAR_43X001_SP95_STAGE1_LIVE_OVERLAY_V10_1_FAST_BLIP.bin",
+        "2ba49c274a438898d6fa8f251ad8676cce5889aed964ac4c2e62352714b0d203");
+
     static byte[] Read(string relative, string expectedSha256)
     {
         lock (cache)
