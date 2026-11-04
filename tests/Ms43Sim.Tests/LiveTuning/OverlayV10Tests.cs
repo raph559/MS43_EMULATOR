@@ -15,12 +15,13 @@ public static class V10Fixture
     public const int Defaults = V8Fixture.Defaults;
 
     /// <summary>
-    /// Groups 138..142 as V10.1 flashes them: pops (4.0 s, -23.625°, AFR 9.99, 4,000 rpm, 3.0 °TPS), stabs (5.0 °TPS,
-    /// 480 rpm rise once stabbing), blip (30.0 °TPS at +20.25°), gears and tap (a 150 ms lead), ratios.
+    /// Groups 138..142 as V10.2 flashes them: pops (4.0 s, -23.625°, a real AFR of 7.0, 4,000 rpm, 3.0 °TPS), stabs
+    /// (5.0 °TPS, 480 rpm rise once stabbing), blip (30.0 °TPS at +20.25°), gears and tap (a 150 ms lead, the cap angle
+    /// -23.625°), ratios.
     /// </summary>
     public static readonly byte[] Flashed =
     [
-        0x00, 0x28, 0x00, 0xD2, 0x7D, 0x9E, 0x1E, 0x14,
+        0x00, 0x28, 0x00, 0x46, 0x7D, 0x9E, 0x1E, 0x14,
         0x14, 0x19, 0x0F, 0x19, 0x0F, 0x00, 0x00, 0x00,
         0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x96, 0x19, 0x75,
         0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x0F, 0x00,
@@ -29,11 +30,12 @@ public static class V10Fixture
 
     /// <summary>
     /// V10's flashed settings (4.0 s, 10.0 °TPS, 15.0 °TPS stabs and blip), with V10.1's two new bytes at V10's rules:
-    /// 139/4 = 5 (a window ends 160 rpm above its lowest, stabbing or not) and 141/6 = 0 (no lead).
+    /// 139/4 = 5 (a window ends 160 rpm above its lowest, stabbing or not) and 141/6 = 0 (no lead). V10.2: 138/3 is 121,
+    /// a real 12.1, the fuel V10's 184 (shown 11.5) gave through the firmware's straight line (x 1.219, real 12.06).
     /// </summary>
     public static readonly byte[] Classic =
     [
-        0x00, 0x28, 0x17, 0xB8, 0x32, 0x9E, 0x64, 0x14,
+        0x00, 0x28, 0x17, 0x79, 0x32, 0x9E, 0x64, 0x14,
         0x14, 0x4B, 0x0F, 0x19, 0x05, 0x00, 0x00, 0x00,
         0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x4B, 0x19, 0x5A,
         0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x00, 0x00,
@@ -189,7 +191,7 @@ public sealed class OverlayV10Tests
 
     public static TheoryData<int, int, byte> OutOfRange => new()
     {
-        { 138, 3, 127 },
+        { 138, 3, 49 }, { 138, 3, 148 },
         { 139, 0, 51 }, { 139, 1, 151 }, { 139, 2, 4 }, { 139, 2, 31 }, { 139, 3, 9 }, { 139, 3, 101 }, { 139, 4, 0 },
         { 139, 4, 4 }, { 139, 4, 32 },
         { 140, 0, 3 }, { 140, 0, 0x7F }, { 140, 0, 0xA0 }, { 140, 0, 0xFF }, { 140, 1, 0 }, { 140, 1, 4 },
@@ -206,7 +208,7 @@ public sealed class OverlayV10Tests
 
     public static TheoryData<int, int, byte> AtTheLimits => new()
     {
-        { 138, 3, 128 }, { 138, 3, 211 }, { 138, 3, 255 },
+        { 138, 3, 50 }, { 138, 3, 70 }, { 138, 3, 147 },
         { 139, 0, 0 }, { 139, 0, 50 }, { 139, 1, 0 }, { 139, 1, 150 }, { 139, 2, 5 }, { 139, 2, 30 }, { 139, 3, 10 },
         { 139, 3, 100 }, { 139, 4, 5 }, { 139, 4, 31 },
         { 140, 0, 0 }, { 140, 0, 2 }, { 140, 0, 0x80 }, { 140, 0, 0x97 }, { 140, 0, 0x9F }, { 140, 1, 1 }, { 140, 1, 3 },
@@ -282,9 +284,9 @@ public sealed class OverlayV10Tests
         Assert.Equal(expected, Setting(image, id, index));
     }
 
-    [Theory] // V10.1: the pops AFR target reaches 255 (lambda 0.504, AFR 7.4); V10 stopped at 210 (AFR 9.99)
-    [InlineData(255, 255)] [InlineData(211, 211)] [InlineData(210, 210)] [InlineData(127, 128)]
-    public void ThePopsAfrTargetReachesLambdaHalf(byte flashed, int expected)
+    [Theory] // V10.2: the pops AFR target is the real AFR x 10, 5.0..14.7 (V10.1's firmware bytes 128..255 are gone)
+    [InlineData(50, 50)] [InlineData(70, 70)] [InlineData(147, 147)] [InlineData(49, 50)] [InlineData(210, 147)]
+    public void ThePopsAfrIsARealAfrFrom5To14_7(byte flashed, int expected)
     {
         var image = V10Fixture.Bytes;
         image[V10Fixture.Defaults + 3] = flashed;

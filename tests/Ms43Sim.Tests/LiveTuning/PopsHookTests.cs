@@ -16,13 +16,19 @@ public abstract class PopsHookTests
     /// <summary>The throttle opening's limit (0.1 °TPS) and the 86A4 units it adds: V8 5.0, V9 20.0 (owner, 2026-10-29).</summary>
     protected abstract (byte Limit, int Add) ThrottleLimit { get; }
 
+    /// <summary>
+    /// The flashed AFR byte and what the shared path then receives in R12 and R13. V8 and V9 pass the firmware's own
+    /// target byte (184, 11.5 shown); V10.2's byte is the real AFR × 10, so 70 (7.0) forces the rich path with 255.
+    /// </summary>
+    protected virtual (byte Setting, int Passed) Afr => (184, 184);
+
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
-    private static readonly byte[] Settings = [1, 20, 23, 184, 50, 158, 30, 20];
+    private byte[] Settings => [1, 20, 23, Afr.Setting, 50, 158, 30, 20];
 
     private sealed record Hook(string Name, byte Segment, ushort Offset, uint[] Ends);
 
     private static readonly Hook Spark = new("spark", 0x0A, 0xD424, [0xAD428]);
-    private static readonly Hook Afr = new("afr", 0x0B, 0xD434, [0xBD438, 0xBD44E, 0xBD456, 0xBD464]);
+    private static readonly Hook AfrHook = new("afr", 0x0B, 0xD434, [0xBD438, 0xBD44E, 0xBD456, 0xBD464]);
     private static readonly Hook Throttle = new("throttle", 0x09, 0xB138, [0x9B13C]);
 
     private byte[] Image(byte[] settings, bool donor)
@@ -65,12 +71,12 @@ public abstract class PopsHookTests
     public void EachHookIsStockWhenInactive()
     {
         var cases = 0;
-        foreach (var hook in new[] { Spark, Afr, Throttle })
+        foreach (var hook in new[] { Spark, AfrHook, Throttle })
         foreach (var (mode, fdf8) in new (ushort, ushort)[] { (Overrun, 0x4000), (PartLoad, 0x4008), (Idle, 0x4008), (Overrun, 0x4004) })
         for (var cv = 0; cv < 4; cv++)
         for (var sample = 0; sample < 5; sample++)
         {
-            if (hook != Afr && fdf8 == 0x4004) continue;
+            if (hook != AfrHook && fdf8 == 0x4004) continue;
             var psw = (ushort)(0x0801 | cv << 1);
             var expected = Seed(Image(Settings, donor: true), mode, fdf8, psw, sample);
             var actual = Seed(Image(Settings, donor: false), mode, fdf8, psw, sample);
@@ -107,10 +113,10 @@ public abstract class PopsHookTests
     public void AfrFeedsTheRichTargetThroughTheSharedPath()
     {
         var m = Seed(Image(Settings, donor: false), Overrun, 0x4008, 0x0800, 0);
-        Assert.Equal(0xBD456u, Run(m, Afr));
-        Assert.Equal(184, m.Cpu.R(12)); Assert.Equal(184, m.Cpu.R(13));
+        Assert.Equal(0xBD456u, Run(m, AfrHook));
+        Assert.Equal(Afr.Passed, m.Cpu.R(12)); Assert.Equal(Afr.Passed, m.Cpu.R(13));
         m = Seed(Image(Settings, donor: false), Overrun, 0x400C, 0x0800, 0);
-        Assert.Equal(0xBD44Eu, Run(m, Afr));
+        Assert.Equal(0xBD44Eu, Run(m, AfrHook));
     }
 
     [Theory]
@@ -186,4 +192,109 @@ public sealed class PopsHookTestsOnV10 : PopsHookTests
 {
     protected override OverlayFixture Fixture => OverlayFixture.V10;
     protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);
+    protected override (byte Setting, int Passed) Afr => (70, 255);    // V10.2: a real 7.0 forces the rich path
+}
+
+/// <summary>
+/// V10.2's real pops AFR, on the V10 image. In a window with the pops AFR below 14.7, pops_afr (0B:D434) keeps the car
+/// file's own target byte in POPS_XSTOCK (BLIP_RATE's byte, free while no blip runs) and forces the shared rich path with
+/// 255, which stores 91A0 = 2032. At the path's join (0B:D4D4), pops_fuel then writes 91A0 = (147 − A) × 4096 / A, or
+/// the car file's (X − 128) × 16 when that is richer, and the logged target 91B9 = 91B8 × 4096 / (4096 + 91A0); on every
+/// other pass it runs the displaced MOVBZ R12, 91B8h and returns to 0B:D4D8. Direct CPU tests from the real sites.
+/// </summary>
+public sealed class PopsRealAfrHookTests
+{
+    private const ushort Overrun = 1 << 11, Window = 0x4008;
+    private const uint Enrichment = 0x411A0, Stoich = 0x411B8, XStock = 0x41FA7;
+    private static readonly uint[] AfrEnds = [0xBD438, 0xBD44E, 0xBD456, 0xBD464], FuelEnds = [0xBD4D8, 0xBD4E8];
+
+    private static Machine Seed(byte afr, ushort fdf8 = Window, ushort fd9a = 1 << 10, ushort enrichment = 2032, byte xStock = 128)
+    {
+        var image = V10Fixture.Bytes;
+        new byte[] { 1, 20, 23, afr, 50, 158, 30, 20 }.CopyTo(image, V8Fixture.Defaults);
+        var m = V8Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
+        for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
+        m.Cpu.SetR(0, 0xF780);
+        m.Cpu.Psw = 0x0800;
+        m.Bus.Poke16(0xFD2C, Overrun);
+        m.Bus.Poke16(0xFDF8, fdf8);
+        m.Bus.Poke16(0xFD42, 1 << 13);
+        m.Bus.Poke16(0xFD9A, fd9a);
+        m.Bus.Poke16(Enrichment, enrichment);
+        m.Bus.Poke16(Stoich, 0x5500 | 147);                            // 91B8 = 147 (14.7); 91B9 = 55h, which only a write changes
+        V8Fixture.PutByte(m, XStock, xStock);
+        return m;
+    }
+
+    private static uint Run(Machine m, ushort offset, uint[] ends)
+    {
+        m.Cpu.Jump(0x0B, offset);
+        m.Run(200_000, x => ends.Contains(x.Cpu.Address));
+        Assert.True(ends.Contains(m.Cpu.Address), $"stopped at {m.Cpu.Address:X5}");
+        return m.Cpu.Address;
+    }
+
+    private static int Logged(Machine m) => m.Bus.Peek16(Stoich) >> 8;
+
+    [Fact]
+    public void ThePopsAfrForcesTheRichPathAndKeepsTheStockTarget()
+    {
+        var m = Seed(afr: 70, xStock: 0x55);
+        m.Cpu.SetR(6, 140);                                            // the car file's own target byte on entry
+        Assert.Equal(0xBD456u, Run(m, 0xD434, AfrEnds));
+        Assert.Equal(255, m.Cpu.R(12)); Assert.Equal(255, m.Cpu.R(13));
+        Assert.Equal(140, V10Fixture.Byte(m, XStock));
+    }
+
+    [Fact]
+    public void AtTheLeanestPopsAfrTheStockPathIsUntouched()
+    {
+        var m = Seed(afr: 147, xStock: 0x55);
+        m.Cpu.SetR(6, 140);
+        Assert.Equal(0xBD456u, Run(m, 0xD434, AfrEnds));
+        Assert.Equal(140, m.Cpu.R(12)); Assert.Equal(140, m.Cpu.R(13));
+        Assert.Equal(0x55, V10Fixture.Byte(m, XStock));
+    }
+
+    [Theory] // 91A0 = (147 − A) × 4096 / A, hand-computed and truncated; 91B9 = 147 × 4096 / (4096 + 91A0)
+    [InlineData((byte)50, 7946, 50)] [InlineData((byte)70, 4505, 70)] [InlineData((byte)98, 2048, 98)]
+    [InlineData((byte)120, 921, 120)] [InlineData((byte)146, 28, 146)]
+    public void TheFuelHookWritesTheRealPopsEnrichment(byte afr, int enrichment, int logged)
+    {
+        var m = Seed(afr);
+        var before = Enumerable.Range(0, 16).Select(r => m.Cpu.R(r)).ToArray();
+        Assert.Equal(0xBD4E8u, Run(m, 0xD4D4, FuelEnds));
+        Assert.InRange(m.Bus.Peek16(Enrichment), enrichment - 1, enrichment + 1);
+        Assert.Equal(logged, Logged(m));
+        foreach (var r in new[] { 0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 14, 15 })
+            Assert.True(before[r] == m.Cpu.R(r), $"R{r} changed");
+    }
+
+    [Theory] // the car file's own enrichment, (X − 128) × 16, wins when it is richer than the pops AFR's
+    [InlineData((byte)255, 2032, 98)] [InlineData((byte)140, 921, 120)] [InlineData((byte)100, 921, 120)]
+    public void TheCarFilesRicherTargetWins(byte xStock, int enrichment, int logged)
+    {
+        var m = Seed(afr: 120, xStock: xStock);
+        Assert.Equal(0xBD4E8u, Run(m, 0xD4D4, FuelEnds));
+        Assert.InRange(m.Bus.Peek16(Enrichment), enrichment - 1, enrichment + 1);
+        Assert.Equal(logged, Logged(m));
+    }
+
+    [Fact]
+    public void OutsideAWindowTheFuelHookIsStock() => Stock(Seed(afr: 70, fdf8: 0x4000));
+
+    [Theory] // the loop still on (under 1,600 rpm), the rich path not forced this pass, RAL, or a pops AFR of 14.7
+    [InlineData((ushort)0, (ushort)2032, (ushort)Window, (byte)70)] [InlineData((ushort)(1 << 10), (ushort)896, (ushort)Window, (byte)70)]
+    [InlineData((ushort)(1 << 10), (ushort)2032, (ushort)(Window | 4), (byte)70)] [InlineData((ushort)(1 << 10), (ushort)2032, (ushort)Window, (byte)147)]
+    public void WithoutTheRichPathTheFuelHookIsStock(ushort fd9a, ushort enrichment, ushort fdf8, byte afr) =>
+        Stock(Seed(afr, fdf8, fd9a, enrichment));
+
+    private static void Stock(Machine m)
+    {
+        var enrichment = m.Bus.Peek16(Enrichment);
+        Assert.Equal(0xBD4D8u, Run(m, 0xD4D4, FuelEnds));
+        Assert.Equal(147, m.Cpu.R(12));                                // the displaced MOVBZ R12, 91B8h
+        Assert.Equal(enrichment, m.Bus.Peek16(Enrichment));
+        Assert.Equal(0x55, Logged(m));
+    }
 }
