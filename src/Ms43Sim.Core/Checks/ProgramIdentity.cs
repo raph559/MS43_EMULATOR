@@ -59,10 +59,17 @@ public static class ProgramIdentity
     /// <summary>
     /// The live-tuning overlay 10.2 (V10.1 with the blip's spark cap above its target, ramped back toward advance after it,
     /// the real pops AFR and every AFR real, header minor 2), as tools/build_live_overlay_v10.py builds it since
-    /// 2026-11-08. Its flashed settings are calibration, and so are the stock start pre-injection and the X001 release's
-    /// injector flow it carries (0x7DE64, 0x70E14, outside the program the identity covers).
+    /// 2026-11-08 after the review: above the target the spark is the lower of the cap and the blip angle. Its flashed
+    /// settings are calibration, and so are the stock start pre-injection and the X001 release's injector flow it
+    /// carries (0x7DE64, 0x70E14, outside the program the identity covers).
     /// </summary>
-    public const string Ms43X001LiveOverlayV102 = "42d0139998bbdd20ca73c49a208c0a29ec408dc60a54b057373d81f79636f4fd";
+    public const string Ms43X001LiveOverlayV102 = "b8bafce5f10d2b26a8095d7a71be094a634145bfd7a431bcc36c536c05de7173";
+
+    /// <summary>
+    /// V10.2's first build (453cd66), sent to the owner on 2026-11-08 before the review: a cap set above the blip angle
+    /// fires that cap above the target.
+    /// </summary>
+    public const string Ms43X001LiveOverlayV102First = "42d0139998bbdd20ca73c49a208c0a29ec408dc60a54b057373d81f79636f4fd";
 
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 
@@ -117,6 +124,7 @@ public static class ProgramIdentity
         Ms43X001LiveOverlayV10 => "MS43X001 live overlay V10",
         Ms43X001LiveOverlayV101 => "MS43X001 live overlay V10.1",
         Ms43X001LiveOverlayV102 => "MS43X001 live overlay V10.2",
+        Ms43X001LiveOverlayV102First => "MS43X001 live overlay V10.2 (first build)",
         _ => OfWithFlashedPops(image) switch
         {
             Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
@@ -124,7 +132,12 @@ public static class ProgramIdentity
             Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",
             _ => OfWithFlashed(image, V10Defaults) == Ms43X001LiveOverlayV10 ? "MS43X001 live overlay V10"
                 : OfWithFlashed(image, V101Defaults) == Ms43X001LiveOverlayV101 ? "MS43X001 live overlay V10.1"
-                : OfWithFlashed(image, V102Defaults) == Ms43X001LiveOverlayV102 ? "MS43X001 live overlay V10.2" : null,
+                : OfWithFlashed(image, V102Defaults) switch
+                {
+                    Ms43X001LiveOverlayV102 => "MS43X001 live overlay V10.2",
+                    Ms43X001LiveOverlayV102First => "MS43X001 live overlay V10.2 (first build)",
+                    _ => null,
+                },
         },
     };
 

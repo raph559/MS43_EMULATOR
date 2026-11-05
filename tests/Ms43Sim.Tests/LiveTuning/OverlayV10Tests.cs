@@ -130,12 +130,16 @@ public sealed class OverlayV10Tests
         Assert.Equal(0xC0DA, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B552)));
     }
 
-    [Fact] // V10.2 beside the sent V10.1 and V10: each program is known whatever its flashed settings, which are calibration
+    [Fact] // V10.2 beside the sent V10.2 first build, V10.1 and V10: each program is known whatever its flashed settings
     public void ProgramIdentityNamesV102()
     {
         static string? Name(byte[] bytes) => ProgramIdentity.Name(TestImages.AsFlashed(bytes).Image);
         Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.Bytes));
         Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.ClassicBytes));
+        var first = TestBins.LiveOverlayV102FirstBytes;                   // sent 2026-11-08, before the review's cap fix
+        Assert.Equal("MS43X001 live overlay V10.2 (first build)", Name(first));
+        V10Fixture.Classic.CopyTo(first, V10Fixture.Defaults);
+        Assert.Equal("MS43X001 live overlay V10.2 (first build)", Name(first));
         var fastBlip = TestBins.LiveOverlayV101FastBlipBytes;
         Assert.Equal("MS43X001 live overlay V10.1", Name(fastBlip));
         V10Fixture.Flashed.CopyTo(fastBlip, V10Fixture.Defaults);

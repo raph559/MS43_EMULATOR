@@ -185,6 +185,20 @@ public sealed class BlipHookTests
     }
 
     /// <summary>
+    /// V10.2's review (2026-11-08): a cap set above the blip angle would add advance above the target, the opposite of a
+    /// cap. Above the target the spark is the lower of the two, so at or above the blip angle (0x75 here) the cap is off.
+    /// </summary>
+    [Theory]
+    [InlineData((byte)0x76)] [InlineData((byte)0x8F)]                  // just above the blip angle, and the cap's top, +30.0°
+    public void ACapAboveTheBlipAngleIsOff(byte cap)
+    {
+        var m = Capping(75, 90, cap);
+        Run(m, Spark);
+        Assert.Equal(0x7500, m.Bus.Peek16(0xE2B4));
+        Assert.Equal(0x75, V10Fixture.Byte(m, V10Fixture.BlipSpk));
+    }
+
+    /// <summary>
     /// V10.2: the spark call arms each coil's charge for the angle before it, so an advance written while a coil charges
     /// cuts that charge by the advance's time (2026-11-08 drive: the cap's 44 deg release at 2,624 rpm left cylinder 4
     /// 0.21 ms of its 2.35, igcfb_5 detected). After the cap, an advance rises at most 807F / 4 steps of 0.375 deg a spark
