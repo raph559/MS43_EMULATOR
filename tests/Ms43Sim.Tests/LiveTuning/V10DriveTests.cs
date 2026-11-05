@@ -52,21 +52,31 @@ public sealed class V10DriveFixture
     /// <summary>One housekeeping pass: the time and FDF8.</summary>
     public sealed record Tick(double Seconds, int Fdf8);
 
-    public sealed record Run(DriveResult Result, IReadOnlyList<Store> Stores, IReadOnlyList<Tick> Ticks);
+    /// <summary>
+    /// One blip spark decision (V10.2), taken right after psk_blip writes E2B5 (psk_written): the time, the group the angle
+    /// came from (140 the blip angle, 141 the cap), 807F and BLIP_TGT as it compared them (32 rpm units), and the angle
+    /// written, after the ramp.
+    /// </summary>
+    public sealed record SparkPick(double Seconds, int Group, int Rpm, int Target, int Angle);
+
+    public sealed record Run(DriveResult Result, IReadOnlyList<Store> Stores, IReadOnlyList<Tick> Ticks, IReadOnlyList<SparkPick> Sparks);
 
     public static Run Record(byte[]? settings, string drive)
     {
-        var stores = new List<Store>(); var ticks = new List<Tick>();
+        var stores = new List<Store>(); var ticks = new List<Tick>(); var sparks = new List<SparkPick>();
         var hk = (uint)V10Fixture.Symbol("hk");
+        var picked = (uint)V10Fixture.Symbol("psk_written");             // right after MOVB 0E2B5h, RL4
         ushort pedalMap = 0;
         void Attach(DriveContext context) => context.PowerCycleStarted += (machine, _) =>
         {
             machine.OnInstruction(0x9B138, m => pedalMap = m.Cpu.R(4));
             machine.OnInstruction(0x9B13C, m => stores.Add(new Store(m.Cycles / 24e6, m.Bus.Peek16(0x406A4) - pedalMap, m.Bus.Peek16(0xFDF8))));
             machine.OnInstruction(hk, m => ticks.Add(new Tick(m.Cycles / 24e6, m.Bus.Peek16(0xFDF8))));
+            machine.OnInstruction(picked, m => sparks.Add(new SparkPick(m.Cycles / 24e6, m.Cpu.R(2), V10Fixture.Byte(m, 0x4007F),
+                V10Fixture.Byte(m, V10Fixture.BlipTgt), m.Bus.Peek16(0xE2B4) >> 8)));
         };
         var result = DriveRun.RunWithChecks(Image(settings), Load(drive), new DriveRunOptions(Observers: new Action<DriveContext>[] { Attach }));
-        return new Run(result, stores, ticks);
+        return new Run(result, stores, ticks, sparks);
     }
 
     public IReadOnlyDictionary<string, Run> Runs { get; }
@@ -106,6 +116,58 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         }
         if (start is { } open) spans.Add((open, run.Ticks[^1].Seconds));
         return spans;
+    }
+
+    /// <summary>
+    /// V10.2's cap on the scripted downshifts (the braking one passes 3rd's target, the tap one starts below 4th's): above
+    /// the target the cap angle at once; at or below it the blip angle, reached from the last angle written a step of
+    /// 807F / 4 at most per decision. Each run has one blip, so every decision after the first follows the one before.
+    /// </summary>
+    [Theory]
+    [InlineData("braking", 0x5A)] [InlineData("tap", 0x5A)] [InlineData("v101-braking", 0x75)]
+    public void TheBlipFiresTheCapAngleAboveItsTarget(string key, int blipAngle)
+    {
+        var sparks = fixture.Runs[key].Sparks;
+        Assert.Contains(sparks, s => s.Rpm > s.Target);
+        Assert.Contains(sparks, s => s.Rpm <= s.Target && s.Angle == blipAngle);
+        for (var i = 0; i < sparks.Count; i++)
+        {
+            var s = sparks[i];
+            var capped = s.Rpm > s.Target;
+            var expected = capped ? 0 : i == 0 ? Math.Min(s.Angle, blipAngle) : Math.Min(blipAngle, sparks[i - 1].Angle + s.Rpm / 4);
+            Assert.True(s.Group == (capped ? 141 : 140) && s.Angle == expected,
+                $"{key} at {s.Seconds:F3} s: rpm {s.Rpm} target {s.Target}, group {s.Group}, angle {s.Angle:X2}, expected {expected:X2}");
+        }
+    }
+
+    private static readonly int[] FiringOrder = [1, 5, 3, 6, 2, 4];
+
+    /// <summary>
+    /// The coil charges cut short from <paramref name="from"/> to <paramref name="to"/> seconds: a spark after under 1.8 ms
+    /// of charge (these drives charge 2.3 to 2.4 ms, and a ramp step takes under 0.5 ms), or a cylinder missing from the
+    /// firing order (the emulator keeps a spark only after 0.5 ms of charge, so a charge cut to almost nothing is none).
+    /// </summary>
+    internal static List<string> CutCharges(DriveResult run, double from, double to)
+    {
+        var sparks = run.Sparks.Where(s => s.Fire / 24e6 >= from && s.Fire / 24e6 <= to).OrderBy(s => s.Fire).ToList();
+        var cuts = sparks.Where(s => s.DwellMs < 1.8).Select(s => $"cylinder {s.Cylinder} at {s.Fire / 24e6:F3} s charged {s.DwellMs:F2} ms").ToList();
+        for (var i = 1; i < sparks.Count; i++)
+        {
+            var next = FiringOrder[(Array.IndexOf(FiringOrder, sparks[i - 1].Cylinder) + 1) % 6];
+            if (sparks[i].Cylinder != next)
+                cuts.Add($"cylinder {next} had no spark between {sparks[i - 1].Fire / 24e6:F3} and {sparks[i].Fire / 24e6:F3} s");
+        }
+        return cuts;
+    }
+
+    [Theory] // V10.2: the blip start, the cap and its release never cut a coil's charge (2026-11-08: cylinder 4, 0.21 ms)
+    [InlineData("braking")] [InlineData("tap")] [InlineData("v101-braking")]
+    public void ABlipNeverCutsACoilsChargeShort(string key)
+    {
+        var run = fixture.Runs[key];
+        var blip = Assert.Single(Spans(run, V10Fixture.BlipOn));
+        var cuts = CutCharges(run.Result, blip.Start - 0.1, blip.End + 0.2);
+        Assert.True(cuts.Count == 0, $"{key}: " + string.Join("; ", cuts));
     }
 
     [Fact]
@@ -178,6 +240,23 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         Assert.True(cut.End > 19.5 && cut.End < window.End - 0.1, $"with 160 rpm the window ended at {cut.End:F3} s");
     }
 
+    /// <summary>
+    /// The sparks of a blip: each decided between the cap's −23.625 deg and the blip angle (V10.2: the cap above the target,
+    /// the ramp between), and those decided at the blip angle after a spark decided there too fired within
+    /// <paramref name="fired"/> of it. (The ramp's last step rises while its coil charges, so that one spark fires
+    /// between the step before and the blip angle.)
+    /// </summary>
+    private static void SparksOfABlip(IReadOnlyList<Spark> sparks, double angle, double fired)
+    {
+        Assert.All(sparks, s => Assert.True(s.DecidedAdvance >= -23.625 - 0.01 && s.DecidedAdvance <= angle + 0.01,
+            $"spark at {s.Fire / 24e6:F3} s: decided {s.DecidedAdvance}"));
+        static bool At(Spark s, double a) => Math.Abs(s.DecidedAdvance - a) <= 0.01;
+        var ordered = sparks.OrderBy(s => s.Fire).ToList();
+        var steady = ordered.Where((s, i) => i > 0 && At(s, angle) && At(ordered[i - 1], angle)).ToList();
+        Assert.True(steady.Count >= 6, $"{steady.Count} steady sparks at {angle} deg");
+        Assert.All(steady, s => Assert.True(Math.Abs(s.Advance - angle) <= fired, $"spark at {s.Fire / 24e6:F3} s: fired {s.Advance}"));
+    }
+
     /// <summary>V10.1's default blip (owner, 2026-11-06: "Make it the default"): 30.0 deg TPS, fired at +20.25 deg.</summary>
     [Fact]
     public void V101BlipsWithThirtyDegreesAtTwentyDegreesOfSpark()
@@ -189,9 +268,7 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         Assert.NotEmpty(rise);
         Assert.All(rise, s => Assert.True(Math.Abs(s.Added - 16387) <= 4, $"+{s.Added} at {s.Seconds:F3} s"));
         var sparks = run.Result.Sparks.Where(s => s.Main && s.Fire / 24e6 > blip.Start + 0.05 && s.Fire / 24e6 < blip.End - 0.02).ToList();
-        Assert.NotEmpty(sparks);
-        Assert.All(sparks, s => Assert.True(Math.Abs(s.DecidedAdvance - 20.25) <= 0.01 && Math.Abs(s.Advance - 20.25) <= 1.0,
-            $"spark at {s.Fire / 24e6:F3} s: decided {s.DecidedAdvance}, fired {s.Advance}"));
+        SparksOfABlip(sparks, 20.25, 1.0);
         Assert.DoesNotContain(run.Ticks, t => (t.Fdf8 & 1 << V10Fixture.BlipOn) != 0 && (t.Fdf8 & 1 << V10Fixture.Guard) != 0);
     }
 
@@ -216,8 +293,7 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         Assert.All(rise, s => Assert.True(Math.Abs(s.Added - 8193) <= 4, $"+{s.Added} at {s.Seconds:F3} s"));
         Assert.All(run.Stores.Where(s => s.Seconds > blip.End + 0.01 && s.Seconds < blip.End + 0.5), s => Assert.Equal(0, s.Added));
         var sparks = run.Result.Sparks.Where(s => s.Main && s.Fire / 24e6 > blip.Start + 0.05 && s.Fire / 24e6 < blip.End - 0.02).ToList();
-        Assert.NotEmpty(sparks);
-        Assert.All(sparks, s => Assert.True(Math.Abs(s.Advance - 10.125) <= 0.375, $"spark at {s.Fire / 24e6:F3} s: {s.Advance}"));
+        SparksOfABlip(sparks, 10.125, 0.375);
         var opens = run.Result.Injections.Select(i => i.Open / 24e6).Where(t => t > blip.Start + 0.05 && t < blip.End).Order().ToList();
         Assert.NotEmpty(opens);
         for (var i = 1; i < opens.Count; i++) Assert.True(opens[i] - opens[i - 1] <= 0.2, $"no injection from {opens[i - 1]:F3} s");

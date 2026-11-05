@@ -199,8 +199,9 @@ public sealed class PopsHookTestsOnV10 : PopsHookTests
 /// V10.2's real pops AFR, on the V10 image. In a window with the pops AFR below 14.7, pops_afr (0B:D434) keeps the car
 /// file's own target byte in POPS_XSTOCK (BLIP_RATE's byte, free while no blip runs) and forces the shared rich path with
 /// 255, which stores 91A0 = 2032. At the path's join (0B:D4D4), pops_fuel then writes 91A0 = (147 − A) × 4096 / A, or
-/// the car file's (X − 128) × 16 when that is richer, and the logged target 91B9 = 91B8 × 4096 / (4096 + 91A0); on every
-/// other pass it runs the displaced MOVBZ R12, 91B8h and returns to 0B:D4D8. Direct CPU tests from the real sites.
+/// the car file's own target made real when that is richer, and the logged target 91B9 = 91B8 × 4096 / (4096 + 91A0).
+/// On every other pass with a rich target it makes that target real (every AFR real), and without one it runs the
+/// displaced MOVBZ R12, 91B8h and returns to 0B:D4D8. Direct CPU tests from the real sites.
 /// </summary>
 public sealed class PopsRealAfrHookTests
 {
@@ -270,8 +271,8 @@ public sealed class PopsRealAfrHookTests
             Assert.True(before[r] == m.Cpu.R(r), $"R{r} changed");
     }
 
-    [Theory] // the car file's own enrichment, (X − 128) × 16, wins when it is richer than the pops AFR's
-    [InlineData((byte)255, 2032, 98)] [InlineData((byte)140, 921, 120)] [InlineData((byte)100, 921, 120)]
+    [Theory] // the car file's own enrichment, made real (every AFR real), wins when it is richer than the pops AFR's
+    [InlineData((byte)255, 4032, 74)] [InlineData((byte)184, 1146, 114)] [InlineData((byte)140, 921, 120)] [InlineData((byte)100, 921, 120)]
     public void TheCarFilesRicherTargetWins(byte xStock, int enrichment, int logged)
     {
         var m = Seed(afr: 120, xStock: xStock);
@@ -280,14 +281,46 @@ public sealed class PopsRealAfrHookTests
         Assert.Equal(logged, Logged(m));
     }
 
-    [Fact]
-    public void OutsideAWindowTheFuelHookIsStock() => Stock(Seed(afr: 70, fdf8: 0x4000));
+    [Theory] // no rich target in this pass (FD9A.10 clear, so 91A0 was cleared or never set), in a window or not
+    [InlineData((ushort)0, (ushort)0x4000, (byte)70)] [InlineData((ushort)0, (ushort)Window, (byte)70)]
+    [InlineData((ushort)2032, (ushort)Window, (byte)70)]
+    public void WithoutARichTargetTheFuelHookIsStock(ushort enrichment, ushort fdf8, byte afr) =>
+        Stock(Seed(afr, fdf8, fd9a: 0, enrichment));
 
-    [Theory] // the loop still on (under 1,600 rpm), the rich path not forced this pass, RAL, or a pops AFR of 14.7
-    [InlineData((ushort)0, (ushort)2032, (ushort)Window, (byte)70)] [InlineData((ushort)(1 << 10), (ushort)896, (ushort)Window, (byte)70)]
-    [InlineData((ushort)(1 << 10), (ushort)2032, (ushort)(Window | 4), (byte)70)] [InlineData((ushort)(1 << 10), (ushort)2032, (ushort)Window, (byte)147)]
-    public void WithoutTheRichPathTheFuelHookIsStock(ushort fd9a, ushort enrichment, ushort fdf8, byte afr) =>
-        Stock(Seed(afr, fdf8, fd9a, enrichment));
+    /// <summary>
+    /// V10.2, every AFR real (spec §6b): with the rich path on in this pass (FD9A.10), the enrichment the shared path
+    /// stored, L = (X − 128) × 16, becomes L × 4096 / (4096 − L), signed and truncated toward zero, so the byte the XDF
+    /// shows as AFR 14.7 × (384 − X) / 256 gives that AFR. The logged target is the stock display from L,
+    /// 91B8 × (4096 − L) / 4096, so its numbers stay as today. This holds outside a window and in one where pops does not
+    /// act: RAL, a pops AFR of 14.7.
+    /// </summary>
+    [Theory]
+    [InlineData((byte)255, 4032, 74)] [InlineData((byte)184, 1146, 114)] [InlineData((byte)172, 850, 121)]
+    [InlineData((byte)112, -240, 156)]
+    public void EveryRichTargetIsReal(byte x, int real, int logged)
+    {
+        foreach (var (fdf8, afr) in new (ushort, byte)[] { (0x4000, 70), (Window | 4, 70), (Window, 147) })
+        {
+            var m = Seed(afr, fdf8, enrichment: (ushort)((x - 128) * 16));
+            var before = Enumerable.Range(0, 16).Select(r => m.Cpu.R(r)).ToArray();
+            var context = $"X {x}, FDF8 {fdf8:X4}, pops AFR {afr}";
+            Assert.True(Run(m, 0xD4D4, FuelEnds) == 0xBD4E8u, context);
+            Assert.True((ushort)real == m.Bus.Peek16(Enrichment), $"{context}: 91A0 {(short)m.Bus.Peek16(Enrichment)}");
+            Assert.True(logged == Logged(m), $"{context}: 91B9 {Logged(m)}");
+            Assert.True(m.Cpu.R(5) == 0x1000 && m.Cpu.R(12) == 147, $"{context}: R5 {m.Cpu.R(5):X4}, R12 {m.Cpu.R(12)}");
+            foreach (var r in new[] { 0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 14, 15 })
+                Assert.True(before[r] == m.Cpu.R(r), $"{context}: R{r} changed");
+        }
+    }
+
+    [Fact] // a window's pass that pops_afr did not force (a window begun between pops_afr and the join): the car file's, real
+    public void AWindowPassPopsDidNotForceIsRealToo()
+    {
+        var m = Seed(afr: 70, enrichment: 896);
+        Assert.Equal(0xBD4E8u, Run(m, 0xD4D4, FuelEnds));
+        Assert.Equal(1146, m.Bus.Peek16(Enrichment));
+        Assert.Equal(114, Logged(m));
+    }
 
     private static void Stock(Machine m)
     {

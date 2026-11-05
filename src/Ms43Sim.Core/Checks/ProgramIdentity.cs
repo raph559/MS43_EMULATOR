@@ -57,11 +57,12 @@ public static class ProgramIdentity
     public const string Ms43X001LiveOverlayV101 = "309a5749ae0f856600d5170602b820841dd209e401f666e0f9c1a17125b3ed45";
 
     /// <summary>
-    /// The live-tuning overlay 10.2 (V10.1 with the blip's spark cap above its target and the real pops AFR, header minor
-    /// 2), as tools/build_live_overlay_v10.py builds it since 2026-11-08. Its flashed settings are calibration, and so is
-    /// the stock start pre-injection it carries (0x7DE64, outside the program the identity covers).
+    /// The live-tuning overlay 10.2 (V10.1 with the blip's spark cap above its target, its spark ramped toward advance, the
+    /// real pops AFR and every AFR real, header minor 2), as tools/build_live_overlay_v10.py builds it since 2026-11-08.
+    /// Its flashed settings are calibration, and so are the stock start pre-injection and the X001 release's injector
+    /// flow it carries (0x7DE64, 0x70E14, outside the program the identity covers).
     /// </summary>
-    public const string Ms43X001LiveOverlayV102 = "847176711420eb00daf59b04bd439e4ea77ec4870a66775d1016ad1cea88943f";
+    public const string Ms43X001LiveOverlayV102 = "da1bec1856ace85b39014e6a97642d841dee568162e879e211a263eabb276214";
 
     static readonly byte[] PopsDefaults = [0x00, 0x14, 0x17, 0xB8, 0x32, 0x9E, 0x00, 0x14];
 

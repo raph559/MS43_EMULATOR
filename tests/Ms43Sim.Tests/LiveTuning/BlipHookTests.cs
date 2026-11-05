@@ -95,6 +95,7 @@ public sealed class BlipHookTests
             0x0800, 0, fd2e, fd30);
         m.Bus.Poke16(V10Fixture.BlipAdd, add);
         V8Fixture.PutByte(m, V10Fixture.BlipTgt, 120);                 // a running blip has its target: 3,840 rpm, above the 3,200
+        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0x75);                // and its last spark, here the flashed blip angle (V10.2)
         return m;
     }
 
@@ -181,6 +182,35 @@ public sealed class BlipHookTests
         var m = Capping(75, 90, cap);
         Run(m, Spark);
         Assert.Equal(cap << 8, m.Bus.Peek16(0xE2B4));
+    }
+
+    /// <summary>
+    /// V10.2: the spark call arms each coil's charge for the angle before it, so an advance written while a coil charges
+    /// cuts that charge by the advance's time (2026-11-08 drive: a 44 deg rise at 2,624 rpm left cylinder 4 0.21 ms of
+    /// its 2.35). An advance rises at most 807F / 4 steps of 0.375 deg a spark from the last angle the blip wrote
+    /// (BLIP_SPK), under 0.5 ms of charge at any speed; a retard, the cap, is whole at once.
+    /// </summary>
+    [Theory]
+    [InlineData((byte)0, (byte)100, (byte)25)]                         // from the cap at 3,200 rpm
+    [InlineData((byte)0, (byte)82, (byte)20)]                          // the drive's release at 2,624 rpm
+    [InlineData((byte)29, (byte)45, (byte)40)]                         // a blip's first spark from the car file's -12.75 deg
+    [InlineData((byte)100, (byte)100, (byte)0x75)]                     // within a step: the whole angle
+    public void AnAdvanceRisesAStepASpark(byte last, byte rpm, byte expected)
+    {
+        var m = Capping(target: 120, rpm: rpm);
+        V8Fixture.PutByte(m, V10Fixture.BlipSpk, last);
+        Run(m, Spark);
+        Assert.Equal(expected << 8, m.Bus.Peek16(0xE2B4));
+        Assert.Equal(expected, V10Fixture.Byte(m, V10Fixture.BlipSpk));
+    }
+
+    [Fact]
+    public void ARetardIsWholeAtOnce()
+    {
+        var m = Capping(target: 75, rpm: 90);                          // above the target, from the blip angle: the cap
+        Run(m, Spark);
+        Assert.Equal(0x0000, m.Bus.Peek16(0xE2B4));
+        Assert.Equal(0, V10Fixture.Byte(m, V10Fixture.BlipSpk));
     }
 
     [Fact]

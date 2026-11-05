@@ -50,6 +50,9 @@ public static class V10Fixture
     public const uint PopsT = 0x41F9C, BlipAdd = 0x41F9E, BlipLeft = 0x41FA0, PopsPh = 0x41FA2, BlipCl = 0x41FA3,
         BlipTgt = 0x41FA4, BlipTap = 0x41FA5, BlipPrev = 0x41FA6, BlipRate = 0x41FA7, Flags = 0xFDF8;
 
+    /// <summary>V10.2: the spark angle the blip wrote last (E2B5's encoding); shares POPS_PH, as no blip runs in a pops window.</summary>
+    public const uint BlipSpk = PopsPh;
+
     /// <summary>V10.1: the stabs begun in the current pops window, in pops' spare byte after POPS_MIN, for the log.</summary>
     public const uint PopsStabs = 0x41FBF;
     public const int PopsStab = 7, BlipOn = 8, BlipUsed = 9, BlipArmed = 10, BlipTapping = 11, BlipHold = 12, Guard = 13;
@@ -152,9 +155,18 @@ public sealed class OverlayV10Tests
         Assert.NotEqual(stock, TestBins.CarBytes.AsSpan(0x7DE64, 16).ToArray());
     }
 
+    [Fact] // V10.2 (spec §6c): c_inj_flow, 16 bits little-endian, the X001 release's 237 cm³/min; the car file has 225
+    public void TheInjectorFlowIsTheX001Releases()
+    {
+        Assert.Equal(new byte[] { 0xED, 0x00 }, V10Fixture.Bytes.AsSpan(0x70E14, 2).ToArray());
+        Assert.Equal(new byte[] { 0xED, 0x00 }, TestBins.ReleaseBytes.AsSpan(0x70E14, 2).ToArray());
+        Assert.Equal(new byte[] { 0xE1, 0x00 }, TestBins.CarBytes.AsSpan(0x70E14, 2).ToArray());
+    }
+
     /// <summary>
     /// The built V10.2, checksums corrected as a full write does, against the V10.1 fast-blip bin sent to the owner: the
-    /// only differences are the overlay block, the new hook at 0x3D4D4, the start table and the checksum words.
+    /// only differences are the overlay block, the new hook at 0x3D4D4, the start table, the injector flow and the
+    /// checksum words.
     /// </summary>
     [Fact]
     public void V102DiffersFromV101OnlyWhereThePlanSays()
@@ -166,6 +178,7 @@ public sealed class OverlayV10Tests
             (0x4B544, 0x4FFE6),      // the overlay block, its code and its flashed settings
             (0x3D4D4, 0x3D4D8),      // the AFR display join's JMPS
             (0x7DE64, 0x7DE74),      // ip_tipr_cst__tco, back to stock
+            (0x70E14, 0x70E16),      // c_inj_flow, the X001 release's 237
             .. ChecksumWords,
         ];
         var outside = Enumerable.Range(0, built.Length)
@@ -174,6 +187,7 @@ public sealed class OverlayV10Tests
         Assert.True(outside.Count == 0, "differences outside the plan's ranges: " + string.Join(" ", outside.Take(20)));
         Assert.Contains(Enumerable.Range(0x7DE64, 16), i => built[i] != sent[i]);
         Assert.Contains(Enumerable.Range(0x3D4D4, 4), i => built[i] != sent[i]);
+        Assert.Contains(Enumerable.Range(0x70E14, 2), i => built[i] != sent[i]);
     }
 
     /// <summary>The five stored checksums (tools/ms43_checksums.py): boot, program and calibration CRCs, program and cal sums.</summary>
