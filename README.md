@@ -3,18 +3,14 @@
 A purpose-built emulator for the Siemens MS43 (Infineon C167CR). It runs an MS43 bin from
 power-on the way the ECU does, so a bin can be tested before it is flashed.
 
-- Design: `docs/superpowers/specs/2026-10-20-ms43-emulator-design.md`
-- Plans: `docs/superpowers/plans/2026-10-20-ms43-emulator-plan1-cpu-boot.md`,
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan2-startup-peripherals.md`,
-  `docs/superpowers/plans/2026-10-20-ms43-emulator-plan3-engine-warm-idle.md`,
-  `docs/superpowers/plans/2026-10-21-ms43-emulator-plan4-checks-drives.md` and
-  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan5-kline-compare.md` and
-  `docs/superpowers/plans/2026-10-22-ms43-emulator-plan6-overlay-bin.md`; their records
-  (rulings, review findings, open items) beside them
+It was built as the `sim/` folder of the author's lab, together with
+[MS43 Tuner](https://github.com/raph559/MS43_TUNER) and the live-tuning overlay
+([MS43X001_CUSTOM](https://github.com/raph559/MS43X001_CUSTOM)); this repository keeps that folder's
+full history. The design notes, plans and reports it cites (`docs/superpowers/…`, `REPORT.md`) stayed
+in the lab and are not published.
+
 - Devices and what is modelled: `HARDWARE.md`
-- Results on the car file: REPORT.md §9.6 (boot), §9.7 (start-up), §9.8 (warm idle), §9.9
-  (checks and drives), §9.10 (the K-line, restarts and the compare) and §9.11 (the live-tuning
-  overlay)
+- No bin and no firmware is included: you bring your own (see the end of this page).
 
 **Status:** plan 6 done (2026-10-24).
 - Plan 1 gave the CPU, bus, traps, interrupts, PEC, watchdog, timing and the boot runner.
@@ -80,14 +76,14 @@ its own, and a live edit gives exactly the run of the same edit baked into the f
 ## Run it
 
 ```bash
-dotnet build -c Release sim/Ms43Sim.sln
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll boot ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --out sim/runs/boot-car
+dotnet build -c Release Ms43Sim.sln
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll boot bins/CAR_current_43X001_SP95_STAGE1.bin --out runs/boot-car
 ```
 
 `ms43sim run BIN` runs a bin with the key on, the engine stopped unless `--engine` names a scenario:
 
 ```bash
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --seconds 5 --out sim/runs/run-car
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run bins/CAR_current_43X001_SP95_STAGE1.bin --seconds 5 --out runs/run-car
 ```
 
 | Option | Default | Effect |
@@ -112,7 +108,7 @@ hardware and the assumptions. An engine run starts the engine at 3.0 s and expec
 4.0 s:
 
 ```bash
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --engine warm-idle --out sim/runs/run-car-idle
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run bins/CAR_current_43X001_SP95_STAGE1.bin --engine warm-idle --out runs/run-car-idle
 ```
 
 `ms43sim boot BIN` takes these options:
@@ -131,23 +127,23 @@ Exit codes, both commands: 0 the run completed (any outcome), 2 usage error, 3 u
 wrong-size image or EEPROM file. A drive (`run --drive`, `check`) exits with its verdict (below).
 
 `ms43sim decode --listing BIN` prints the decoder's linear sweep. Compare it with
-`python -I sim/tools/decode_listing.py BIN`, which uses `tools/c167dis.py`.
+`python -I tools/decode_listing.py BIN`, which uses the lab's `tools/c167dis.py` (not published).
 
 ## Drive it: `run --drive` and `check`
 
 `ms43sim run BIN --drive FILE` runs one drive file on BIN with every check and gives a verdict;
-`ms43sim check BIN` runs every drive in `sim/drives/` (the seven standard drives):
+`ms43sim check BIN` runs every drive in `drives/` (the seven standard drives):
 
 ```bash
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll check ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --out sim/runs/check-car
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --drive sim/drives/full-load.drive --eeprom sim/runs/check-car/warm-start/eeprom.bin --out sim/runs/full-load
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll check bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --out runs/check-car
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll run bins/CAR_current_43X001_SP95_STAGE1.bin --drive drives/full-load.drive --eeprom runs/check-car/warm-start/eeprom.bin --out runs/full-load
 ```
 
 | Option | Default | Effect |
 |---|---|---|
 | `--drive FILE` | | `run` only: the drive to run. It does not take `--seconds`, `--key-off-at` or `--engine`: the drive sets the time, the key and the engine |
 | `--eeprom FILE` | blank | `run` only: the EEPROM at the first key-on. A drive that starts `seasoned` needs one: a warm-start run's `eeprom.bin` |
-| `--drives DIR` | `sim/drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
+| `--drives DIR` | `drives` above the current folder | `check` only: the folder of `*.drive` files. The one named `warm-start` runs first from a blank EEPROM; its final EEPROM is where every `start seasoned` drive begins (C5) |
 | `--jobs N` | 1 | `check` only: how many drives run at once after the warm start; each run is deterministic |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot` |
 | `--out DIR` | `runs/drive-<drive>-<bin>`, `runs/check-<bin>` | Where the files go (`check`: one folder per drive; two drive files of one name are refused): `drive-report.md` (the software verdict and its reasons, the separate physical safety status, the drive, power cycles, checks, coverage and K-line), `events.csv`, `trace.csv`, `eeprom.bin`, `verdict.txt` (the software verdict), `assessment.json` (both assessments and unjudged software properties), and `kline.csv` (the tester's requests, what came of each, and the bytes the line lost). `check` also writes an aggregate `assessment.json` |
@@ -176,7 +172,7 @@ all modeled output checks while requesting physically inappropriate ignition or 
 software verdict to assess the exercised firmware mechanisms; the simulator cannot validate SP95
 octane suitability or clear a calibration for an engine.
 
-**A drive file** (`sim/drives/*.drive`, plan 4 R17) is text: `#` starts a comment.
+**A drive file** (`drives/*.drive`, plan 4 R17) is text: `#` starts a comment.
 
 ```
 drive part-load                          # first: the name
@@ -215,7 +211,7 @@ set coolant=90 oil=90 intake=33 ambient=20
   - `kline watch ADDR`: the V9 overlay's `6D 0C a2 a1 a0`, which watches the map at the hex data
     address ADDR (below 80000; 0 stops the watch). It is queued like a send, so it goes before the
     next poll. The first request after the connect's speed switch can be lost, so a drive sends it
-    once polling runs (see `sim/drives/watch`);
+    once polling runs (see `drives/watch`);
   - `kline pause MS`: the wait after each reply, 0 to 1000 ms (default 20);
   - `kline send BYTES`: one DS2 frame with these payload bytes; `kline raw BYTES`: these exact bytes,
     unframed; `kline every SECONDS BYTES`: that frame every SECONDS (above 0, at most 60). The first
@@ -247,14 +243,14 @@ the verdict does not count it.
 standard set, and reports how they differ (design §6.3):
 
 ```bash
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare ../../../bins/MS43X001_release_E46_M54B25.bin ../../../bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --xdf ../../../defs/Siemens_MS43_MS43X001_512K_v1.0.0.xdf --out sim/runs/compare-release-car
-dotnet sim/src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare REF.bin CANDIDATE.bin --drive sim/drives/full-load.drive --eeprom sim/runs/check-car/warm-start/eeprom.bin --out sim/runs/compare-full-load
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare bins/MS43X001_release_E46_M54B25.bin bins/CAR_current_43X001_SP95_STAGE1.bin --jobs 6 --xdf defs/Siemens_MS43_MS43X001_512K_v1.0.0.xdf --out runs/compare-release-car
+dotnet src/Ms43Sim.Cli/bin/Release/net10.0/ms43sim.dll compare REF.bin CANDIDATE.bin --drive drives/full-load.drive --eeprom runs/check-car/warm-start/eeprom.bin --out runs/compare-full-load
 ```
 
 | Option | Default | Effect |
 |---|---|---|
 | `--drive FILE` | | One drive. A drive that starts `seasoned` needs `--eeprom`; both bins start from it |
-| `--drives DIR` | `sim/drives` above the current folder | A set: the warm-start drive first on both bins from a blank EEPROM, then the others, each seasoned one on both bins from the **reference's** warm-start EEPROM, so a seasoned drive's differences come from the bins (C6) |
+| `--drives DIR` | `drives` above the current folder | A set: the warm-start drive first on both bins from a blank EEPROM, then the others, each seasoned one on both bins from the **reference's** warm-start EEPROM, so a seasoned drive's differences come from the bins (C6) |
 | `--jobs N` | 1 | A set only: how many drives run at once after the warm start |
 | `--xdf FILE` | | The MS43X001 XDF (local only): names its single constants |
 | `--raw`, `--partial-onto ECU.bin`, `--ecu-boot BOOT.bin` | | As for `boot`, for both bins |
@@ -309,7 +305,7 @@ Needs the .NET 10 SDK. The test packages (xUnit 2.5.3, Microsoft.NET.Test.Sdk 17
 versions already in the local NuGet cache, so a restore works offline.
 
 ```bash
-dotnet test sim/Ms43Sim.sln
+dotnet test Ms43Sim.sln
 ```
 
 Run it from the repository root. 1,004 tests (about 17 minutes in all):
@@ -329,7 +325,7 @@ Run it from the repository root. 1,004 tests (about 17 minutes in all):
   transparent stub, an ignition edit, the release), and the overlay's safety, abuse, drive set and
   acceptance.
 
-`dotnet test sim/Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
+`dotnet test Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
 (955 tests, about 7 minutes).
 
 **Speed:** 122 M emulated cycles per second on this PC (Release, the warm-start drive with every
@@ -499,8 +495,8 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 
 ## Inputs that are not in version control
 
-- **Bins:** the tests read `bins/` and `candidates/` from the main MS43LAB checkout. They walk
-  up from the test assembly to find it, or use the `MS43_BINS_ROOT` environment variable (the
+- **Bins:** the tests read `bins/` and `candidates/` from the author's lab, which are not published. They walk
+  up from the test assembly to find them, or use the `MS43_BINS_ROOT` environment variable (the
   folder that contains `bins/`). Every bin is checked against its SHA-256 before use.
 - **Manuals:** `refs/c166ism.pdf` (C166 Family Instruction Set Manual V2.0) and
   `refs/c167cr_um.pdf` (C167CR Derivatives User's Manual V3.1). The plan's Task 1 gives their
