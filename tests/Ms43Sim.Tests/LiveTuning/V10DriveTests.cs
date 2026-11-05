@@ -120,8 +120,9 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
 
     /// <summary>
     /// V10.2's cap on the scripted downshifts (the braking one passes 3rd's target, the tap one starts below 4th's): above
-    /// the target the cap angle at once; at or below it the blip angle, reached from the last angle written a step of
-    /// 807F / 4 at most per decision. Each run has one blip, so every decision after the first follows the one before.
+    /// the target the cap angle at once; at or below it the blip angle. A blip's first decision is its whole angle (the
+    /// owner: "very sharp"); after the cap the angle comes back from the last one written a step of 807F / 4 at most per
+    /// decision. Each run has one blip, so every decision after the first follows the one before.
     /// </summary>
     [Theory]
     [InlineData("braking", 0x5A)] [InlineData("tap", 0x5A)] [InlineData("v101-braking", 0x75)]
@@ -134,7 +135,7 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
         {
             var s = sparks[i];
             var capped = s.Rpm > s.Target;
-            var expected = capped ? 0 : i == 0 ? Math.Min(s.Angle, blipAngle) : Math.Min(blipAngle, sparks[i - 1].Angle + s.Rpm / 4);
+            var expected = capped ? 0 : i == 0 ? blipAngle : Math.Min(blipAngle, sparks[i - 1].Angle + s.Rpm / 4);
             Assert.True(s.Group == (capped ? 141 : 140) && s.Angle == expected,
                 $"{key} at {s.Seconds:F3} s: rpm {s.Rpm} target {s.Target}, group {s.Group}, angle {s.Angle:X2}, expected {expected:X2}");
         }
@@ -142,32 +143,45 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
 
     private static readonly int[] FiringOrder = [1, 5, 3, 6, 2, 4];
 
+    /// <summary>One coil charge cut short: when (the short spark, or the spark after a missing one) and what.</summary>
+    internal sealed record CutCharge(double Seconds, string Text);
+
     /// <summary>
     /// The coil charges cut short from <paramref name="from"/> to <paramref name="to"/> seconds: a spark after under 1.8 ms
     /// of charge (these drives charge 2.3 to 2.4 ms, and a ramp step takes under 0.5 ms), or a cylinder missing from the
     /// firing order (the emulator keeps a spark only after 0.5 ms of charge, so a charge cut to almost nothing is none).
     /// </summary>
-    internal static List<string> CutCharges(DriveResult run, double from, double to)
+    internal static List<CutCharge> CutCharges(DriveResult run, double from, double to)
     {
         var sparks = run.Sparks.Where(s => s.Fire / 24e6 >= from && s.Fire / 24e6 <= to).OrderBy(s => s.Fire).ToList();
-        var cuts = sparks.Where(s => s.DwellMs < 1.8).Select(s => $"cylinder {s.Cylinder} at {s.Fire / 24e6:F3} s charged {s.DwellMs:F2} ms").ToList();
+        var cuts = sparks.Where(s => s.DwellMs < 1.8)
+            .Select(s => new CutCharge(s.Fire / 24e6, $"cylinder {s.Cylinder} at {s.Fire / 24e6:F3} s charged {s.DwellMs:F2} ms")).ToList();
         for (var i = 1; i < sparks.Count; i++)
         {
             var next = FiringOrder[(Array.IndexOf(FiringOrder, sparks[i - 1].Cylinder) + 1) % 6];
             if (sparks[i].Cylinder != next)
-                cuts.Add($"cylinder {next} had no spark between {sparks[i - 1].Fire / 24e6:F3} and {sparks[i].Fire / 24e6:F3} s");
+                cuts.Add(new CutCharge(sparks[i].Fire / 24e6,
+                    $"cylinder {next} had no spark between {sparks[i - 1].Fire / 24e6:F3} and {sparks[i].Fire / 24e6:F3} s"));
         }
         return cuts;
     }
 
-    [Theory] // V10.2: the blip start, the cap and its release never cut a coil's charge (2026-11-08: cylinder 4, 0.21 ms)
+    /// <summary>
+    /// V10.2: around a blip, only its first firing may lose its charge. The blip's start jumps to its whole angle, as on
+    /// V10.1 (the owner: "very sharp"), and the coil already charging for the overrun angle fires early: at most one
+    /// cylinder, within 40 ms of the first decision (2026-11-08: cylinder 3, 0.04 ms, from −12.75° to +20.25° at 1,440 rpm).
+    /// The cap and its return never cut a charge (2026-11-08, before the ramp: cylinder 4, 0.21 ms, igcfb_5 detected).
+    /// </summary>
+    [Theory]
     [InlineData("braking")] [InlineData("tap")] [InlineData("v101-braking")]
-    public void ABlipNeverCutsACoilsChargeShort(string key)
+    public void OnlyABlipsFirstFiringMayLoseItsCharge(string key)
     {
         var run = fixture.Runs[key];
         var blip = Assert.Single(Spans(run, V10Fixture.BlipOn));
+        var first = run.Sparks[0].Seconds;
         var cuts = CutCharges(run.Result, blip.Start - 0.1, blip.End + 0.2);
-        Assert.True(cuts.Count == 0, $"{key}: " + string.Join("; ", cuts));
+        Assert.True(cuts.Count <= 1 && cuts.All(c => c.Seconds >= first && c.Seconds <= first + 0.04),
+            $"{key} (first decision at {first:F3} s): " + string.Join("; ", cuts.Select(c => c.Text)));
     }
 
     [Fact]

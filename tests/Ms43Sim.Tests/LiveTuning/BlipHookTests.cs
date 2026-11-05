@@ -186,14 +186,15 @@ public sealed class BlipHookTests
 
     /// <summary>
     /// V10.2: the spark call arms each coil's charge for the angle before it, so an advance written while a coil charges
-    /// cuts that charge by the advance's time (2026-11-08 drive: a 44 deg rise at 2,624 rpm left cylinder 4 0.21 ms of
-    /// its 2.35). An advance rises at most 807F / 4 steps of 0.375 deg a spark from the last angle the blip wrote
-    /// (BLIP_SPK), under 0.5 ms of charge at any speed; a retard, the cap, is whole at once.
+    /// cuts that charge by the advance's time (2026-11-08 drive: the cap's 44 deg release at 2,624 rpm left cylinder 4
+    /// 0.21 ms of its 2.35, igcfb_5 detected). After the cap, an advance rises at most 807F / 4 steps of 0.375 deg a spark
+    /// from the last angle the blip wrote (BLIP_SPK), under 0.5 ms of charge at any speed; a retard, the cap, is whole at
+    /// once. A blip's start is whole (BLIP_SPK = FFh, <see cref="TheBlipsFirstSparkIsWhole"/>).
     /// </summary>
     [Theory]
     [InlineData((byte)0, (byte)100, (byte)25)]                         // from the cap at 3,200 rpm
     [InlineData((byte)0, (byte)82, (byte)20)]                          // the drive's release at 2,624 rpm
-    [InlineData((byte)29, (byte)45, (byte)40)]                         // a blip's first spark from the car file's -12.75 deg
+    [InlineData((byte)29, (byte)45, (byte)40)]                         // from a cap set at -12.75 deg, at 1,440 rpm
     [InlineData((byte)100, (byte)100, (byte)0x75)]                     // within a step: the whole angle
     public void AnAdvanceRisesAStepASpark(byte last, byte rpm, byte expected)
     {
@@ -202,6 +203,17 @@ public sealed class BlipHookTests
         Run(m, Spark);
         Assert.Equal(expected << 8, m.Bus.Peek16(0xE2B4));
         Assert.Equal(expected, V10Fixture.Byte(m, V10Fixture.BlipSpk));
+    }
+
+    [Theory] // the owner, 2026-11-08: "i want them to feel very sharp": a blip's first spark is its whole angle, as V10.1
+    [InlineData((byte)45)] [InlineData((byte)100)]
+    public void TheBlipsFirstSparkIsWhole(byte rpm)
+    {
+        var m = Capping(target: 120, rpm: rpm);
+        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0xFF);                // as bt_go leaves it
+        Run(m, Spark);
+        Assert.Equal(0x7500, m.Bus.Peek16(0xE2B4));
+        Assert.Equal(0x75, V10Fixture.Byte(m, V10Fixture.BlipSpk));
     }
 
     [Fact]

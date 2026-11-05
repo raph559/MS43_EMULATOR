@@ -64,16 +64,16 @@ public sealed class BlipTests
         Assert.InRange(Add(m), 8191, 8195);                         // 15.0 deg TPS
     }
 
-    [Fact] // V10.2: the blip's spark ramps from the angle in use (E2B5, the stock overrun angle)
-    public void ABlipStartsItsSparkRampFromTheAngleInUse()
+    [Fact] // V10.2: a blip starts with its whole angle (the owner: "very sharp"): no ramp until the cap has acted
+    public void ABlipStartsWithItsWholeAngle()
     {
         var m = Machine();
         m.Bus.Poke16(0xE2B4, 0x1D00);                               // the car file's overrun angle, -12.75 deg
-        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0xAA);
+        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0x1D);
         Braking(m);
         PopsStabTests.Tick(m);
         Assert.True(On(m));
-        Assert.Equal(0x1D, V10Fixture.Byte(m, V10Fixture.BlipSpk));
+        Assert.Equal(0xFF, V10Fixture.Byte(m, V10Fixture.BlipSpk));
     }
 
     [Theory] // RF1: one stuck switch never starts a blip
