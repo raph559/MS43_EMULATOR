@@ -22,19 +22,9 @@ It runs the real firmware, unmodified: stock MS430069-family software, MS43X001,
 
 ## What it does
 
-```mermaid
-flowchart LR
-    BIN["Your bin<br>(512 KiB)"] --> FLASH["Flashed image<br>as MS4X Flasher writes it"]
-    FLASH --> CPU
-    subgraph ECU["The ECU"]
-        CPU["C167CR CPU<br>traps, interrupts, PEC, timing"] <--> PER["Peripherals<br>CAPCOM, GPT, ADC, PWM,<br>SSC, ASC0, CAN, watchdog"]
-        PER <--> BOARD["Board<br>EEPROM, output drivers,<br>monitoring module"]
-    end
-    BOARD <--> CAR["Engine and car<br>crank, cams, starter, idle air,<br>throttle, VANOS, sensors,<br>pedal, gears, ASC on CAN"]
-    PER <--> KLINE["K-line tester<br>DS2, as MS43 Tuner speaks it"]
-    DRIVE["Drive file"] --> CAR
-    ECU --> CHECKS["16 checks"] --> OUT["Verdict and report<br>events, trace, fault memory,<br>EEPROM, K-line log"]
-```
+<p align="center">
+  <img src="docs/assets/how-it-works.svg" width="100%" alt="How it works: your bin, as MS4X Flasher would write it, runs on the emulated ECU (C167CR CPU, peripherals, board) with an engine and car around it, driven by a drive file and a K-line tester; 16 checks give a verdict and a report">
+</p>
 
 - **Boots the real firmware.** The boot block, the checksum tasks, the monitoring-module handshake and the
   scheduler run as on the ECU. A key-off runs the after-run, writes the EEPROM and drops the main relay; the
