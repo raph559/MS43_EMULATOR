@@ -14,7 +14,7 @@ public sealed class PopsBrakeTests
     private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10;
 
-    private static Machine Overrun_() => PopsStabTests.Machine(PopsStabTests.Image(), V10Fixture.Symbol);
+    private static Machine Overrun_() => PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);
 
     private static uint Gate(Machine m)
     {
@@ -32,14 +32,14 @@ public sealed class PopsBrakeTests
     public void EitherBrakeSwitchEndsAWindowWithinATick(int bit)
     {
         var m = Overrun_();
-        PopsStabTests.Gate(m);
-        PopsStabTests.Tick(m);
-        Assert.True(PopsStabTests.Window(m));
+        PopsWindowTests.Gate(m);
+        PopsWindowTests.Tick(m);
+        Assert.True(PopsWindowTests.Window(m));
         m.Bus.Poke16(0xFD2E, (ushort)(1 << bit));
-        PopsStabTests.Tick(m);
-        Assert.False(PopsStabTests.Window(m));
+        PopsWindowTests.Tick(m);
+        Assert.False(PopsWindowTests.Window(m));
         Assert.True(Used(m));
-        Assert.Equal(1000, PopsStabTests.Store(m, 1000).Setpoint);
+        Assert.Equal(1000, PopsWindowTests.Store(m, 1000).Setpoint);
     }
 
     [Theory] // RF3
@@ -48,36 +48,36 @@ public sealed class PopsBrakeTests
     {
         var m = Overrun_();
         m.Bus.Poke16(0xFD2E, (ushort)(1 << bit));                    // 1. braking in overrun, before the cut decision
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(Used(m));
         m.Bus.Poke16(0xFD2E, 0);                                     //    then off the brake
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.Equal(Cut, Gate(m));                                  // 2. the cut decision: no window
-        Assert.False(PopsStabTests.Window(m));
+        Assert.False(PopsWindowTests.Window(m));
         m.Bus.Poke16(0xFD2C, PartLoad);                              // 3. the pedal, with the clutch up, re-arms
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.False(Used(m));
         m.Bus.Poke16(0xFD2C, Overrun);                               // 4. the next lift has its window
         Assert.Equal(Stay, Gate(m));
-        Assert.True(PopsStabTests.Window(m));
+        Assert.True(PopsWindowTests.Window(m));
     }
 
     [Fact] // RF3
     public void APedalPressWithTheClutchInDoesNotReArm()
     {
         var m = Overrun_();
-        PopsStabTests.Gate(m);                                       // the lift's window, so FDF8.4 is set
+        PopsWindowTests.Gate(m);                                       // the lift's window, so FDF8.4 is set
         m.Bus.Poke16(0xFD2E, 1 << 6);                                // clutch in: the window ends
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(Used(m));
         m.Bus.Poke16(0xFD2C, PartLoad);                              // a tap with the clutch in
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(Used(m));
         m.Bus.Poke16(0xFD2C, Overrun);
         Assert.Equal(Cut, Gate(m));
         m.Bus.Poke16(0xFD2E, 0);                                     // the clutch up and the pedal pressed re-arm it
         m.Bus.Poke16(0xFD2C, PartLoad);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.False(Used(m));
     }
 }

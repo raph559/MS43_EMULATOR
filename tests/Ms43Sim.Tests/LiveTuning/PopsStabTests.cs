@@ -4,14 +4,15 @@ using Ms43Sim.Tests.Support;
 namespace Ms43Sim.Tests.LiveTuning;
 
 /// <summary>
-/// V10's pops stabs: after the load, the throttle addition alternates a stab (the opening plus the stab size) and a
-/// gap (the opening), on the 10 ms tick. Direct CPU tests: one machine starts a window through the real overrun-cut
-/// gate (0A:A7BC), then runs housekeeping tick by tick and the throttle store (09:B138) in between.
+/// V10.3's pops window, without V10.2's stabs: the throttle store adds pops' own opening for the whole window, and the
+/// window ends at V8's 160 rpm rise, in the tick and in the gate, whatever group 139 holds (it is reserved, every byte 0).
+/// Direct CPU tests: one machine starts a window through the real overrun-cut gate (0A:A7BC), then runs housekeeping
+/// tick by tick and the throttle store (09:B138) in between. The helpers serve the blip, brake and guard tests too.
 /// </summary>
-public sealed class PopsStabTests
+public sealed class PopsWindowTests
 {
     private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
-    private const ushort Overrun = 1 << 11, PartLoad = 1 << 10;
+    private const ushort Overrun = 1 << 11;
 
     /// <summary>V10's settings (<see cref="V10Fixture.Classic"/>) with pops on, or <paramref name="image"/>'s own.</summary>
     internal static byte[] Image(byte[]? image = null, Action<byte[]>? change = null)
@@ -66,34 +67,28 @@ public sealed class PopsStabTests
     }
 
     internal static bool Window(Machine m) => (m.Bus.Peek16(0xFDF8) & 1 << 3) != 0;
-    internal static bool Stab(Machine m) => V10Fixture.Flag(m, V10Fixture.PopsStab);
 
+    /// <summary>V10.2's stab bit, FDF8.7: free on V10.3, so it must never be set.</summary>
+    private static bool OldStabBit(Machine m) => (m.Bus.Peek16(0xFDF8) & 1 << 7) != 0;
+
+    /// <summary>A window with the image's flashed settings and pops on, started at 4,160 rpm (the flashed minimum is 4,000).</summary>
     private static Machine Started(Action<byte[]>? change = null)
     {
-        var m = Machine(Image(change: change), V10Fixture.Symbol);
+        var m = Machine(Image(V10Fixture.Bytes, change), V10Fixture.Symbol);
+        V8Fixture.PutByte(m, 0x4007F, 130);
         Gate(m);
         return m;
     }
 
-    /// <summary>The ticks (1-based, from the window's start) on which POPS_STAB was set, until the window ended.</summary>
-    private static List<int> StabTicks(Machine m, int ticks)
-    {
-        var on = new List<int>();
-        for (var tick = 1; tick <= ticks; tick++)
-        {
-            Tick(m);
-            if (Stab(m)) on.Add(tick);
-            if (!Window(m)) break;
-        }
-        return on;
-    }
+    /// <summary>V10.2's flashed stabs, written into the reserved group 139: a 2.0 s load, +5.0 deg TPS, 150/250 ms, 480 rpm.</summary>
+    private static void V102Stabs(byte[] b) => new byte[] { 0x14, 0x19, 0x0F, 0x19, 0x0F, 0, 0, 0 }.CopyTo(b, V10Fixture.Defaults + 8);
 
-    [Theory] // RF5: with stab size 0 the store is V9's
+    [Theory] // with V10.2's stabs flashed in 139, the store is still V9's: group 139 is never read
     [InlineData(0)] [InlineData(100)] [InlineData(200)]
-    public void WithStabSizeZeroTheThrottleIsV9s(byte opening)
+    public void TheThrottleIsV9sWhatever139Holds(byte opening)
     {
-        void Settings(byte[] b) { b[V10Fixture.Defaults + 1] = 50; b[V10Fixture.Defaults + 6] = opening; b[V10Fixture.Defaults + 9] = 0; }
-        var v10 = Machine(Image(change: Settings), V10Fixture.Symbol);
+        void Settings(byte[] b) { b[V10Fixture.Defaults + 1] = 50; b[V10Fixture.Defaults + 6] = opening; }
+        var v10 = Machine(Image(change: b => { Settings(b); V102Stabs(b); }), V10Fixture.Symbol);
         var v9 = Machine(Image(V9Fixture.Bytes, Settings), V9Fixture.Symbol);
         Gate(v10); Gate(v9);
         for (var tick = 1; tick <= 500; tick++)
@@ -102,128 +97,37 @@ public sealed class PopsStabTests
             var pedal = (ushort)(tick * 97 % 4000);
             var psw = (ushort)(0x0800 | tick % 16);
             Assert.True(Store(v9, pedal, psw) == Store(v10, pedal, psw), $"tick {tick}");
-            Assert.False(Stab(v10), $"tick {tick}");
+            Assert.False(OldStabBit(v10), $"tick {tick}");
         }
     }
 
-    [Fact]
-    public void TheLoadComesFirst()
+    [Fact] // the flashed 3.0 deg TPS, from the first tick to the window's end, with no stab on top
+    public void TheOpeningHoldsTheWholeWindow()
     {
-        var m = Started();
-        for (var tick = 1; tick <= 200; tick++)
+        var m = Started(V102Stabs);
+        var ticks = 0;
+        while (Window(m) && ticks < 500)
         {
-            Tick(m);
-            Assert.False(Stab(m), $"tick {tick}");
-            var (setpoint, _) = Store(m, 1000);
-            Assert.InRange(setpoint - 1000, 5460, 5464);
+            Tick(m); ticks++;
+            if (!Window(m)) break;
+            Assert.InRange(Store(m, 1000).Setpoint - 1000, 1637, 1641);
+            Assert.False(OldStabBit(m), $"tick {ticks}");
         }
-    }
-
-    [Fact]
-    public void StabsAlternateWithTheSetLengths()
-    {
-        var m = Started();
-        var on = StabTicks(m, 500);
-        // A 4.0 s window: ticks 1..399 run, 400 ends it. After the 2.0 s load, 15 ticks on and 25 off.
-        int[] expected = [.. Enumerable.Range(0, 5).SelectMany(n => Enumerable.Range(201 + 40 * n, 15))];
-        Assert.Equal(expected, on);
-    }
-
-    [Fact]
-    public void DuringAStabTheAddIsOpeningPlusStab()
-    {
-        var m = Started();
-        for (var tick = 1; tick <= 201; tick++) Tick(m);
-        Assert.True(Stab(m));
-        var (setpoint, _) = Store(m, 1000);
-        Assert.InRange(setpoint - 1000, 13652, 13660);
-        for (var tick = 202; tick <= 216; tick++) Tick(m);
-        Assert.False(Stab(m));
-        (setpoint, _) = Store(m, 1000);
-        Assert.InRange(setpoint - 1000, 5460, 5464);
-    }
-
-    public static TheoryData<string> Stops => new() { "time", "pedal", "speed", "clutch", "rise" };
-
-    [Theory, MemberData(nameof(Stops))]
-    public void AStabNeverOutlivesTheWindow(string stop)
-    {
-        var m = Started(b => b[V10Fixture.Defaults + 1] = 21);      // a 2.1 s window: its last ticks are a stab
-        for (var tick = 1; tick <= 205; tick++) Tick(m);
-        Assert.True(Stab(m));
-        switch (stop)
-        {
-            case "time": for (var tick = 206; tick <= 210; tick++) Tick(m); break;
-            case "pedal": m.Bus.Poke16(0xFD2C, PartLoad); Tick(m); break;
-            case "speed": V8Fixture.PutByte(m, 0x4047F, 19); Tick(m); break;
-            case "clutch": m.Bus.Poke16(0xFD2E, 1 << 6); Tick(m); break;
-            case "rise": V8Fixture.PutByte(m, 0x4007F, 105); Tick(m); break;
-        }
-        Assert.False(Window(m), stop);
-        Assert.False(Stab(m), stop);
+        Assert.InRange(ticks, 399, 401);                             // the flashed 4.0 s window ran out
         Assert.Equal(1000, Store(m, 1000).Setpoint);
     }
 
-    [Fact]
-    public void ALoadAsLongAsTheWindowGivesNoStab()
+    [Theory] // V8's rule for the whole window: it ends 160 rpm above its lowest, even with V10.2's 480 rpm in 139/4
+    [InlineData(150, 4, true)] [InlineData(150, 5, false)] [InlineData(260, 4, true)] [InlineData(260, 5, false)]
+    [InlineData(260, 14, false)]
+    public void TheWindowEndsAt160RpmThroughout(int ticks, byte rise, bool kept)
     {
-        var m = Started(b => b[V10Fixture.Defaults + 8] = 40);      // a 4.0 s load in the 4.0 s window
-        Assert.Empty(StabTicks(m, 500));
-    }
-
-    [Fact]
-    public void ALiveGapChangeAppliesAtTheNextPhase()
-    {
-        var m = Started();
-        Assert.Equal(0xA0, OverlayV9Tests.Command(m, V3Fixture.Open())[0]);
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(139, 704))[0]);
-        var live = V10Fixture.ClassicGroup(139); live[3] = 10;       // gaps of 100 ms
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, [0x6D, 2, 139, 0, 0, .. live])[0]);
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, LiveOverlay.On(139, LiveOverlay.Crc32(live)))[0]);
-        var on = StabTicks(m, 500);
-        // 15 ticks on, 10 off, from tick 201 to the window's end at 400.
-        int[] expected = [.. Enumerable.Range(0, 8).SelectMany(n => Enumerable.Range(201 + 25 * n, 15)).Where(t => t < 400)];
-        Assert.Equal(expected, on);
-    }
-
-    /// <summary>A window with V10.1's flashed settings and pops on, started at 4,160 rpm (V10.1's minimum is 4,000).</summary>
-    private static Machine StartedV101(Action<byte[]>? change = null)
-    {
-        var m = Machine(Image(V10Fixture.Bytes, change), V10Fixture.Symbol);
-        V8Fixture.PutByte(m, 0x4007F, 130);
-        Gate(m);
-        return m;
-    }
-
-    /// <summary>
-    /// V10.1 (the car, 2026-11-05: a stab adds about 200 rpm, and V8's 160 rpm rule ended each window after one or two
-    /// stabs). During the 2.0 s load a window still ends when the rpm rises 160 rpm above its lowest; once the stabs have
-    /// begun, at 139/4 x 32 rpm, V10.1's default 15 (480 rpm).
-    /// </summary>
-    [Theory] // RF1
-    [InlineData(150, 4, true)] [InlineData(150, 5, false)] [InlineData(199, 5, false)]
-    [InlineData(260, 5, true)] [InlineData(260, 14, true)] [InlineData(260, 15, false)]
-    public void OnceTheStabsBeginTheWindowAllowsTheSetRise(int ticks, byte rise, bool kept)
-    {
-        var m = StartedV101();
+        var m = Started(V102Stabs);
         for (var tick = 1; tick <= ticks; tick++) Tick(m);
         Assert.True(Window(m));
         V8Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
         Tick(m);
         Assert.Equal(kept, Window(m));
-        Tick(m);
-        Assert.Equal(kept, Window(m));
-    }
-
-    [Fact] // RF5: with stab size 0 there is no stab phase, so the 160 rpm rule holds for the whole window
-    public void WithoutStabsTheWindowEndsAt160RpmThroughout()
-    {
-        var m = StartedV101(b => b[V10Fixture.Defaults + 9] = 0);
-        for (var tick = 1; tick <= 260; tick++) Tick(m);
-        Assert.True(Window(m));
-        V8Fixture.PutByte(m, 0x4007F, 135);
-        Tick(m);
-        Assert.False(Window(m));
     }
 
     /// <summary>The overrun-cut gate (0A:A7BC) with the stock cut requested, for a window that runs: Stay or Cut.</summary>
@@ -235,64 +139,36 @@ public sealed class PopsStabTests
         return m.Cpu.Address;
     }
 
-    /// <summary>
-    /// The V10.1 review's finding: the gate checks the rise too, on every request of the stock cut, so it must allow 139/4
-    /// once stabbing as the tick does; with V8's +5 there, each stabbing window still ended 160 rpm above its lowest.
-    /// </summary>
-    [Theory] // RF1
-    [InlineData(150, 4, true)] [InlineData(150, 5, false)] [InlineData(260, 7, true)] [InlineData(260, 14, true)]
-    [InlineData(260, 15, false)]
-    public void TheGateAllowsTheSetRiseOnceStabbing(int ticks, byte rise, bool kept)
+    [Theory] // the gate checks the same 160 rpm rise on every request of the stock cut
+    [InlineData(150, 4, true)] [InlineData(150, 5, false)] [InlineData(260, 4, true)] [InlineData(260, 7, false)]
+    public void TheGateEndsTheWindowAt160Rpm(int ticks, byte rise, bool kept)
     {
-        var m = StartedV101();
+        var m = Started(V102Stabs);
         for (var tick = 1; tick <= ticks; tick++) Tick(m);
         V8Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
         Assert.Equal(kept ? Stay : Cut, GateExit(m));
         Assert.Equal(kept, Window(m));
     }
 
-    [Fact] // RF5: with stab size 0 the gate's rule is V8's for the whole window
-    public void WithoutStabsTheGateEndsTheWindowAt160Rpm()
+    [Fact] // group 139 is reserved: a live copy of V10.2's stabs is refused, a copy of zeros is taken
+    public void TheReservedGroupTakesOnlyZeros()
     {
-        var m = StartedV101(b => b[V10Fixture.Defaults + 9] = 0);
-        for (var tick = 1; tick <= 260; tick++) Tick(m);
-        V8Fixture.PutByte(m, 0x4007F, 135);
-        Assert.Equal(Cut, GateExit(m));
-        Assert.False(Window(m));
+        var m = Machine(Image(V10Fixture.Bytes), V10Fixture.Symbol);
+        Assert.Equal(0xA0, OverlayV9Tests.Command(m, V3Fixture.Open())[0]);
+        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(139, 704))[0]);
+        byte[] v102 = [0x14, 0x19, 0x0F, 0x19, 0x0F, 0, 0, 0];
+        Assert.NotEqual(0xA0, OverlayV9Tests.Mutate(m, [0x6D, 2, 139, 0, 0, .. v102])[0]);
+        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, [0x6D, 2, 139, 0, 0, .. new byte[8]])[0]);
     }
 
-    /// <summary>
-    /// V10.1: the stabs begun in the window are counted in pops' spare byte (09FBF, after POPS_MIN) for the app's log, which
-    /// reads it twice a second: FDF8.7 alone shows a 150 ms stab to about one read in five. A window's start clears it, and
-    /// it keeps the window's count after the window ends.
-    /// </summary>
-    [Fact]
-    public void TheStabsBegunAreCountedForTheLog()
+    [Fact] // V10.2's stab count byte, 09FBF, is no longer written by a window
+    public void AWindowLeavesTheOldStabCountAlone()
     {
         var m = Machine(Image(V10Fixture.Bytes), V10Fixture.Symbol);
         V8Fixture.PutByte(m, 0x4007F, 130);
-        V8Fixture.PutByte(m, V10Fixture.PopsStabs, 7);                  // left from an earlier window
+        V8Fixture.PutByte(m, V10Fixture.PopsStabs, 7);
         Gate(m);
-        Assert.Equal(0, V10Fixture.Byte(m, V10Fixture.PopsStabs));
-        var counts = new List<int>();
-        while (Window(m) && counts.Count < 500) { Tick(m); counts.Add(V10Fixture.Byte(m, V10Fixture.PopsStabs)); }
-        Assert.Equal(0, counts[199]);                                    // still loading at tick 200
-        Assert.Equal(1, counts[200]);                                    // the first stab begins at tick 201
-        Assert.Equal(1, counts[239]);
-        Assert.Equal(2, counts[240]);                                    // the next 400 ms later
-        Assert.Equal(5, counts[^1]);                                     // five in the 4.0 s window, kept after it
-        Assert.False(Window(m));
-    }
-
-    [Fact]
-    public void V101sStabsAreFiveDegreesOnTopOfThreeDegrees()
-    {
-        var m = StartedV101();
-        for (var tick = 1; tick <= 200; tick++) Tick(m);
-        Assert.False(Stab(m));
-        Assert.InRange(Store(m, 1000).Setpoint - 1000, 1637, 1641);  // 3.0 deg TPS
-        Tick(m);
-        Assert.True(Stab(m));
-        Assert.InRange(Store(m, 1000).Setpoint - 1000, 4367, 4373);  // 3.0 + 5.0 deg TPS
+        while (Window(m)) Tick(m);
+        Assert.Equal(7, V10Fixture.Byte(m, V10Fixture.PopsStabs));
     }
 }

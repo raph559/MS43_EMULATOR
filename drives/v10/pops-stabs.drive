@@ -1,5 +1,5 @@
-# V10 pops stabs: pops' lift (4th, 110 km/h, 16.5 s), 10 s long, for the load and five stabs.
-drive v10-pops-stabs
+# V10 pops: pops' lift (4th, 110 km/h, 16.5 s), 10 s long, for one whole 4.0 s window (V10.3: no stabs).
+drive v10-pops-window
 start blank
 set coolant=90 oil=90 intake=33 ambient=20
 3 on

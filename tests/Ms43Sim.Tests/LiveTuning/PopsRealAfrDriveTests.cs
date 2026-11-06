@@ -78,13 +78,8 @@ public sealed class PopsRealAfrDriveTests(PopsRealAfrDriveFixture fixture) : ICl
         return rows.Where(r => r.Seconds > start + 0.3 && r.Seconds < end - 0.1).ToList();
     }
 
-    /// <summary>The window's rows in the load, before the first stab: the steady mixture.</summary>
-    private static List<TraceRow> LoadRows(DriveResult run)
-    {
-        var rows = WindowRows(run);
-        var stab = rows.First(r => (Fdf8(r) & 1 << 7) != 0).Seconds;
-        return rows.Where(r => r.Seconds < stab).ToList();
-    }
+    /// <summary>The window's rows: the steady mixture (V10.3: no stab, so the whole window).</summary>
+    private static List<TraceRow> LoadRows(DriveResult run) => WindowRows(run);
 
     private static double Ti(DriveResult run, double seconds) => Sample(run, "ti1_ms", seconds);
 
@@ -112,18 +107,20 @@ public sealed class PopsRealAfrDriveTests(PopsRealAfrDriveFixture fixture) : ICl
     }
 
     /// <summary>
-    /// The stabs let the most air in; at the richest setting the stock fuel factor (0C:AFD6, 0D:194C, the fuel ×
-    /// factor / 4096, FFFFh on an overflow) must not saturate. At every factor pass of the stabs at 5.0 it applies the
+    /// At the richest setting the stock fuel factor (0C:AFD6, 0D:194C, the fuel × factor / 4096, FFFFh on an overflow)
+    /// must not saturate. At every factor pass of the window at 5.0, from 0.3 s in, it applies the
     /// whole enrichment: the factor is 91B0 + 91A0 with 91A0 the real 7,946, and the fuel after it is the fuel before × the
     /// factor / 4096 exactly. (The injection time itself is not linear in 14.7 / A there: the stock tip-in fuel added after
     /// the factor, about 0.5 ms, depends on the fuel before it, 2026-11-08 probe: +110, +97 and +90 ticks at 14.7, 9.8 and
     /// 5.0.)
     /// </summary>
     [Fact]
-    public void NoSaturationDuringTheStabs()
+    public void NoSaturationDuringTheWindow()
     {
-        var passes = fixture.Runs[50].Factors.Where(p => (p.Fdf8 & 1 << 3) != 0 && (p.Fdf8 & 1 << 7) != 0).ToList();
-        Assert.True(passes.Count >= 100, $"{passes.Count} factor passes in the stabs");
+        var inWindow = fixture.Runs[50].Factors.Where(p => (p.Fdf8 & 1 << 3) != 0).ToList();
+        Assert.NotEmpty(inWindow);
+        var passes = inWindow.Where(p => p.Seconds > inWindow[0].Seconds + 0.3).ToList();
+        Assert.True(passes.Count >= 100, $"{passes.Count} factor passes in the window");
         foreach (var p in passes)
         {
             Assert.True(p.Enrichment == 7946 && p.Factor == p.Base + p.Enrichment,

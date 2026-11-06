@@ -1,5 +1,5 @@
 # V10.1 pops with V10.1's flashed defaults: a lift in 3rd at 120 km/h (about 5,300 rpm, 18.5 s), slowing 6.5 km/h a
-# second, so the whole 4.0 s window stays above V10.1's 4,000 rpm minimum: the 2.0 s load, then five stabs. The lift
+# second, so the whole 4.0 s window stays above V10.1's 4,000 rpm minimum (V10.1 stabbed after 2.0 s; V10.3 does not). The lift
 # ends at 22 km/h (980 rpm), below the stock re-entry, so the engine is fuelled when the idle takes it over.
 drive v10-pops-v101
 start blank

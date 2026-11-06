@@ -6,8 +6,8 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// <summary>
 /// V10's torque guard (RF4): while a pops window or a blip runs, GUARD is set when the monitoring's torque estimate
 /// (8013) is more than 20 Nm above the permitted torque (86AD), both bytes in 2 Nm: 20 Nm short of the monitoring's
-/// own fault threshold (ip_tqi_dif_max_mon, 40 Nm). The guard only lowers the throttle addition: a stab's extra, and
-/// the blip's addition (Task 6). Direct CPU tests on the window machine of PopsStabTests.
+/// own fault threshold (ip_tqi_dif_max_mon, 40 Nm). The guard only lowers the blip's addition (Task 6); V10.3 has no
+/// stabs, so in a pops window it leaves the opening as it is. Direct CPU tests on the window machine of PopsWindowTests.
 /// </summary>
 public sealed class TorqueGuardTests
 {
@@ -21,8 +21,8 @@ public sealed class TorqueGuardTests
 
     private static Machine Window()
     {
-        var m = PopsStabTests.Machine(PopsStabTests.Image(), V10Fixture.Symbol);
-        PopsStabTests.Gate(m);
+        var m = PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);
+        PopsWindowTests.Gate(m);
         return m;
     }
 
@@ -33,46 +33,43 @@ public sealed class TorqueGuardTests
     {
         var m = Window();
         Torque(m, estimate, permitted);
-        PopsStabTests.Tick(m);
-        Assert.True(PopsStabTests.Window(m));
+        PopsWindowTests.Tick(m);
+        Assert.True(PopsWindowTests.Window(m));
         Assert.Equal(acting, Guard(m));
     }
 
     [Fact]
-    public void DuringAStabTheGuardLeavesTheOpening()
+    public void InAWindowTheGuardLeavesTheOpening()
     {
         var m = Window();
-        for (var tick = 1; tick <= 201; tick++) PopsStabTests.Tick(m);
-        Assert.True(PopsStabTests.Stab(m));
+        for (var tick = 1; tick <= 201; tick++) PopsWindowTests.Tick(m);
         Torque(m, 100, 50);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(Guard(m));
-        Assert.True(PopsStabTests.Stab(m));
-        Assert.InRange(PopsStabTests.Store(m, 1000).Setpoint - 1000, 5460, 5464);   // the opening only
+        Assert.InRange(PopsWindowTests.Store(m, 1000).Setpoint - 1000, 5460, 5464);   // the opening, guard or not
         Torque(m, 50, 50);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.False(Guard(m));
-        Assert.True(PopsStabTests.Stab(m));
-        Assert.InRange(PopsStabTests.Store(m, 1000).Setpoint - 1000, 13652, 13660); // the stab's extra is back
+        Assert.InRange(PopsWindowTests.Store(m, 1000).Setpoint - 1000, 5460, 5464);
     }
 
     [Fact]
     public void TheGuardRestsOutsideAWindowOrBlip()
     {
-        var m = PopsStabTests.Machine(PopsStabTests.Image(), V10Fixture.Symbol);   // overrun, no window yet
+        var m = PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);   // overrun, no window yet
         Torque(m, 255, 0);
         m.Bus.Poke16(0xFDF8, (ushort)(m.Bus.Peek16(0xFDF8) | 1 << V10Fixture.Guard));  // as RAM may power up
-        PopsStabTests.Tick(m);
-        Assert.False(PopsStabTests.Window(m));
+        PopsWindowTests.Tick(m);
+        Assert.False(PopsWindowTests.Window(m));
         Assert.False(Guard(m));
 
         m = Window();
         Torque(m, 255, 0);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(Guard(m));
         m.Bus.Poke16(0xFD2C, 1 << 10);                                              // the pedal: the window ends
-        PopsStabTests.Tick(m);
-        Assert.False(PopsStabTests.Window(m));
+        PopsWindowTests.Tick(m);
+        Assert.False(PopsWindowTests.Window(m));
         Assert.False(Guard(m));
     }
 }

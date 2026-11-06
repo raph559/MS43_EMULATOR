@@ -6,23 +6,22 @@ using Ms43Sim.Tests.Support;
 namespace Ms43Sim.Tests.LiveTuning;
 
 /// <summary>
-/// The V10.1 image: V9 plus pops' throttle stabs and the downshift blip, with four new 8-byte settings groups (139
-/// pops stabs, 140 blip, 141 its gears and tap, 142 its ratios). V10.1 is V10 with new defaults, the rise allowed
-/// once stabbing (139/4), the blip lead (141/6) and a richer pops AFR limit. Its machines and helpers are V8's.
+/// The V10.3 image: V9 plus the downshift blip, with four 8-byte settings groups after pops (139 reserved, 140 blip, 141
+/// its gears and tap, 142 its ratios). V10.3 is V10.2 without pops' throttle stabs: 139, V10.2's stabs, is reserved,
+/// every byte limited to 0. Its machines and helpers are V8's.
 /// </summary>
 public static class V10Fixture
 {
     public const int Defaults = V8Fixture.Defaults;
 
     /// <summary>
-    /// Groups 138..142 as V10.2 flashes them: pops (4.0 s, -23.625°, a real AFR of 7.0, 4,000 rpm, 3.0 °TPS), stabs
-    /// (5.0 °TPS, 480 rpm rise once stabbing), blip (30.0 °TPS at +20.25°), gears and tap (a 150 ms lead, the cap angle
-    /// -23.625°), ratios.
+    /// Groups 138..142 as V10.3 flashes them: pops (4.0 s, -23.625°, a real AFR of 7.0, 4,000 rpm, 3.0 °TPS), 139
+    /// reserved (0), blip (30.0 °TPS at +20.25°), gears and tap (a 150 ms lead, the cap angle -23.625°), ratios.
     /// </summary>
     public static readonly byte[] Flashed =
     [
         0x00, 0x28, 0x00, 0x46, 0x7D, 0x9E, 0x1E, 0x14,
-        0x14, 0x19, 0x0F, 0x19, 0x0F, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x96, 0x19, 0x75,
         0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x0F, 0x00,
         0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
@@ -53,7 +52,7 @@ public static class V10Fixture
     /// <summary>V10.2: the spark angle the blip wrote last (E2B5's encoding); shares POPS_PH, as no blip runs in a pops window.</summary>
     public const uint BlipSpk = PopsPh;
 
-    /// <summary>V10.1: the stabs begun in the current pops window, in pops' spare byte after POPS_MIN, for the log.</summary>
+    /// <summary>V10.2's stab count, pops' spare byte after POPS_MIN, and its stab bit FDF8.7: both free on V10.3.</summary>
     public const uint PopsStabs = 0x41FBF;
     public const int PopsStab = 7, BlipOn = 8, BlipUsed = 9, BlipArmed = 10, BlipTapping = 11, BlipHold = 12, Guard = 13;
 
@@ -119,23 +118,23 @@ public sealed class OverlayV10Tests
         return bytes;
     }
 
-    [Fact] // V10.2: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
-    public void TheV102HeaderSaysMinor2()
+    [Fact] // V10.3: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
+    public void TheV103HeaderSaysMinor3()
     {
         var image = V10Fixture.Bytes;
         Assert.Equal("LTOV"u8.ToArray(), image.AsSpan(0x4B544, 4).ToArray());
-        Assert.Equal(0x020A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
+        Assert.Equal(0x030A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
         Assert.Equal(0xFFA8, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B54E)));
         Assert.Equal(143, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B550)));
         Assert.Equal(0xC0DA, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B552)));
     }
 
-    [Fact] // V10.2 beside the sent V10.2 first build, V10.1 and V10: each program is known whatever its flashed settings
-    public void ProgramIdentityNamesV102()
+    [Fact] // V10.3 beside the sent V10.2 first build, V10.1 and V10: each program is known whatever its flashed settings
+    public void ProgramIdentityNamesV103()
     {
         static string? Name(byte[] bytes) => ProgramIdentity.Name(TestImages.AsFlashed(bytes).Image);
-        Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.Bytes));
-        Assert.Equal("MS43X001 live overlay V10.2", Name(V10Fixture.ClassicBytes));
+        Assert.Equal("MS43X001 live overlay V10.3", Name(V10Fixture.Bytes));
+        Assert.Equal("MS43X001 live overlay V10.3", Name(V10Fixture.ClassicBytes));
         var first = TestBins.LiveOverlayV102FirstBytes;                   // sent 2026-11-08, before the review's cap fix
         Assert.Equal("MS43X001 live overlay V10.2 (first build)", Name(first));
         V10Fixture.Classic.CopyTo(first, V10Fixture.Defaults);
@@ -168,7 +167,7 @@ public sealed class OverlayV10Tests
     }
 
     /// <summary>
-    /// The built V10.2, checksums corrected as a full write does, against the V10.1 fast-blip bin sent to the owner: the
+    /// The built V10.3 (V10.2's plan), checksums corrected as a full write does, against the V10.1 fast-blip bin sent to the owner: the
     /// only differences are the overlay block, the new hook at 0x3D4D4, the start table, the injector flow and the
     /// checksum words.
     /// </summary>
@@ -263,8 +262,7 @@ public sealed class OverlayV10Tests
     public static TheoryData<int, int, byte> OutOfRange => new()
     {
         { 138, 3, 49 }, { 138, 3, 148 },
-        { 139, 0, 51 }, { 139, 1, 151 }, { 139, 2, 4 }, { 139, 2, 31 }, { 139, 3, 9 }, { 139, 3, 101 }, { 139, 4, 0 },
-        { 139, 4, 4 }, { 139, 4, 32 },
+        { 139, 0, 1 }, { 139, 1, 25 }, { 139, 2, 15 }, { 139, 3, 25 }, { 139, 4, 15 },  // V10.3: 139 is reserved
         { 140, 0, 3 }, { 140, 0, 0x7F }, { 140, 0, 0xA0 }, { 140, 0, 0xFF }, { 140, 1, 0 }, { 140, 1, 4 },
         { 140, 2, 9 }, { 140, 3, 62 }, { 140, 3, 188 }, { 140, 4, 2 }, { 140, 4, 31 }, { 140, 5, 151 },
         { 140, 6, 151 }, { 140, 7, 62 }, { 140, 7, 144 },
@@ -280,8 +278,7 @@ public sealed class OverlayV10Tests
     public static TheoryData<int, int, byte> AtTheLimits => new()
     {
         { 138, 3, 50 }, { 138, 3, 70 }, { 138, 3, 147 },
-        { 139, 0, 0 }, { 139, 0, 50 }, { 139, 1, 0 }, { 139, 1, 150 }, { 139, 2, 5 }, { 139, 2, 30 }, { 139, 3, 10 },
-        { 139, 3, 100 }, { 139, 4, 5 }, { 139, 4, 31 },
+        { 139, 0, 0 },
         { 140, 0, 0 }, { 140, 0, 2 }, { 140, 0, 0x80 }, { 140, 0, 0x97 }, { 140, 0, 0x9F }, { 140, 1, 1 }, { 140, 1, 3 },
         { 140, 2, 10 }, { 140, 2, 255 }, { 140, 3, 63 }, { 140, 3, 187 }, { 140, 4, 3 }, { 140, 4, 30 }, { 140, 5, 150 },
         { 140, 6, 0 }, { 140, 7, 63 }, { 140, 7, 143 },
@@ -303,7 +300,7 @@ public sealed class OverlayV10Tests
 
     public static TheoryData<int, int> Reserved => new()
     {
-        { 139, 5 }, { 139, 6 }, { 139, 7 }, { 142, 4 }, { 142, 5 }, { 142, 6 }, { 142, 7 },
+        { 139, 0 }, { 139, 1 }, { 139, 2 }, { 139, 3 }, { 139, 4 }, { 139, 5 }, { 139, 6 }, { 139, 7 }, { 142, 4 }, { 142, 5 }, { 142, 6 }, { 142, 7 },
     };
 
     [Theory, MemberData(nameof(Reserved))]
@@ -337,15 +334,15 @@ public sealed class OverlayV10Tests
     {
         var image = V10Fixture.Bytes;
         image[V10Fixture.Defaults + 2 * 8 + 3] = 250;     // 140/3, highest 187
-        image[V10Fixture.Defaults + 1 * 8 + 1] = 200;     // 139/1, highest 150
-        image[V10Fixture.Defaults + 1 * 8 + 2] = 1;       // 139/2, lowest 5
+        image[V10Fixture.Defaults + 1 * 8 + 1] = 200;     // 139/1, reserved: highest 0 (V10.3)
+        image[V10Fixture.Defaults + 1 * 8 + 2] = 1;       // 139/2, reserved
         Assert.Equal(187, Setting(image, 140, 3));
-        Assert.Equal(150, Setting(image, 139, 1));
-        Assert.Equal(5, Setting(image, 139, 2));
+        Assert.Equal(0, Setting(image, 139, 1));
+        Assert.Equal(0, Setting(image, 139, 2));
     }
 
-    [Theory] // V10.1's new bytes: 139/4 5..31 (a V10 bin's 0 reads as 5, V10's 160 rpm), 141/6 0..30
-    [InlineData(139, 4, 0, 5)] [InlineData(139, 4, 4, 5)] [InlineData(139, 4, 31, 31)] [InlineData(139, 4, 200, 31)]
+    [Theory] // V10.1's new bytes: 139/4 is reserved on V10.3 (0 whatever is flashed), 141/6 0..30
+    [InlineData(139, 4, 0, 0)] [InlineData(139, 4, 15, 0)] [InlineData(139, 4, 200, 0)]
     [InlineData(141, 6, 0, 0)] [InlineData(141, 6, 30, 30)] [InlineData(141, 6, 200, 30)]
     [InlineData(141, 7, 0, 0)] [InlineData(141, 7, 143, 143)] [InlineData(141, 7, 200, 143)] // V10.2's cap angle, −23.625..+30°
     public void TheNewBytesAreClampedToTheirLimits(int id, int index, byte flashed, int expected)

@@ -7,7 +7,7 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// <summary>
 /// V10's CPU cost on top of V9's logging (Task 7 step 6): the cycles a housekeeping pass (0C:hk to 0D:80DE) and a
 /// throttle store (09:B138 to 09:B13C) take, on V9 and on V10, with the logger polling sub 11 at full speed and a watch
-/// set; and during a stab window and a blip on V10's own drives. V10 may not store a fault or overflow a task queue
+/// set; and during a pops window and a blip on V10's own drives. V10 may not store a fault or overflow a task queue
 /// (FD84 &amp; 01C0h) that V9 does not on the same drive. The observers only read.
 /// </summary>
 public sealed class V10CostTests(ITestOutputHelper output)
@@ -67,15 +67,15 @@ public sealed class V10CostTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void TheCostDuringAStabWindowAndABlip()
+    public void TheCostDuringAPopsWindowAndABlip()
     {
-        var stabs = Measure(V10Fixture.Bytes, V10Fixture.Symbol, V10DriveFixture.Stabs, "pops-stabs");
+        var stabs = Measure(V10Fixture.Bytes, V10Fixture.Symbol, V10DriveFixture.Pops, "pops-window");
         var blip = Measure(V10Fixture.Bytes, V10Fixture.Symbol, V10DriveFixture.Blip, "blip-braking");
         static double Mean(IEnumerable<(double, ulong Cycles, int)> xs) => xs.Select(x => (double)x.Cycles).DefaultIfEmpty().Average();
         var window = stabs.Passes.Where(p => (p.Fdf8 & 8) != 0).ToList();
         var outside = stabs.Passes.Where(p => (p.Fdf8 & 8) == 0 && p.Seconds > 10).ToList();
         var blipping = blip.Passes.Where(p => (p.Fdf8 & 1 << V10Fixture.BlipOn) != 0).ToList();
-        output.WriteLine($"housekeeping: {Mean(outside):F0} cycles a pass outside a window, {Mean(window):F0} in a stab window " +
+        output.WriteLine($"housekeeping: {Mean(outside):F0} cycles a pass outside a window, {Mean(window):F0} in a pops window " +
             $"({window.Count} passes), {Mean(blipping):F0} during a blip ({blipping.Count} passes)");
         Assert.NotEmpty(window);
         Assert.NotEmpty(blipping);

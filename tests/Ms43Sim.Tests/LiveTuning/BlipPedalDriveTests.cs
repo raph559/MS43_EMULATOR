@@ -66,6 +66,23 @@ public sealed class BlipPedalDriveTests(BlipPedalDriveFixture fixture) : IClassF
             + $"\nV10.1 fired: {Fired(fixture.V101, BlipPedalDriveFixture.Press - 0.1, BlipPedalDriveFixture.Press + 0.2)}");
     }
 
+    /// <summary>
+    /// V10.3: after the press the stock angle comes back ramped from the cap's, each spark at most 807F / 4 steps of
+    /// 0.375 deg above the one before (about 7.9 deg at 2,700 rpm), never in one 9 deg jump; on 2026-11-08 V10.2 jumped
+    /// from -23.6 to -14.5 deg at once.
+    /// </summary>
+    [Fact]
+    public void AfterThePressTheStockAngleComesBackRamped()
+    {
+        var sparks = fixture.V102.Result.Sparks.Where(s => s.Main && s.Fire / 24e6 > BlipPedalDriveFixture.Press - 0.05
+            && s.Fire / 24e6 < BlipPedalDriveFixture.Press + 0.3).OrderBy(s => s.Fire).ToList();
+        Assert.True(sparks.Count > 10);
+        Assert.Contains(sparks, s => s.DecidedAdvance > -20);             // the stock angle is back within the window
+        for (var i = 1; i < sparks.Count; i++)
+            Assert.True(sparks[i].DecidedAdvance - sparks[i - 1].DecidedAdvance <= 2700 / 32 / 4 * 0.375 + 0.01,
+                $"at {sparks[i].Fire / 24e6:F3} s: {sparks[i - 1].DecidedAdvance} -> {sparks[i].DecidedAdvance} deg");
+    }
+
     private static string[] Faults(DriveResult run) => run.PowerCycles
         .SelectMany(c => c.Faults.Detected.Concat(c.Faults.Stored)).Select(f => f.Label).Distinct().Order().ToArray();
 

@@ -18,8 +18,7 @@ public sealed class V10DriveFixture
         return settings;
     }
 
-    public static readonly byte[] Stabs = Settings(s => s[0] = 1);                          // pops on, V10's defaults
-    public static readonly byte[] NoStabs = Settings(s => { s[0] = 1; s[9] = 0; });          // pops on, stab size 0
+    public static readonly byte[] Pops = Settings(s => s[0] = 1);                           // pops on, V10's defaults (V10.3 ignores 139)
     public static readonly byte[] Floor = Settings(s => { s[0] = 1; s[2] = 0; });            // pops' angle -23.625 deg
     public static readonly byte[] Blip = Settings(s => s[16] = 1);                           // the blip always on
     public static readonly byte[] BlipTwoToOne = Settings(s => { s[16] = 1; s[27] = 1; });
@@ -27,7 +26,6 @@ public sealed class V10DriveFixture
     /// <summary>V10.1's own flashed settings with pops on, and with the blip on.</summary>
     public static readonly byte[] V101Pops = V101(s => s[0] = 1);
     public static readonly byte[] V101Blip = V101(s => s[16] = 1);
-    public static readonly byte[] V101Pops160 = V101(s => { s[0] = 1; s[12] = 5; });             // V10's 160 rpm once stabbing
 
     static byte[] V101(Action<byte[]> change)
     {
@@ -85,15 +83,14 @@ public sealed class V10DriveFixture
     {
         var jobs = new (string Key, string Drive, byte[]? Settings)[]
         {
-            ("stabs", "pops-stabs", Stabs), ("no-stabs", "pops-stabs", NoStabs), ("floor", "pops-stabs", Floor),
-            ("stabs-brake", "pops-stabs-brake", Stabs), ("braking", "blip-braking", Blip), ("braking-off", "blip-braking", null),
+            ("pops", "pops-window", Pops), ("floor", "pops-window", Floor),
+            ("pops-brake", "pops-brake", Pops), ("braking", "blip-braking", Blip), ("braking-off", "blip-braking", null),
             ("tap", "blip-tap", Blip), ("upshift", "blip-upshift", Blip), ("stop", "blip-stop-in-2nd", Blip),
             ("stop-21", "blip-stop-in-2nd", BlipTwoToOne), ("from-cut", "blip-from-cut", Blip), ("from-cut-off", "blip-from-cut", null),
-            ("stabs-off", "pops-stabs", null), ("stabs-brake-off", "pops-stabs-brake", null), ("tap-off", "blip-tap", null),
+            ("pops-off", "pops-window", null), ("pops-brake-off", "pops-brake", null), ("tap-off", "blip-tap", null),
             ("upshift-off", "blip-upshift", null), ("stop-off", "blip-stop-in-2nd", null),
             ("v101-pops", "pops-v101", V101Pops), ("v101-pops-off", "pops-v101", null), ("v101-braking", "blip-braking", V101Blip),
-            ("v101-downhill", "pops-downhill-v101", V101Pops), ("v101-downhill-160", "pops-downhill-v101", V101Pops160),
-            ("v101-downhill-off", "pops-downhill-v101", null),
+            ("v101-downhill", "pops-downhill-v101", V101Pops), ("v101-downhill-off", "pops-downhill-v101", null),
         };
         // Two at a time: the owner games on this PC.
         Runs = jobs.AsParallel().WithDegreeOfParallelism(2).Select(j => (j.Key, Run: Record(j.Settings, j.Drive)))
@@ -185,52 +182,37 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     }
 
     [Fact]
-    public void V102ImagesAreKnownWhateverTheirSettings()
+    public void V103ImagesAreKnownWhateverTheirSettings()
     {
-        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
-        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Stabs).Image));
-        Assert.Equal("MS43X001 live overlay V10.2", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
+        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
+        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Pops).Image));
+        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
     }
 
+    /// <summary>V10.3: a whole 4.0 s window at pops' own opening, +5462 (V10's flashed opening) in every store, and no stab.</summary>
     [Fact]
-    public void TheStabsShowInTheThrottleStores()
+    public void ThePopsWindowHoldsItsOpening()
     {
-        var run = fixture.Runs["stabs"]; var reference = fixture.Runs["no-stabs"];
+        var run = fixture.Runs["pops"];
         var window = Assert.Single(Spans(run, 3));
-        var stabs = Spans(run, V10Fixture.PopsStab);
-        Assert.Equal(5, stabs.Count);                                   // a 4.0 s window: a 2.0 s load, then five stabs
-        Assert.True(Math.Abs(stabs[0].Start - window.Start - 2.0) <= 0.02, $"the first stab {stabs[0].Start - window.Start:F3} s in");
-        foreach (var (start, end) in stabs) Assert.True(Math.Abs(end - start - 0.15) <= 0.01, $"a stab of {end - start:F3} s");
-        for (var i = 1; i < stabs.Count; i++)
-            Assert.True(Math.Abs(stabs[i].Start - stabs[i - 1].End - 0.25) <= 0.01, $"a gap of {stabs[i].Start - stabs[i - 1].End:F3} s");
-        foreach (var store in run.Stores.Where(s => Bit(s.Fdf8, 3)))
-        {
-            var expected = Bit(store.Fdf8, V10Fixture.PopsStab) ? 13655 : 5462;
-            Assert.True(Math.Abs(store.Added - expected) <= 4, $"+{store.Added} at {store.Seconds:F3} s");
-        }
-        Assert.All(reference.Stores.Where(s => Bit(s.Fdf8, 3)), s => Assert.True(Math.Abs(s.Added - 5462) <= 2, $"+{s.Added}"));
-        Assert.DoesNotContain(reference.Ticks, t => Bit(t.Fdf8, V10Fixture.PopsStab));
+        Assert.True(Math.Abs(window.End - window.Start - 4.0) <= 0.02, $"a window of {window.End - window.Start:F3} s");
+        Assert.All(run.Stores.Where(s => Bit(s.Fdf8, 3)), s => Assert.True(Math.Abs(s.Added - 5462) <= 2, $"+{s.Added} at {s.Seconds:F3} s"));
+        Assert.DoesNotContain(run.Ticks, t => Bit(t.Fdf8, V10Fixture.PopsStab));
     }
 
     /// <summary>
-    /// V10.1's defaults on a lift in 3rd at 120 km/h: one 4.0 s window, a 2.0 s load at 3.0 deg TPS, then five stabs of
-    /// 150 ms at 3.0 + 5.0 deg TPS every 400 ms, the spark decided at -23.625 deg throughout. In this run the fired angle
-    /// lies up to about 0.6 deg from the decided one, at 4,200 to 5,300 rpm on a slowing engine.
+    /// V10.1's flashed pops on a lift in 3rd at 120 km/h: one 4.0 s window at 3.0 deg TPS throughout (V10.3: no stabs),
+    /// the spark decided at -23.625 deg. In this run the fired angle lies up to about 0.6 deg from the decided one, at
+    /// 4,200 to 5,300 rpm on a slowing engine.
     /// </summary>
     [Fact]
-    public void V101sPopsDefaultsStabFromTheLoad()
+    public void V101sPopsDefaultsHoldThreeDegrees()
     {
         var run = fixture.Runs["v101-pops"];
         var window = Assert.Single(Spans(run, 3));
         Assert.True(Math.Abs(window.End - window.Start - 4.0) <= 0.02, $"a window of {window.End - window.Start:F3} s");
-        var stabs = Spans(run, V10Fixture.PopsStab);
-        Assert.Equal(5, stabs.Count);
-        Assert.True(Math.Abs(stabs[0].Start - window.Start - 2.0) <= 0.02, $"the first stab {stabs[0].Start - window.Start:F3} s in");
-        foreach (var store in run.Stores.Where(s => Bit(s.Fdf8, 3)))
-        {
-            var expected = Bit(store.Fdf8, V10Fixture.PopsStab) ? 4369 : 1638;
-            Assert.True(Math.Abs(store.Added - expected) <= 4, $"+{store.Added} at {store.Seconds:F3} s");
-        }
+        Assert.DoesNotContain(run.Ticks, t => Bit(t.Fdf8, V10Fixture.PopsStab));
+        Assert.All(run.Stores.Where(s => Bit(s.Fdf8, 3)), s => Assert.True(Math.Abs(s.Added - 1638) <= 4, $"+{s.Added} at {s.Seconds:F3} s"));
         var sparks = run.Result.Sparks.Where(s => s.Main && s.Fire / 24e6 > window.Start + 0.05 && s.Fire / 24e6 < window.End - 0.02).ToList();
         Assert.NotEmpty(sparks);
         Assert.All(sparks, s => Assert.True(Math.Abs(s.DecidedAdvance + 23.625) <= 0.01 && Math.Abs(s.Advance + 23.625) <= 1.0,
@@ -239,19 +221,15 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     }
 
     /// <summary>
-    /// The V10.1 review's finding, end to end: on a slope that raises the rpm about 270 rpm once the stabs have begun, the
-    /// window runs its 4.0 s with V10.1's 480 rpm allowed, both at the tick and at the overrun-cut gate; with 139/4 = 5
-    /// (V10's 160 rpm) it ends on the slope, after the load.
+    /// V10.3, end to end: on a slope that raises the rpm about 270 rpm, the window ends on the slope at V8's 160 rpm, as
+    /// V10.2 did with 139/4 = 5; V10.1's 480 rpm in 139/4 no longer counts.
     /// </summary>
-    [Fact] // RF1
-    public void OnASlopeTheWindowOutlivesARiseBelowTheAllowance()
+    [Fact]
+    public void OnASlopeTheWindowEndsAt160Rpm()
     {
-        var window = Assert.Single(Spans(fixture.Runs["v101-downhill"], 3));
-        Assert.True(Math.Abs(window.End - window.Start - 4.0) <= 0.02, $"a window of {window.End - window.Start:F3} s");
-        Assert.Equal(5, Spans(fixture.Runs["v101-downhill"], V10Fixture.PopsStab).Count);
-        var cut = Assert.Single(Spans(fixture.Runs["v101-downhill-160"], 3));
-        Assert.True(cut.End - cut.Start > 2.3 && cut.End - cut.Start < 3.8, $"with 160 rpm a window of {cut.End - cut.Start:F3} s");
-        Assert.True(cut.End > 19.5 && cut.End < window.End - 0.1, $"with 160 rpm the window ended at {cut.End:F3} s");
+        var cut = Assert.Single(Spans(fixture.Runs["v101-downhill"], 3));
+        Assert.True(cut.End - cut.Start > 2.3 && cut.End - cut.Start < 3.8, $"a window of {cut.End - cut.Start:F3} s");
+        Assert.True(cut.End > 19.5, $"the window ended at {cut.End:F3} s");
     }
 
     /// <summary>
@@ -289,7 +267,7 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     [Fact] // RF3
     public void TheBrakeEndsThePopsAndTheyDoNotReturn()
     {
-        var run = fixture.Runs["stabs-brake"];
+        var run = fixture.Runs["pops-brake"];
         var window = Assert.Single(Spans(run, 3));
         Assert.True(window.End >= 19.5 && window.End <= 19.6, $"the window ended at {window.End:F3} s");
     }
@@ -343,41 +321,17 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     public void TheGuardStaysQuietAtPopsFloorAngle()
     {
         var run = fixture.Runs["floor"];
-        Assert.NotEmpty(Spans(run, V10Fixture.PopsStab));
+        Assert.Single(Spans(run, 3));
         Assert.DoesNotContain(run.Ticks, t => Bit(t.Fdf8, V10Fixture.Guard));
     }
 
-    /// <summary>
-    /// Spec 9: a stab gets the stock tip-in fuel. The routine at 09:7D16 that the firmware reading called the wall film runs
-    /// about twice a second, so it is not the per-stab path; the injections show the response instead. 54 to 106 ms after
-    /// each stab (the throttle body and the air model's lag) the stock code adds short intermediate pulses (under 2 ms,
-    /// about 1.1 ms) between the main ones, and the main pulses grow (about 8 to 10.5 ms). The run without stabs has neither.
-    /// </summary>
-    [Fact]
-    public void AStabGetsTheTipInFuel()
-    {
-        var run = fixture.Runs["stabs"]; var reference = fixture.Runs["no-stabs"];
-        static List<(double Open, double Ms)> Pulses(V10DriveFixture.Run r, double from, double to) => r.Result.Injections
-            .Select(i => (Open: i.Open / 24e6, Ms: (i.Close - i.Open) / 24e3)).Where(p => p.Open >= from && p.Open < to).ToList();
-        var stabs = Spans(run, V10Fixture.PopsStab);
-        Assert.Equal(5, stabs.Count);
-        foreach (var (start, _) in stabs)
-        {
-            Assert.Contains(Pulses(run, start, start + 0.12), p => p.Ms < 2.0);
-            Assert.DoesNotContain(Pulses(reference, start, start + 0.12), p => p.Ms < 2.0);
-            var before = Pulses(run, start - 0.05, start).Where(p => p.Ms >= 2.0).Max(p => p.Ms);
-            var during = Pulses(run, start + 0.04, start + 0.2).Where(p => p.Ms >= 2.0).Max(p => p.Ms);
-            Assert.True(during > before * 1.1, $"main pulses {before:F2} -> {during:F2} ms at the stab at {start:F3} s");
-        }
-    }
-
-    /// <summary>Each run with V10's features on, and the same drive with them off (V10's flashed defaults).</summary>
+    /// <summary>Each run with V10's features on, and the same drive with them off (the image's flashed defaults).</summary>
     public static TheoryData<string, string> AllRuns => new()
     {
-        { "stabs", "stabs-off" }, { "no-stabs", "stabs-off" }, { "floor", "stabs-off" }, { "stabs-brake", "stabs-brake-off" },
+        { "pops", "pops-off" }, { "floor", "pops-off" }, { "pops-brake", "pops-brake-off" },
         { "braking", "braking-off" }, { "tap", "tap-off" }, { "upshift", "upshift-off" }, { "stop", "stop-off" },
         { "stop-21", "stop-off" }, { "from-cut", "from-cut-off" }, { "v101-pops", "v101-pops-off" },
-        { "v101-braking", "braking-off" }, { "v101-downhill", "v101-downhill-off" }, { "v101-downhill-160", "v101-downhill-off" },
+        { "v101-braking", "braking-off" }, { "v101-downhill", "v101-downhill-off" },
     };
 
     // The fault labels of paths 111, 112, 113 (the throttle controller), 117, 118 (the brake) and 149 (the torque check).

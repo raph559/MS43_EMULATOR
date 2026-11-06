@@ -31,7 +31,7 @@ public sealed class BlipTests
         m.Bus.Poke16(0xFD18, 0);
         m.Bus.Poke16(0xFDF8, 0x4000);
         m.Bus.Poke16(0xFD2E, 0);
-        PopsStabTests.Tick(m);                                       // one tick with the clutch up
+        PopsWindowTests.Tick(m);                                       // one tick with the clutch up
         return m;
     }
 
@@ -40,7 +40,7 @@ public sealed class BlipTests
 
     private static void Braking(Machine m) => Clutch(m, true, true, true);
     private static void Pedal(Machine m, byte value) => V8Fixture.PutByte(m, 0xE0FF, value);
-    private static void Ticks(Machine m, int n) { for (var i = 0; i < n; i++) PopsStabTests.Tick(m); }
+    private static void Ticks(Machine m, int n) { for (var i = 0; i < n; i++) PopsWindowTests.Tick(m); }
 
     private static bool On(Machine m) => V10Fixture.Flag(m, V10Fixture.BlipOn);
     private static int Target(Machine m) => V10Fixture.Byte(m, V10Fixture.BlipTgt);
@@ -50,7 +50,7 @@ public sealed class BlipTests
     private static void Tap(Machine m, int up = 20)
     {
         Pedal(m, 40); Ticks(m, up);
-        Pedal(m, 0); PopsStabTests.Tick(m);
+        Pedal(m, 0); PopsWindowTests.Tick(m);
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public sealed class BlipTests
     {
         var m = Machine();
         Braking(m);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(On(m));
         Assert.Equal(83, Target(m));                                // 60 x 89 / 64: about 2,656 rpm
         Assert.InRange(Add(m), 8191, 8195);                         // 15.0 deg TPS
@@ -71,7 +71,7 @@ public sealed class BlipTests
         m.Bus.Poke16(0xE2B4, 0x1D00);                               // the car file's overrun angle, -12.75 deg
         V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0x1D);
         Braking(m);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.True(On(m));
         Assert.Equal(0xFF, V10Fixture.Byte(m, V10Fixture.BlipSpk));
     }
@@ -91,10 +91,10 @@ public sealed class BlipTests
     {
         var m = Machine();
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Pedal(m, 40); Ticks(m, 20);
         Assert.False(On(m));
-        Pedal(m, 0); PopsStabTests.Tick(m);
+        Pedal(m, 0); PopsWindowTests.Tick(m);
         Assert.True(On(m));
     }
 
@@ -115,7 +115,7 @@ public sealed class BlipTests
     {
         var m = Machine();
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Tap(m, up: 41);
         Assert.False(On(m));
         Assert.True(V10Fixture.Flag(m, V10Fixture.BlipUsed));
@@ -128,7 +128,7 @@ public sealed class BlipTests
     {
         var m = Machine();
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Tap(m, up: 40);
         Assert.True(On(m));
     }
@@ -154,7 +154,7 @@ public sealed class BlipTests
 
         m = Machine(TwoToOne, gear: 2, speed: 30);
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Tap(m);
         Assert.True(On(m));
         Assert.Equal(30 * 226 / 64, Target(m));
@@ -165,7 +165,7 @@ public sealed class BlipTests
     public void ADownshiftSwitchedOffGetsNoBlip(byte gear, int index)
     {
         var on = Machine(gear: gear);
-        Braking(on); PopsStabTests.Tick(on);
+        Braking(on); PopsWindowTests.Tick(on);
         Assert.True(On(on));
 
         var off = Machine(b => b[Gears + index] = 0, gear: gear);
@@ -178,7 +178,7 @@ public sealed class BlipTests
     {
         var m = Machine(gear: 2, speed: 30);
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Tap(m);
         Assert.False(On(m));
     }
@@ -192,7 +192,7 @@ public sealed class BlipTests
 
         m = Machine(b => b[Blip + 1] = 1);                          // while braking only
         Clutch(m, true);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Tap(m);
         Assert.False(On(m));
     }
@@ -217,14 +217,14 @@ public sealed class BlipTests
     public void OneBlipPerClutchPress()
     {
         var m = Machine(b => b[Blip + 4] = 3);                      // 0.3 s at most
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
         Ticks(m, 40);
         Assert.False(On(m));
         Ticks(m, 100);
         Assert.False(On(m));
-        Clutch(m, false); PopsStabTests.Tick(m);
-        Braking(m); PopsStabTests.Tick(m);
+        Clutch(m, false); PopsWindowTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
     }
 
@@ -241,9 +241,9 @@ public sealed class BlipTests
     {
         var m = Machine(b => { b[Blip] = 2; b[Blip + 4] = 30; });  // cruise ready as the switch; 3.0 s
         m.Bus.Poke16(0xFD18, 2);                                    // the cruise main switch on, no speed held
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
-        if (fromTheHold) { V8Fixture.PutByte(m, 0x4007F, 80); PopsStabTests.Tick(m); Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold)); }
+        if (fromTheHold) { V8Fixture.PutByte(m, 0x4007F, 80); PopsWindowTests.Tick(m); Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold)); }
         switch (stop)
         {
             case "clutch": Clutch(m, false); break;
@@ -254,7 +254,7 @@ public sealed class BlipTests
             case "switch": m.Bus.Poke16(0xFD18, 0); break;
             case "lc": m.Bus.Poke16(0xFDF8, (ushort)(m.Bus.Peek16(0xFDF8) | 1)); break;
         }
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.False(On(m), stop);
         Assert.Equal(0, Add(m));
     }
@@ -263,25 +263,25 @@ public sealed class BlipTests
     public void RiseThenHold()
     {
         var m = Machine();                                          // the target is 83 (60 km/h, 3rd)
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         int rise = Add(m), hold = 2731;                             // 15.0 and 5.0 deg TPS
         Assert.InRange(rise, 8191, 8195);
         foreach (byte rpm in new byte[] { 60, 76 })
         {
-            V8Fixture.PutByte(m, 0x4007F, rpm); PopsStabTests.Tick(m);
+            V8Fixture.PutByte(m, 0x4007F, rpm); PopsWindowTests.Tick(m);
             Assert.False(V10Fixture.Flag(m, V10Fixture.BlipHold), $"{rpm}");
             Assert.Equal(rise, Add(m));
         }
-        V8Fixture.PutByte(m, 0x4007F, 77); PopsStabTests.Tick(m);   // 77 + 6 reaches 83: the hold begins
+        V8Fixture.PutByte(m, 0x4007F, 77); PopsWindowTests.Tick(m);   // 77 + 6 reaches 83: the hold begins
         Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold));
         Assert.InRange(Add(m), hold - 2, hold + 2);
-        V8Fixture.PutByte(m, 0x4007F, 88); PopsStabTests.Tick(m);   // in the band (83..88): unchanged
+        V8Fixture.PutByte(m, 0x4007F, 88); PopsWindowTests.Tick(m);   // in the band (83..88): unchanged
         Assert.InRange(Add(m), hold - 2, hold + 2);
-        V8Fixture.PutByte(m, 0x4007F, 89); PopsStabTests.Tick(m);   // above 83 + 5: nothing
+        V8Fixture.PutByte(m, 0x4007F, 89); PopsWindowTests.Tick(m);   // above 83 + 5: nothing
         Assert.Equal(0, Add(m));
-        V8Fixture.PutByte(m, 0x4007F, 85); PopsStabTests.Tick(m);   // back in the band: still nothing
+        V8Fixture.PutByte(m, 0x4007F, 85); PopsWindowTests.Tick(m);   // back in the band: still nothing
         Assert.Equal(0, Add(m));
-        V8Fixture.PutByte(m, 0x4007F, 82); PopsStabTests.Tick(m);   // below the target: the hold opening
+        V8Fixture.PutByte(m, 0x4007F, 82); PopsWindowTests.Tick(m);   // below the target: the hold opening
         Assert.InRange(Add(m), hold - 2, hold + 2);
     }
 
@@ -289,9 +289,9 @@ public sealed class BlipTests
     public void TheTargetFallsAsTheCarSlows()
     {
         var m = Machine();
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.Equal(83, Target(m));
-        V8Fixture.PutByte(m, 0x4047F, 50); PopsStabTests.Tick(m);
+        V8Fixture.PutByte(m, 0x4047F, 50); PopsWindowTests.Tick(m);
         Assert.Equal(50 * 89 / 64, Target(m));
     }
 
@@ -299,7 +299,7 @@ public sealed class BlipTests
     public void ReleasingTheBrakeDoesNotEndABrakingBlip()
     {
         var m = Machine();
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Clutch(m, true);
         Ticks(m, 20);
         Assert.True(On(m));
@@ -309,7 +309,7 @@ public sealed class BlipTests
     public void ABlipUsesUpTheLiftsPops()
     {
         var m = Machine();
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
         Assert.NotEqual(0, m.Bus.Peek16(0xFDF8) & 1 << 4);
     }
@@ -333,9 +333,9 @@ public sealed class BlipTests
     public void TheBlipKeepsMisfireDetectionSuppressed()
     {
         var m = Machine();
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         m.Bus.Poke16(0xE3B0, 7); m.Bus.Poke16(0xFD2A, 0);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.Equal(100, m.Bus.Peek16(0xE3B0));
         Assert.NotEqual(0, m.Bus.Peek16(0xFD2A) & 1 << 12);
     }
@@ -344,7 +344,7 @@ public sealed class BlipTests
     public void V101BlipsWithThirtyDegrees()
     {
         var m = Machine(v101: true);
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
         Assert.InRange(Add(m), 16385, 16389);
     }
@@ -353,11 +353,11 @@ public sealed class BlipTests
     private static int HoldBeganAt(byte lead)
     {
         var m = Machine(b => b[Gears + 6] = lead, rpm: 50, v101: true);
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
         for (var rpm = 51; rpm < 83; rpm++)
         {
-            V8Fixture.PutByte(m, 0x4007F, (byte)rpm); PopsStabTests.Tick(m);
+            V8Fixture.PutByte(m, 0x4007F, (byte)rpm); PopsWindowTests.Tick(m);
             Assert.True(On(m), $"{rpm}");
             if (V10Fixture.Flag(m, V10Fixture.BlipHold)) return rpm;
         }
@@ -415,10 +415,10 @@ public sealed class BlipTests
     public void AGearOutsideTwoToFiveStopsTheBlip(byte gear)
     {
         var m = Machine();
-        Braking(m); PopsStabTests.Tick(m);
+        Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
         V8Fixture.PutByte(m, 0x401AE, gear);
-        PopsStabTests.Tick(m);
+        PopsWindowTests.Tick(m);
         Assert.False(On(m), $"gear {gear}");
         Assert.Equal(0, Add(m));
     }

@@ -1,6 +1,6 @@
-# V10.1 pops on a slope: a lift in 3rd at 110 km/h (16.5 s) slowing to 105 km/h through the 2.0 s load, then downhill
-# from 19.5 s: the road speed rises 6 km/h (about 270 rpm, 4,670 to 4,940) with the pedal at 0. With V10.1's 480 rpm
-# allowed once stabbing the window runs its 4.0 s; with 139 byte 4 = 5 (V10's 160 rpm) it ends on the slope.
+# V10.1 pops on a slope: a lift in 3rd at 110 km/h (16.5 s) slowing to 105 km/h for 3 s, then downhill from 19.5 s:
+# the road speed rises 6 km/h (about 270 rpm, 4,670 to 4,940) with the pedal at 0. V10.1's 480 rpm allowed once
+# stabbing kept the window its 4.0 s; V10.3 has no stabs, and its 160 rpm rule ends the window on the slope.
 drive v10-pops-downhill-v101
 start blank
 set coolant=90 oil=90 intake=33 ambient=20

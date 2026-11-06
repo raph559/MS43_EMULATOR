@@ -1,5 +1,5 @@
-# V10 pops stabs and the brake: the lift at 16.5 s, the brake from 19.5 s for 1 s, the pedal still released.
-drive v10-pops-stabs-brake
+# V10 pops and the brake: the lift at 16.5 s, the brake from 19.5 s for 1 s, the pedal still released.
+drive v10-pops-brake
 start blank
 set coolant=90 oil=90 intake=33 ambient=20
 3 on
