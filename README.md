@@ -58,6 +58,10 @@ the firmware's RAM know MS43X001's layout; on stock software those checks report
 
 ## Quick start
 
+The [Releases](https://github.com/raph559/MS43_EMULATOR/releases) page has `ms43sim` ready to run for Windows and
+Linux (x64, no .NET needed), with the standard drives next to it: unzip, then run `ms43sim boot my.bin` in that folder.
+To build it yourself:
+
 ```bash
 git clone https://github.com/raph559/MS43_EMULATOR.git
 cd MS43_EMULATOR
