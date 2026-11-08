@@ -147,6 +147,13 @@ the real ECU; `check` of seven drives takes about half a minute with `--jobs 6`.
 | [`HARDWARE.md`](HARDWARE.md) | Every device the emulator models, its evidence in the firmware and the manuals, and what is stubbed |
 | [`docs/reference.md`](docs/reference.md) | The full manual: every command and option, the drive format, the compare's tolerances, and the assumptions of each development stage |
 
+## Related projects
+
+This project is one of three that work together:
+
+- [MS43 Tuner](https://github.com/raph559/MS43_TUNER): the Windows app and command-line tool: live logging, map editing, live tuning, bin compare and road performance tests.
+- [MS43X001 Custom](https://github.com/raph559/MS43X001_CUSTOM): MS43X001 with the live-tuning overlay that MS43 Tuner talks to, plus pops & bangs and a downshift blip.
+
 ## Contributing
 
 Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Never attach a bin to an issue
