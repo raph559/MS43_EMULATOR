@@ -2,7 +2,10 @@ using Ms43Sim.Core;
 
 namespace Ms43Sim.Tests.Support;
 
-/// <summary>The seven standard drives (plan 4 Task 12), read from sim/drives: the nearest one above the test assembly.</summary>
+/// <summary>
+/// The seven standard drives (plan 4 Task 12), read from the nearest drives/ (the emulator's own repository) or sim/drives
+/// (the lab) above the test assembly.
+/// </summary>
 public static class StandardDrives
 {
     static readonly Lazy<string> directory = new(Find);
@@ -19,10 +22,10 @@ public static class StandardDrives
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
-            var candidate = Path.Combine(dir.FullName, "sim", "drives");
-            if (File.Exists(Path.Combine(candidate, "warm-start.drive")))
-                return candidate;
+            foreach (var candidate in new[] { Path.Combine(dir.FullName, "drives"), Path.Combine(dir.FullName, "sim", "drives") })
+                if (File.Exists(Path.Combine(candidate, "warm-start.drive")))
+                    return candidate;
         }
-        throw new InvalidOperationException("no sim/drives/warm-start.drive above the test assembly");
+        throw new InvalidOperationException("no drives/warm-start.drive or sim/drives/warm-start.drive above the test assembly");
     }
 }

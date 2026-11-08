@@ -29,15 +29,15 @@ public static class Program
         "      software/output checks only: 0 pass, 1 fail, 4 incomplete\n" +
         "  ms43sim check BIN [--drives DIR] [--jobs N] [--raw | --partial-onto ECU.bin]\n" +
         "                    [--ecu-boot BOOT.bin] [--out DIR]\n" +
-        "      runs every *.drive in DIR (default: sim/drives) on BIN with every check, the\n" +
-        "      warm-start drive first: its final EEPROM is where the seasoned drives start;\n" +
+        "      runs every *.drive in DIR (default: drives/ or sim/drives) on BIN with every check,\n" +
+        "      the warm-start drive first: its final EEPROM is where the seasoned drives start;\n" +
         "      --jobs N runs the others N at a time; one folder and one line per drive; the\n" +
         "      exit code is the worst software/output-check verdict\n" +
         "  ms43sim compare REF CANDIDATE --drive FILE [--eeprom FILE] [--xdf FILE] [--out DIR]\n" +
         "  ms43sim compare REF CANDIDATE [--drives DIR] [--jobs N] [--xdf FILE] [--out DIR]\n" +
         "                  [--raw | --partial-onto ECU.bin] [--ecu-boot BOOT.bin]\n" +
         "      runs both bins (flashed the same way) through one drive, or every *.drive in DIR\n" +
-        "      (default: sim/drives), the warm-start drive first: both seasoned runs start from\n" +
+        "      (default: drives/ or sim/drives), the warm-start drive first: both seasoned runs start from\n" +
         "      the reference's warm-start EEPROM; names calibration differences from\n" +
         "      calmaps_ms43x.csv (found in the current folder or above) and --xdf's constants,\n" +
         "      lists code differences, and lines the runs up per engine event and per sample;\n" +
@@ -317,7 +317,7 @@ public static class Program
             return UsageError(error, problem);
         drivesDir ??= FindStandardDrives();
         if (drivesDir is null || !Directory.Exists(drivesDir))
-            return UsageError(error, drivesDir is null ? "no --drives DIR, and no sim/drives above the current folder" : $"no folder {drivesDir}");
+            return UsageError(error, drivesDir is null ? "no --drives DIR, and no drives folder found (drives/ or sim/drives above the current folder)" : $"no folder {drivesDir}");
         var drives = new List<Drive>();
         var files = new Dictionary<string, string>();
         foreach (var file in Directory.GetFiles(drivesDir, "*.drive").Order(StringComparer.Ordinal))
@@ -431,7 +431,7 @@ public static class Program
         {
             drivesDir ??= FindStandardDrives();
             if (drivesDir is null || !Directory.Exists(drivesDir))
-                return UsageError(error, drivesDir is null ? "no --drives DIR, and no sim/drives above the current folder" : $"no folder {drivesDir}");
+                return UsageError(error, drivesDir is null ? "no --drives DIR, and no drives folder found (drives/ or sim/drives above the current folder)" : $"no folder {drivesDir}");
             var names = new HashSet<string>();
             foreach (var file in Directory.GetFiles(drivesDir, "*.drive").Order(StringComparer.Ordinal))
             {
@@ -490,15 +490,17 @@ public static class Program
         return null;
     }
 
-    /// <summary>sim/drives in the current folder or the nearest folder above it.</summary>
+    /// <summary>
+    /// The standard drives: drives/ (the emulator's own repository, or next to a release's ms43sim) or sim/drives (the
+    /// lab), in the current folder or the nearest folder above it, then next to the program.
+    /// </summary>
     static string? FindStandardDrives()
     {
-        for (var dir = new DirectoryInfo(Directory.GetCurrentDirectory()); dir != null; dir = dir.Parent)
-        {
-            var candidate = Path.Combine(dir.FullName, "sim", "drives");
-            if (Directory.Exists(candidate))
-                return candidate;
-        }
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+            for (var dir = new DirectoryInfo(start); dir != null; dir = dir.Parent)
+                foreach (var candidate in new[] { Path.Combine(dir.FullName, "drives"), Path.Combine(dir.FullName, "sim", "drives") })
+                    if (File.Exists(Path.Combine(candidate, "warm-start.drive")))
+                        return candidate;
         return null;
     }
 
