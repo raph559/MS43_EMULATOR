@@ -64,14 +64,24 @@ public sealed class V10DriveFixture
         var stores = new List<Store>(); var ticks = new List<Tick>(); var sparks = new List<SparkPick>();
         var hk = (uint)V10Fixture.Symbol("hk");
         var picked = (uint)V10Fixture.Symbol("psk_written");             // right after MOVB 0E2B5h, RL4
+        var deciding = (uint)V10Fixture.Symbol("psk_angle");             // every blip decision passes here first
+        var armed = false;
         ushort pedalMap = 0;
         void Attach(DriveContext context) => context.PowerCycleStarted += (machine, _) =>
         {
             machine.OnInstruction(0x9B138, m => pedalMap = m.Cpu.R(4));
             machine.OnInstruction(0x9B13C, m => stores.Add(new Store(m.Cycles / 24e6, m.Bus.Peek16(0x406A4) - pedalMap, m.Bus.Peek16(0xFDF8))));
             machine.OnInstruction(hk, m => ticks.Add(new Tick(m.Cycles / 24e6, m.Bus.Peek16(0xFDF8))));
-            machine.OnInstruction(picked, m => sparks.Add(new SparkPick(m.Cycles / 24e6, m.Cpu.R(2), V10Fixture.Byte(m, 0x4007F),
-                V10Fixture.Byte(m, V10Fixture.BlipTgt), m.Bus.Peek16(0xE2B4) >> 8)));
+            // One pick per decision: an interrupt taken at psk_written runs its hook again on the return (V10.4's timing
+            // put one there on v101-braking at 19.535 s), so a pick counts only after psk_angle has armed it.
+            machine.OnInstruction(deciding, _ => armed = true);
+            machine.OnInstruction(picked, m =>
+            {
+                if (!armed) return;
+                armed = false;
+                sparks.Add(new SparkPick(m.Cycles / 24e6, m.Cpu.R(2), V10Fixture.Byte(m, 0x4007F),
+                    V10Fixture.Byte(m, V10Fixture.BlipTgt), m.Bus.Peek16(0xE2B4) >> 8));
+            });
         };
         var result = DriveRun.RunWithChecks(Image(settings), Load(drive), new DriveRunOptions(Observers: new Action<DriveContext>[] { Attach }));
         return new Run(result, stores, ticks, sparks);
@@ -182,11 +192,11 @@ public sealed class V10DriveTests(V10DriveFixture fixture) : IClassFixture<V10Dr
     }
 
     [Fact]
-    public void V103ImagesAreKnownWhateverTheirSettings()
+    public void V104ImagesAreKnownWhateverTheirSettings()
     {
-        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
-        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Pops).Image));
-        Assert.Equal("MS43X001 live overlay V10.3", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
+        Assert.Equal("MS43X001 live overlay V10.4", ProgramIdentity.Name(V10DriveFixture.Image(null).Image));
+        Assert.Equal("MS43X001 live overlay V10.4", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Pops).Image));
+        Assert.Equal("MS43X001 live overlay V10.4", ProgramIdentity.Name(V10DriveFixture.Image(V10DriveFixture.Blip).Image));
     }
 
     /// <summary>V10.3: a whole 4.0 s window at pops' own opening, +5462 (V10's flashed opening) in every store, and no stab.</summary>

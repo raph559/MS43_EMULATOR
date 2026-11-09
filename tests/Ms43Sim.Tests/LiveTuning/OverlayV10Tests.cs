@@ -118,23 +118,23 @@ public sealed class OverlayV10Tests
         return bytes;
     }
 
-    [Fact] // V10.3: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
-    public void TheV103HeaderSaysMinor3()
+    [Fact] // V10.4: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
+    public void TheV104HeaderSaysMinor4()
     {
         var image = V10Fixture.Bytes;
         Assert.Equal("LTOV"u8.ToArray(), image.AsSpan(0x4B544, 4).ToArray());
-        Assert.Equal(0x030A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
+        Assert.Equal(0x040A, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B548)));
         Assert.Equal(0xFFA8, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B54E)));
         Assert.Equal(143, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B550)));
         Assert.Equal(0xC0DA, BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(0x4B552)));
     }
 
-    [Fact] // V10.3 beside the sent V10.2 first build, V10.1 and V10: each program is known whatever its flashed settings
-    public void ProgramIdentityNamesV103()
+    [Fact] // V10.4 beside the sent V10.2 first build, V10.1 and V10: each program is known whatever its flashed settings
+    public void ProgramIdentityNamesV104()
     {
         static string? Name(byte[] bytes) => ProgramIdentity.Name(TestImages.AsFlashed(bytes).Image);
-        Assert.Equal("MS43X001 live overlay V10.3", Name(V10Fixture.Bytes));
-        Assert.Equal("MS43X001 live overlay V10.3", Name(V10Fixture.ClassicBytes));
+        Assert.Equal("MS43X001 live overlay V10.4", Name(V10Fixture.Bytes));
+        Assert.Equal("MS43X001 live overlay V10.4", Name(V10Fixture.ClassicBytes));
         var first = TestBins.LiveOverlayV102FirstBytes;                   // sent 2026-11-08, before the review's cap fix
         Assert.Equal("MS43X001 live overlay V10.2 (first build)", Name(first));
         V10Fixture.Classic.CopyTo(first, V10Fixture.Defaults);
@@ -262,6 +262,7 @@ public sealed class OverlayV10Tests
     public static TheoryData<int, int, byte> OutOfRange => new()
     {
         { 138, 3, 49 }, { 138, 3, 148 },
+        { 138, 2, 144 }, { 138, 2, 255 },                                               // V10.4: pops spark at most +30.0
         { 139, 0, 1 }, { 139, 1, 25 }, { 139, 2, 15 }, { 139, 3, 25 }, { 139, 4, 15 },  // V10.3: 139 is reserved
         { 140, 0, 3 }, { 140, 0, 0x7F }, { 140, 0, 0xA0 }, { 140, 0, 0xFF }, { 140, 1, 0 }, { 140, 1, 4 },
         { 140, 2, 9 }, { 140, 3, 62 }, { 140, 3, 188 }, { 140, 4, 2 }, { 140, 4, 31 }, { 140, 5, 151 },
@@ -278,6 +279,7 @@ public sealed class OverlayV10Tests
     public static TheoryData<int, int, byte> AtTheLimits => new()
     {
         { 138, 3, 50 }, { 138, 3, 70 }, { 138, 3, 147 },
+        { 138, 2, 0 }, { 138, 2, 143 },
         { 139, 0, 0 },
         { 140, 0, 0 }, { 140, 0, 2 }, { 140, 0, 0x80 }, { 140, 0, 0x97 }, { 140, 0, 0x9F }, { 140, 1, 1 }, { 140, 1, 3 },
         { 140, 2, 10 }, { 140, 2, 255 }, { 140, 3, 63 }, { 140, 3, 187 }, { 140, 4, 3 }, { 140, 4, 30 }, { 140, 5, 150 },

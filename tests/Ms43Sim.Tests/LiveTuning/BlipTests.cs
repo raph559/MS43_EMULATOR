@@ -197,13 +197,13 @@ public sealed class BlipTests
         Assert.False(On(m));
     }
 
-    public static TheoryData<string> NoBlipCases => new() { "speed", "cold", "late", "lc", "nls", "ral", "1st", "near" };
+    public static TheoryData<string> NoBlipCases => new() { "speed", "cold", "late", "lc", "nls", "ral", "1st", "near", "stalled", "under800" };
 
     [Theory, MemberData(nameof(NoBlipCases))]
     public void NoBlipWhen(string name)
     {
         var m = Machine(gear: name == "1st" ? (byte)1 : (byte)4, speed: name == "speed" ? (byte)29 : (byte)60,
-            rpm: name == "near" ? (byte)78 : (byte)40);
+            rpm: name switch { "near" => (byte)78, "stalled" => (byte)0, "under800" => (byte)24, _ => (byte)40 });  // V10.4: under 800 rpm
         if (name == "cold") V8Fixture.PutByte(m, 0x40433, 143);
         if (name is "lc" or "nls" or "ral")
             m.Bus.Poke16(0xFDF8, (ushort)(0x4000 | 1 << (name == "lc" ? 0 : name == "nls" ? 1 : 2)));
