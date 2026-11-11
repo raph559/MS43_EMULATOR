@@ -13,7 +13,7 @@ public static class FeatureFixture
     {
         get
         {
-            using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+            using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot,
                 "defs/live_overlay_v10_reads.json")));
             return json.RootElement.EnumerateArray().Select(e => new Reader(e.GetProperty("name").GetString()!,
                 e.GetProperty("group").GetInt32(), e.GetProperty("offset").GetInt32(),

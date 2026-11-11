@@ -14,19 +14,6 @@ public static class ProgramIdentity
     public const string Ms43X001 = "32141e6358bfbfa0cc58bf6bbab72516f04ea769afbbba67e572923e3bb10d35";
 
     /// <summary>
-    /// MS43X001 with the live-tuning overlay 1, as tools/build_live_overlay.py builds it from patches/live_overlay.asm (plan 6,
-    /// D13). A rebuild that changes the program changes this pin.
-    /// </summary>
-    public const string Ms43X001LiveOverlay = "a188fb4fca566d20c04bb359f04601f0e4e01af04be5c17e2bc9202c711457f2";
-
-    public const string Ms43X001LiveOverlayV2 = "47ec91bbad19a09f890ca514632e107ee501146edab98843dc279a41cf682dcf";
-    public const string Ms43X001LiveOverlayV3 = "eac4af912730c8ce681ebfe7329b198365226b9bfabc870f9af3fb800516523a";
-    public const string Ms43X001LiveOverlayV4 = "f5541e1edf954aa24fa1934db230b161dde7ab9ae005003b9892bf72b28f0d57";
-    public const string Ms43X001LiveOverlayV5 = "a43d2af4acc6b1ae7ff8e02a5039fe5e222eea90ef4bffcfcc46346e96c76f8c";
-    public const string Ms43X001LiveOverlayV6 = "926eee3dcfa194841424601167a298c4f233dcd3218410a49da6cfa944717c0e";
-    public const string Ms43X001LiveOverlayV7 = "a55ba742d87193fd48b42e72261cc28826e683f4d7d590221b73141f93ee8a42";
-
-    /// <summary>
     /// The live-tuning overlay 8 (pops on lift-off), as tools/build_live_overlay_v8.py builds it. Its eight flashed pops
     /// settings at 0x4FF80 are calibration the owner writes into the bin, so they do not change which program it is.
     /// </summary>
@@ -133,13 +120,6 @@ public static class ProgramIdentity
     public static string? Name(FirmwareImage image) => Of(image) switch
     {
         Ms43X001 => "MS43X001",
-        Ms43X001LiveOverlay => "MS43X001 with the live-tuning overlay 1",
-        Ms43X001LiveOverlayV2 => "MS43X001 with the live-tuning overlay 2",
-        Ms43X001LiveOverlayV3 => "MS43X001 with the live-tuning overlay 3",
-        Ms43X001LiveOverlayV4 => "MS43X001 with the live-tuning overlay 4",
-        Ms43X001LiveOverlayV5 => "MS43X001 with the live-tuning overlay 5",
-        Ms43X001LiveOverlayV6 => "MS43X001 with the live-tuning overlay 6",
-        Ms43X001LiveOverlayV7 => "MS43X001 with the live-tuning overlay 7",
         Ms43X001LiveOverlayV8 => "MS43X001 with the live-tuning overlay 8",
         Ms43X001LiveOverlayV85 => "MS43X001 with the live-tuning overlay 8.5",
         Ms43X001LiveOverlayV9 => "MS43X001 live overlay V9",

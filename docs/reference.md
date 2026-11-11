@@ -44,12 +44,9 @@ in the lab and are not published.
     behaviour differences.
 - Plan 6 adds:
   - the live-tuning overlay bin (`patches/live_overlay.asm`, built by
-    `tools/build_live_overlay.py`), its contract in C# (`LiveOverlay`, DS2 command 0x6D) and its
-    program identity (`ProgramIdentity.Ms43X001LiveOverlayV2` for v2; the historical
-    `ProgramIdentity.Ms43X001LiveOverlay` remains recognized), so the checks that read the
-    firmware's RAM run on it and it can pass;
-  - the overlay drives in `drives/overlay/`: the standard seven with the app's session and tables
-    on, the DS2 command and its abuse (`ds2`), `silence`, `stall` and `quick-key-cycle`;
+    `tools/build_live_overlay.py`), its request builders in C# (`LiveOverlay`, DS2 command 0x6D) and its
+    program identity (`ProgramIdentity.Ms43X001LiveOverlayV104`; the builds from V8 on stay recognized), so the
+    checks that read the firmware's RAM run on it and it can pass;
   - the K-line tester's three blind spots from plan 5's review: a restart no longer applies its
     segment's `kline` lines again (M1), kline.csv keeps a timeout's partial frame and every ECU byte
     that was no part of a reply (`stray`, M3), and an ECU byte reaches the tester only at the
@@ -318,12 +315,11 @@ Run it from the repository root. 1,004 tests (about 17 minutes in all):
   and `spark-window` rules, which fail as pure rules only (the plan 4 record);
 - the K-line (the bus, the tester, the car file on the app's session), stalls and restarts, a quick
   key cycle, and the compare's parts and command;
-- the live-tuning overlay (`LiveTuning/`): the facts it leans on, its contract, its image, hooks,
-  edits, rules and command set;
-- in the `StandardDrives` category (49 tests): the car and release files on all seven standard
+- the live-tuning overlay (`LiveTuning/`), all on the V10.4 image: the facts it leans on, its image, hooks, commands,
+  allocation, settings groups, pops, the blip, the watch and its safety rules;
+- in the `StandardDrives` category: the car and release files on all seven standard
   drives, the three known-bad bins, the compare's acceptance (the car against itself, the
-  transparent stub, an ignition edit, the release), and the overlay's safety, abuse, drive set and
-  acceptance.
+  transparent stub, an ignition edit, the release), and the overlay's safety drives.
 
 `dotnet test Ms43Sim.sln --filter "Category!=StandardDrives"` leaves the standard drives out
 (955 tests, about 7 minutes).
@@ -487,8 +483,8 @@ boot block (00:0000-00:7FFF), which is not watched because the boot's own code r
 |---|---|
 | `src/Ms43Sim.Core/` | image tools, memory map, CPU, interrupts, peripherals, the board, the engine and the car (`Engine/`, `Vehicle/`, the K-line and its tester), capture, fault memory, drive files (`Drive/`), the checks and the verdict (`Checks/`), the boot, start-up and drive runners, and the compare (`Compare/`) |
 | `src/Ms43Sim.Cli/` | the `ms43sim` command |
-| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build; `fixtures/live_overlay_v2.hex`, the current live-tuning overlay; and `fixtures/live_overlay.hex`, the retained historical v1 overlay (assembler output applied in memory) |
-| `drives/` | the seven standard drive files; `drives/overlay/`, the overlay's eleven |
+| `tests/Ms43Sim.Tests/` | xUnit tests; `fixtures/overlay.hex`, the frozen known-bad overlay build; `fixtures/live_overlay_v10.hex`, the live-tuning overlay (assembler output applied in memory) |
+| `drives/` | the seven standard drive files, and the overlay's in `pops/`, `v10/` and `watch/` |
 | `tools/` | Python helpers: manual text extraction, SFR table generation, decoder cross-check |
 | `refs/` | the two Infineon manuals and their text — local only, not committed |
 | `runs/` | `ms43sim` output — local only, not committed |

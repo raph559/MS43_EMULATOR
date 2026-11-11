@@ -40,7 +40,7 @@ public sealed class V10CostTests(ITestOutputHelper output)
         };
         settings?.CopyTo(image, V10Fixture.Defaults);
         var result = DriveRun.RunWithChecks(TestImages.AsFlashed(image),
-            DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/v10", drive + ".drive"))),
+            DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/v10", drive + ".drive"))),
             new DriveRunOptions(Observers: new Action<DriveContext>[] { Attach }));
         return new Costs(passes, stores, queues, result, gates);
     }

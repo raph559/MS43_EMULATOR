@@ -42,7 +42,7 @@ public sealed class V10DriveFixture
     }
 
     public static Drive Load(string name) =>
-        DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/v10", name + ".drive")));
+        DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/v10", name + ".drive")));
 
     /// <summary>One throttle store: the time, the addition to the pedal-map setpoint, FDF8.</summary>
     public sealed record Store(double Seconds, int Added, int Fdf8);

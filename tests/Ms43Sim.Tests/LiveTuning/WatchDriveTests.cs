@@ -11,7 +11,7 @@ public sealed class WatchDriveTests
 
     static FlashedImage Image => TestImages.AsFlashed(V10Fixture.Bytes);
 
-    static string Text(string name) => File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/watch", name + ".drive"));
+    static string Text(string name) => File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/watch", name + ".drive"));
 
     static (DriveResult Result, WatchOracle Oracle) Run(string text, uint address, bool checks = false)
     {

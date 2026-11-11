@@ -34,7 +34,7 @@ public sealed class WatchDppTests
                 });
             machine.OnInstruction(0xE2FAE, _ => copies++);
         };
-        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives", name + ".drive")));
+        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives", name + ".drive")));
         DriveRun.Run(Image, drive, new DriveRunOptions(Observers: new Action<DriveContext>[] { Attach }));
         Console.WriteLine($"{name}: {passes} hooked lookups, {watched} with a watch armed, the 0E:2FAE copy ran {copies} times");
         Assert.True(passes > 100_000, $"only {passes} hooked lookups");

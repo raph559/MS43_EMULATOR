@@ -36,7 +36,7 @@ public sealed class PopsDriveFixture
     }
 
     public static Drive Load(string name) =>
-        DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/pops", name + ".drive")));
+        DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/pops", name + ".drive")));
 
     public PopsDriveFixture()
     {

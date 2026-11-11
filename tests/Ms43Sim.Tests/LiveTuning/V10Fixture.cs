@@ -63,19 +63,22 @@ public static class V10Fixture
     /// <summary>The session token the tests open with.</summary>
     public const uint Token = 0x7351AB29;
 
-    static readonly Lazy<IReadOnlyList<(int Offset, byte[] Bytes)>> records = new(() => LiveOverlayBin.Parse(File.ReadAllText(
-        Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex"))));
+    static readonly Lazy<IReadOnlyList<(int Offset, byte[] Bytes)>> records = new(() => OverlayHex.Parse(File.ReadAllText(
+        Path.Combine(OverlayHex.RepositoryRoot, "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex"))));
 
     static readonly Lazy<Dictionary<string, int>> symbols = new(() =>
     {
-        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot,
             "defs/live_overlay_v10_symbols.json")));
         return json.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetInt32());
     });
 
     static readonly Lazy<JsonElement[]> catalog = new(() => JsonDocument.Parse(File.ReadAllText(Path.Combine(
-        LiveOverlayBin.RepositoryRoot, "defs/live_overlay_v10_catalog.json"))).RootElement.EnumerateArray()
+        OverlayHex.RepositoryRoot, "defs/live_overlay_v10_catalog.json"))).RootElement.EnumerateArray()
         .Select(e => e.Clone()).ToArray());
+
+    /// <summary>The fixture's records as (file offset, bytes).</summary>
+    public static IReadOnlyList<(int Offset, byte[] Bytes)> Records => records.Value;
 
     /// <summary>The car file with the overlay's records, before any checksum is fixed. A fresh copy each time.</summary>
     public static byte[] Bytes
@@ -145,8 +148,11 @@ public static class V10Fixture
         data.AsSpan(0, 8).CopyTo(p.AsSpan(14)); Put(p, 22, LiveOverlay.Crc32(p.AsSpan(2, 20))); return p;
     }
 
+    /// <summary>A warm engine from a blank EEPROM: the head of the drives the overlay tests build.</summary>
+    public const string Warm = "start blank\nset coolant=90 oil=90 intake=33 ambient=20 clock=60\n";
+
     /// <summary>A drive's start: warm, cranked, idling, the 0x6D status polled every second, and a session opened.</summary>
-    public static string Head => "drive live-v10\n" + OverlayRuns.Warm + "3 on\nkline every 1 6D 00\n1.5 crank rpm=200\n3 idle\n" + Send(Open());
+    public static string Head => "drive live-v10\n" + Warm + "3 on\nkline every 1 6D 00\n1.5 crank rpm=200\n3 idle\n" + Send(Open());
 
     /// <summary>
     /// The copy offsets of the four engine tables <see cref="AllLoaded"/> switches on: the main ignition map and the AFR

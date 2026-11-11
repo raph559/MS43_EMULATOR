@@ -157,7 +157,7 @@ public sealed class RealAfrDriveFixture
                 entry = null;
             });
         };
-        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/full-load.drive")));
+        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/full-load.drive")));
         DriveRun.RunWithChecks(V10DriveFixture.Image(null), drive, new DriveRunOptions(Observers: new Action<DriveContext>[] { Attach }));
         Passes = passes;
     }
@@ -210,7 +210,7 @@ public sealed class StartFuelDriveFixture
 
     public StartFuelDriveFixture()
     {
-        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/warm-start.drive")));
+        var drive = DriveParser.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot, "sim/drives/warm-start.drive")));
         var runs = new[] { V10Fixture.Bytes, TestBins.LiveOverlayV101FastBlipBytes }.AsParallel().AsOrdered().WithDegreeOfParallelism(2)
             .Select(bytes => DriveRun.RunWithChecks(TestImages.AsFlashed(bytes), drive)).ToArray();
         (V102, V101) = (runs[0], runs[1]);

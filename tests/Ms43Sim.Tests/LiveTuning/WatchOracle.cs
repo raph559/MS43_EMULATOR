@@ -14,7 +14,7 @@ public sealed record WatchRead(ulong Cycle, byte Kind, ushort Row, ushort RowF, 
 /// <summary>
 /// An independent observer of every library read of one flash address: the 8 reader entries and the 16 descriptor
 /// lookups' MOV DPP0 sites (the plan's Reference facts), plus the V9 handler's copy of the record and each watch set.
-/// It only reads registers and memory, as Support/OverlayRuns does.
+/// It only reads registers and memory.
 /// </summary>
 public sealed class WatchOracle
 {

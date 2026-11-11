@@ -24,16 +24,16 @@ public sealed class OverlayV10Tests
     [AslFact] // the source is patches/live_overlay.asm with its section files put in place of their INCLUDE lines
     public void TheFixtureIsTheSourcesAssembly()
     {
-        var patches = Path.Combine(LiveOverlayBin.RepositoryRoot, "patches");
+        var patches = Path.Combine(OverlayHex.RepositoryRoot, "patches");
         var source = string.Join('\n', File.ReadAllLines(Path.Combine(patches, "live_overlay.asm")).Select(line =>
         {
             var words = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return words.Length == 2 && words[0] == "INCLUDE" ? File.ReadAllText(Path.Combine(patches, words[1].Trim('"'))) : line;
         })) + '\n';
-        var fixture = LiveOverlayBin.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+        var fixture = OverlayHex.Parse(File.ReadAllText(Path.Combine(OverlayHex.RepositoryRoot,
             "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex")));
         Assert.Equal(fixture.Select(r => (r.Offset, Convert.ToHexString(r.Bytes))),
-            LiveOverlayBin.Parse(Asl.Assemble(source)).Select(r => (r.Offset, Convert.ToHexString(r.Bytes))));
+            OverlayHex.Parse(Asl.Assemble(source)).Select(r => (r.Offset, Convert.ToHexString(r.Bytes))));
     }
 
     [Fact] // V10.4: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)

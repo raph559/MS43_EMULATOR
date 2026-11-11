@@ -1,7 +1,7 @@
 namespace Ms43Sim.Core;
 
 /// <summary>
-/// One live table of the overlay (plan 6, R1): its index in the overlay's own list, its name, where the car file holds it
+/// One of the five engine tables: its index in the overlay's own list, its name, where the car file holds it
 /// (file offset, and the page and page offset its sites load into R13/R12), its size in bytes (each cell one byte, read
 /// by 0D:029A), and the file offsets of the CALLS at its sites.
 /// </summary>
@@ -13,48 +13,23 @@ public enum OverlayState : byte { Free, Loaded, Ready, On }
 /// <summary>Why the overlay refused a request: the byte after its B0 (parameter) or B1 (function) status.</summary>
 public enum OverlayReason : byte { Length = 1, Sub, Table, Range, Overlap, NotRunning, TableOn, NotLoaded, Integrity, Leaner, EditLimit }
 
-/// <summary>A directory entry: the state, the copy's offset in the copy area, and the full-copy CRC-32 used at activation.</summary>
-public sealed record OverlayEntry(OverlayState State, int Offset, uint ContentCrc32);
-
 /// <summary>
-/// The status reply's fields (plan 6, "The K-line contract"): the version, whether the engine runs, whether the build holds
-/// the richer-only rule, the five tables' entries and the copy area's free bytes.
-/// </summary>
-public sealed record OverlayStatus(int Version, bool Running, bool RicherOnly, IReadOnlyList<OverlayEntry> Tables, int FreeBytes);
-
-/// <summary>The window 9D00–9FDF as RAM holds it: the control block and the copy area (read by an observer, never written).</summary>
-public sealed record OverlayWindow(bool Initialised, ushort Seen, IReadOnlyList<OverlayEntry> Tables, byte[] Copies);
-
-/// <summary>
-/// The live-tuning overlay's K-line contract, DS2 command 0x6D (plan 6): the requests the app sends, as DS2 payloads from the
-/// command byte on, and readers for its replies and for the window in RAM. Multi-byte arguments and reply fields are
-/// big-endian; the window in RAM is the C167's little-endian.
+/// The live-tuning overlay's requests on the K-line, DS2 command 0x6D, as DS2 payloads from the command byte on: the
+/// sub-commands' plain forms, which the tests wrap with the session and the revision. Multi-byte arguments are big-endian.
 /// </summary>
 public static class LiveOverlay
 {
     public const byte Command = 0x6D;
-    public const byte Version = 2;
-    public const int MaxRawDelta = 8;
-
-    /// <summary>The copy area: 688 bytes from 9D30, after the 48-byte control block at 9D00.</summary>
-    public const int CopyAddress = 0x9D30, CopyBytes = 688;
 
     /// <summary>The most data one write carries: its request is then 128 bytes, inside the firmware's 129.</summary>
     public const int MostWrite = 120;
 
-    /// <summary>300 processed firmware ticks without a 0x6D frame; nominally 3 s, dependent on main-task progress.</summary>
-    public const int SilenceTicks = 300;
+    /// <summary>The word the overlay writes at the head of its control block once it has initialised it.</summary>
+    public const ushort Magic = 0xC0DA;
 
-    public const ushort Magic = 0xC0D2;
+    enum Sub : byte { Load = 1, Write, On, Off, AllOn, AllOff, Free, Revert }
 
-    const int WindowInRam = 0x1D00;                          // 9D00 through DPP2 (10h): external RAM 41D00h, offset 1D00h
-
-    enum Sub : byte { Status, Load, Write, On, Off, AllOn, AllOff, Free, Revert }
-
-    /// <summary>
-    /// The five live tables (plan 6, R1), in the overlay's order. The owner took the pedal map and the fuel constant K out
-    /// of the live set (2026-10-22).
-    /// </summary>
+    /// <summary>The five engine tables, catalogue IDs 0 to 4, with the car file's sites that read them.</summary>
     public static IReadOnlyList<OverlayTable> Tables { get; } = new[]
     {
         new OverlayTable(0, "ign98_pl", 0x77315, 0x1D, 0x3315, 320, new[] { 0x2C650 }),
@@ -63,8 +38,6 @@ public static class LiveOverlay
         new OverlayTable(3, "cam_in", 0x76390, 0x1D, 0x2390, 192, new[] { 0x33B48, 0x33BA2 }),
         new OverlayTable(4, "cam_ex", 0x7629C, 0x1D, 0x229C, 192, new[] { 0x33B74, 0x33BEA }),
     };
-
-    public static byte[] Status() => Payload(Sub.Status);
 
     /// <summary>Places table <paramref name="table"/> at <paramref name="offset"/> in the copy area, as a copy of the flashed table.</summary>
     public static byte[] Load(int table, int offset) => Payload(Sub.Load, (byte)table, (byte)(offset >> 8), (byte)offset);
@@ -90,31 +63,6 @@ public static class LiveOverlay
 
     public static byte[] Revert() => Payload(Sub.Revert);
 
-    /// <summary>
-    /// The writes that turn a copy of <paramref name="flash"/> into <paramref name="copy"/>: one per run of changed bytes, a
-    /// run longer than <see cref="MostWrite"/> split in order.
-    /// </summary>
-    public static IReadOnlyList<byte[]> Edit(int table, ReadOnlySpan<byte> copy, ReadOnlySpan<byte> flash)
-    {
-        if (copy.Length != flash.Length)
-            throw new ArgumentException("the copy and the flashed table differ in size", nameof(copy));
-        var writes = new List<byte[]>();
-        for (var i = 0; i < copy.Length;)
-        {
-            if (copy[i] == flash[i])
-            {
-                i++;
-                continue;
-            }
-            var end = i;
-            while (end < copy.Length && copy[end] != flash[end] && end - i < MostWrite)
-                end++;
-            writes.Add(Write(table, i, copy[i..end]));
-            i = end;
-        }
-        return writes;
-    }
-
     /// <summary>CRC-32/ISO-HDLC of the complete table, including its unchanged cells.</summary>
     public static uint Crc32(ReadOnlySpan<byte> copy)
     {
@@ -128,21 +76,6 @@ public static class LiveOverlay
         return ~crc;
     }
 
-    /// <summary>The fields of a whole status reply (<c>12 34 A0 …</c>).</summary>
-    public static OverlayStatus ParseStatus(IReadOnlyList<byte> reply)
-    {
-        if (!Ds2.IsFrame(reply) || reply.Count != 52 || reply[2] != 0xA0 || reply[3] != 'L' || reply[4] != 'T' || reply[5] != 'O' || reply[6] != 'V')
-            throw new InvalidDataException("not the overlay's status reply: " + Convert.ToHexString(reply.ToArray()));
-        var p = reply.Skip(3).ToArray();
-        int Word(int at) => p[at] << 8 | p[at + 1];
-        if (p[4] != Version)
-            throw new InvalidDataException($"overlay protocol {p[4]} is unsupported; expected {Version}");
-        uint Dword(int at) => (uint)Word(at) << 16 | (uint)Word(at + 2);
-        var tables = Enumerable.Range(0, Tables.Count).Select(i => new OverlayEntry((OverlayState)p[6 + 8 * i], Word(8 + 8 * i), Dword(10 + 8 * i)))
-            .ToArray();
-        return new OverlayStatus(p[4], (p[5] & 1) != 0, (p[5] & 2) != 0, tables, Word(46));
-    }
-
     /// <summary>The reason of a B0/B1 refusal; null for an A0 reply.</summary>
     public static OverlayReason? Refusal(IReadOnlyList<byte> reply)
     {
@@ -154,17 +87,6 @@ public static class LiveOverlay
             0xB0 or 0xB1 when reply.Count == 5 => (OverlayReason)reply[3],
             _ => throw new InvalidDataException("not an overlay reply: " + Convert.ToHexString(reply.ToArray())),
         };
-    }
-
-    /// <summary>The window as the external RAM holds it (<c>Bus.ExternalRam</c>, 9D00 at offset 1D00h).</summary>
-    public static OverlayWindow ReadWindow(byte[] externalRam)
-    {
-        int Word(int at) => externalRam[WindowInRam + at] | externalRam[WindowInRam + at + 1] << 8;
-        uint Dword(int at) => (uint)Word(at) | (uint)Word(at + 2) << 16;
-        var tables = Enumerable.Range(0, Tables.Count)
-            .Select(i => new OverlayEntry((OverlayState)externalRam[WindowInRam + 8 + 8 * i], Word(10 + 8 * i), Dword(12 + 8 * i)))
-            .ToArray();
-        return new OverlayWindow(Word(0) == Magic, (ushort)Word(2), tables, externalRam[(WindowInRam + 0x30)..(WindowInRam + 0x30 + CopyBytes)]);
     }
 
     /// <summary>A drive file's line that sends <paramref name="payload"/>: <c>kline send 6D …</c>.</summary>

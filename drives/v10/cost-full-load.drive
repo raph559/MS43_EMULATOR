@@ -1,5 +1,5 @@
 # V10's CPU cost against V9's: a full-load hold in 3rd at 100 km/h with the logger polling sub 11 at full speed and a
-# watch on the RON98 part-load ignition map, as docs/live-overlay-v9.md measured the watch.
+# watch on the RON98 part-load ignition map.
 drive v10-cost-full-load
 start seasoned
 set coolant=90 oil=90 intake=33 ambient=20
