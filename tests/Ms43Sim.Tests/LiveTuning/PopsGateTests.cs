@@ -7,10 +7,8 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// The pops window at the overrun-cut gate (0A:A7BC) and its 10 ms tick in housekeeping. Direct CPU tests: the
 /// state the gate reads is seeded, and the run stops at the stock "stay fuelled" (0A:B0F2) or "cut" (0A:A7C8) exit.
 /// </summary>
-public abstract class PopsGateTests
+public sealed class PopsGateTests
 {
-    /// <summary>The overlay image under test: V8, or V9, which must behave the same.</summary>
-    protected abstract OverlayFixture Fixture { get; }
 
     private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
     private const uint Left = 0x41FBC, Lowest = 0x41FBE;
@@ -20,8 +18,8 @@ public abstract class PopsGateTests
 
     private byte[] Image(byte[] settings, bool donor = false)
     {
-        var image = donor ? TestBins.CarBytes : Fixture.Bytes();
-        if (!donor) settings.CopyTo(image, V8Fixture.Defaults);
+        var image = donor ? TestBins.CarBytes : V10Fixture.Bytes;
+        if (!donor) settings.CopyTo(image, V10Fixture.Defaults);
         return image;
     }
 
@@ -31,20 +29,20 @@ public abstract class PopsGateTests
 
     private static Machine Seed(byte[] image, Inputs i)
     {
-        var m = V8Fixture.Direct(image, ToGate);
+        var m = V10Fixture.Direct(image, ToGate);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
         m.Cpu.SetR(0, 0xF780);
         m.Cpu.Psw = 0x0805;
-        V8Fixture.PutByte(m, 0x4007F, i.Rpm);
-        V8Fixture.PutByte(m, 0x4047F, i.Speed);
-        V8Fixture.PutByte(m, 0x40433, i.Coolant);
+        V10Fixture.PutByte(m, 0x4007F, i.Rpm);
+        V10Fixture.PutByte(m, 0x4047F, i.Speed);
+        V10Fixture.PutByte(m, 0x40433, i.Coolant);
         m.Bus.Poke16(0xFD2E, (ushort)((i.Clutch ? 1 << 6 : 0) | (i.Immediate ? 1 << 13 : 0)));
         m.Bus.Poke16(0xFD30, (ushort)(i.Request ? 1 << 2 : 0));
         m.Bus.Poke16(0xFD18, (ushort)((i.CruiseMain ? 2 : 0) | (i.CruiseHeld ? 4 : 0)));
         m.Bus.Poke16(0xFD2C, 1 << 11);
         m.Bus.Poke16(0xFDF8, (ushort)(i.Features | (i.Active ? 8 : 0) | (i.Used ? 16 : 0) | 0x4000));
         m.Bus.Poke16(Left, i.WindowLeft);
-        V8Fixture.PutByte(m, Lowest, i.WindowLowest);
+        V10Fixture.PutByte(m, Lowest, i.WindowLowest);
         return m;
     }
 
@@ -143,8 +141,8 @@ public abstract class PopsGateTests
     {
         var settings = On.ToArray(); settings[0] = switchValue;
         var m = Seed(Image(settings), new Inputs());
-        V8Fixture.PutByte(m, 0xEF47, asc);
-        V8Fixture.PutByte(m, 0xEF37, ac);
+        V10Fixture.PutByte(m, 0xEF47, asc);
+        V10Fixture.PutByte(m, 0xEF37, ac);
         Assert.Equal(starts ? Stay : Cut, Run(m));
         Assert.Equal(starts, Flag(m, 3));
     }
@@ -196,18 +194,18 @@ public abstract class PopsGateTests
     private Machine Tick(ushort mode, bool active, bool used, ushort left, Inputs? inputs = null, byte[]? settings = null)
     {
         var image = Image(settings ?? On);
-        var hk = Fixture.Symbol("hk") & 0xFFFF;
+        var hk = V10Fixture.Symbol("hk") & 0xFFFF;
         var i = inputs ?? new Inputs();
-        var m = V8Fixture.Direct(image, [0xFA, 0x0C, (byte)hk, (byte)(hk >> 8)]);
-        V8Fixture.PutByte(m, 0x4007F, i.Rpm);
-        V8Fixture.PutByte(m, 0x4047F, i.Speed);
-        V8Fixture.PutByte(m, 0x40433, i.Coolant);
+        var m = V10Fixture.Direct(image, [0xFA, 0x0C, (byte)hk, (byte)(hk >> 8)]);
+        V10Fixture.PutByte(m, 0x4007F, i.Rpm);
+        V10Fixture.PutByte(m, 0x4047F, i.Speed);
+        V10Fixture.PutByte(m, 0x40433, i.Coolant);
         m.Bus.Poke16(0xFD2E, (ushort)(i.Clutch ? 1 << 6 : 0));
         m.Bus.Poke16(0xFD18, (ushort)((i.CruiseMain ? 2 : 0) | (i.CruiseHeld ? 4 : 0)));
         m.Bus.Poke16(0xFD2C, mode);
         m.Bus.Poke16(0xFDF8, (ushort)((active ? 8 : 0) | (used ? 16 : 0) | 0x4000 | i.Features));
         m.Bus.Poke16(Left, left);
-        V8Fixture.PutByte(m, Lowest, i.WindowLowest == 0 ? i.Rpm : i.WindowLowest);
+        V10Fixture.PutByte(m, Lowest, i.WindowLowest == 0 ? i.Rpm : i.WindowLowest);
         m.Bus.Poke16(0xE3B0, 7);
         m.Bus.Poke16(0xFD2A, 0);
         m.Cpu.Jump(0x0C, 0x1000);
@@ -276,7 +274,3 @@ public abstract class PopsGateTests
         Assert.Equal(0x4010, m.Bus.Peek16(0xFDF8));
     }
 }
-
-public sealed class PopsGateTestsOnV8 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V8; }
-public sealed class PopsGateTestsOnV9 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V9; }
-public sealed class PopsGateTestsOnV10 : PopsGateTests { protected override OverlayFixture Fixture => OverlayFixture.V10; }

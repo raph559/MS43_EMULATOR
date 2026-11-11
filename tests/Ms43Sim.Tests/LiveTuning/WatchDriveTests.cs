@@ -3,13 +3,13 @@ using Ms43Sim.Tests.Support;
 
 namespace Ms43Sim.Tests.LiveTuning;
 
-/// <summary>V9's watch in whole drives (sim/drives/watch): the K-line tester logs with sub 11 at full speed.</summary>
+/// <summary>The watch in whole drives (sim/drives/watch): the K-line tester logs with sub 11 at full speed.</summary>
 public sealed class WatchDriveTests
 {
     const uint PartLoad = 0x77315, Idle = 0x775D4, Overrun = 0x7717D, Nothing = 0x70002;   // Overrun: ip_iga_puc__n__tco, read through the overrun cut
     static readonly byte[] Log = Ds2.Frame(new byte[] { 0x6D, 0x0B });
 
-    static FlashedImage Image => TestImages.AsFlashed(V9Fixture.Bytes);
+    static FlashedImage Image => TestImages.AsFlashed(V10Fixture.Bytes);
 
     static string Text(string name) => File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "sim/drives/watch", name + ".drive"));
 
@@ -97,7 +97,7 @@ public sealed class WatchDriveTests
     }
 
     [Fact]
-    public void V9LogsWithTheWatchAtV8sRateAndKeepsItsSchedule()
+    public void LoggingWithTheWatchKeepsItsRateAndItsSchedule()
     {
         const string head = "drive kline-pause-v9\nstart blank\nset coolant=90 oil=90 intake=33 ambient=20 clock=60\n"
             + "3 on\n1.5 crank rpm=200\n5 idle\n";
@@ -111,13 +111,10 @@ public sealed class WatchDriveTests
             return ((replied.Count - 1) / seconds, polls.Count - replied.Count, polls.Count);
         }
         var (r, _) = Run(Drive("6D 0B", $"kline watch {PartLoad:X}\n"), PartLoad, checks: true);
-        var v8 = DriveRun.Run(TestImages.AsFlashed(V8Fixture.Bytes), DriveParser.Parse(Drive("0B B0", "")));
         var (rate, missed, polls) = Rate(r, Log);
-        var (v8Rate, _, _) = Rate(v8, Ds2.Frame(new byte[] { 0x0B, 0xB0 }));
         Assert.True(r.Check("scheduler").Status == CheckStatus.Pass, string.Join("; ", r.Check("scheduler").Findings.Select(f => f.Message)));
         Assert.True(missed * 50 <= polls, $"{missed} of {polls} polls missed");
-        Assert.True(rate >= 0.96 * v8Rate, $"V9 with the watch {rate:F2}/s, V8 with 0B B0 {v8Rate:F2}/s");
-        File.WriteAllText(Path.Combine(Path.GetTempPath(), "ms43-v9-rate.txt"),
-            $"V9, watch on, 6D 0B: {rate:F2}/s, {missed}/{polls} missed\nV8, 0B B0, same drive: {v8Rate:F2}/s\n");
+        // 21.73 replies a second on this drive, as when the watch was added; the stock 0B B0 gave 20.99 on the overlay before it.
+        Assert.True(rate >= 20.15, $"6D 0B with the watch {rate:F2}/s");
     }
 }

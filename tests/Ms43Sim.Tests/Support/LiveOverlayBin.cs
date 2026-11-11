@@ -4,11 +4,11 @@ using Ms43Sim.Core;
 namespace Ms43Sim.Tests.Support;
 
 /// <summary>
-/// The live-tuning overlay (plan 6) as the tests run it: the assembler's Intel HEX output of patches/live_overlay.asm,
-/// written by tools/build_live_overlay.py to fixtures/live_overlay_v2.hex and committed, applied to the car file in memory and
+/// The first live-tuning overlay (plan 6, protocol 2) as the tests run it: the assembler's Intel HEX output of its source,
+/// kept as fixtures/live_overlay_v2.hex (the source is no longer in the repository), applied to the car file in memory and
 /// built as flashed. No image is written to disk here. A record that would touch the boot block, a validity tag or the
 /// programming signature at 0x4FFE6–0x4FFFF is refused. The fixture is pinned by the program identity it gives
-/// (<see cref="ProgramIdentity.Ms43X001LiveOverlay"/>), and checked against the source by an <see cref="AslFactAttribute"/>.
+/// (<see cref="ProgramIdentity.Ms43X001LiveOverlay"/>).
 /// </summary>
 public static class LiveOverlayBin
 {

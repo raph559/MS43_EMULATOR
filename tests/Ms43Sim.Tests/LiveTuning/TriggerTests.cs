@@ -8,81 +8,80 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// 80h..9Fh follows one bit of byte 0 of the ASC (153h, EF47) or A/C (615h, EF37) frame, as pops' switch does. The
 /// trigger only makes the feature ready, and only gates engagement. Direct CPU tests from each feature's routine.
 /// </summary>
-public abstract class TriggerTests
+public sealed class TriggerTests
 {
     /// <summary>The overlay under test: V9, or V10, which keeps V9's triggers.</summary>
-    protected abstract int Version { get; }
 
-    private Machine Start() => Version == 10 ? OverlayV9Tests.Start(V10Fixture.Bytes, V10Fixture.Symbol) : OverlayV9Tests.Start();
+    private static Machine Start() => V10Fixture.Start();
 
     private const byte AirConOn = 0x97;                          // A/C frame, on while byte 0 bit 7 is 1
 
     private static byte[] With(int group, byte config)
     {
-        var data = OverlayV6Tests.FeatureData(group); data[0] = config; return data;
+        var data = OverlayFeatureTests.FeatureData(group); data[0] = config; return data;
     }
 
     /// <summary>The feature's own action: the clutch at a standstill for LC, the clutch moving for NLS, "−" for RAL.</summary>
     private static void Action(Machine m, int group, bool pressed)
     {
-        if (group == 126) OverlayV6Tests.Inputs(m, cruise: pressed ? (byte)6 : (byte)5);
-        else OverlayV6Tests.Inputs(m, speed: group == 124 ? (byte)0 : (byte)30, clutch: pressed);
+        if (group == 126) OverlayFeatureTests.Inputs(m, cruise: pressed ? (byte)6 : (byte)5);
+        else OverlayFeatureTests.Inputs(m, speed: group == 124 ? (byte)0 : (byte)30, clutch: pressed);
     }
 
-    private static void AirCon(Machine m, byte value) => V9Fixture.PutByte(m, 0xEF37, value);
+    private static void AirCon(Machine m, byte value) => V10Fixture.PutByte(m, 0xEF37, value);
 
     public static TheoryData<int> Groups => new() { 124, 125, 126 };
 
     [Theory, MemberData(nameof(Groups))]
     public void ACanTriggerEngagesOnlyWhileItsBitMatches(int group)
     {
-        var on = OverlayV6Tests.Feature(group, With(group, AirConOn), version: Version);
+        var on = OverlayFeatureTests.Feature(group, With(group, AirConOn));
         Action(on, group, true); AirCon(on, 0x80);
-        OverlayV6Tests.Execute(on); OverlayV6Tests.Active(on, group, true);
+        OverlayFeatureTests.Execute(on); OverlayFeatureTests.Active(on, group, true);
 
-        var off = OverlayV6Tests.Feature(group, With(group, AirConOn), version: Version);
+        var off = OverlayFeatureTests.Feature(group, With(group, AirConOn));
         Action(off, group, true); AirCon(off, 0x00);
-        OverlayV6Tests.Execute(off); OverlayV6Tests.Active(off, group, false);
+        OverlayFeatureTests.Execute(off); OverlayFeatureTests.Active(off, group, false);
     }
 
     [Theory, MemberData(nameof(Groups))]
     public void ATriggerAloneNeverEngages(int group)
     {
-        var m = OverlayV6Tests.Feature(group, With(group, AirConOn), version: Version);
+        var m = OverlayFeatureTests.Feature(group, With(group, AirConOn));
         Action(m, group, false); AirCon(m, 0x80);
-        OverlayV6Tests.Execute(m); OverlayV6Tests.Active(m, group, false);
+        OverlayFeatureTests.Execute(m); OverlayFeatureTests.Active(m, group, false);
     }
 
     [Theory, MemberData(nameof(Groups))] // RF6
     public void TheTriggerGoingAwayDoesNotEndAnEngagedFeature(int group)
     {
-        var m = OverlayV6Tests.Feature(group, With(group, AirConOn), version: Version);
+        var m = OverlayFeatureTests.Feature(group, With(group, AirConOn));
         Action(m, group, true); AirCon(m, 0x80);
-        OverlayV6Tests.Execute(m); OverlayV6Tests.Active(m, group, true);
+        OverlayFeatureTests.Execute(m); OverlayFeatureTests.Active(m, group, true);
         AirCon(m, 0x00);
-        for (var tick = 0; tick < 100; tick++) OverlayV6Tests.Execute(m);
-        OverlayV6Tests.Active(m, group, true);
+        for (var tick = 0; tick < 100; tick++) OverlayFeatureTests.Execute(m);
+        OverlayFeatureTests.Active(m, group, true);
         switch (group)                                            // then the stock release ends it
         {
-            case 124: OverlayV6Tests.Inputs(m, speed: 30, clutch: false); break;
-            case 125: OverlayV6Tests.Inputs(m, clutch: false); break;
-            default: OverlayV6Tests.Inputs(m, pedal: 99); break;
+            case 124: OverlayFeatureTests.Inputs(m, speed: 30, clutch: false); break;
+            case 125: OverlayFeatureTests.Inputs(m, clutch: false); break;
+            default: OverlayFeatureTests.Inputs(m, pedal: 99); break;
         }
-        OverlayV6Tests.Execute(m); OverlayV6Tests.Active(m, group, false);
+        OverlayFeatureTests.Execute(m); OverlayFeatureTests.Active(m, group, false);
     }
 
     [Fact]
     public void PolarityAndFrameFollowTheValue()
     {
-        var low = OverlayV6Tests.Feature(124, With(124, 0x9F), version: Version);   // A/C, on while bit 7 is 0
+        var low = OverlayFeatureTests.Feature(124, With(124, 0x9F));   // A/C, on while bit 7 is 0
         Action(low, 124, true); AirCon(low, 0x00);
-        OverlayV6Tests.Execute(low); OverlayV6Tests.Active(low, 124, true);
+        OverlayFeatureTests.Execute(low); OverlayFeatureTests.Active(low, 124, true);
 
         foreach (var (asc, engaged) in new[] { ((byte)0x04, true), ((byte)0x00, false) })
         {
-            var m = OverlayV6Tests.Feature(124, With(124, 0x82), version: Version);  // ASC, on while bit 2 is 1
-            Action(m, 124, true); V9Fixture.PutByte(m, 0xEF47, asc);
-            OverlayV6Tests.Execute(m); OverlayV6Tests.Active(m, 124, engaged);
+            var m = OverlayFeatureTests.Feature(124, With(124, 0x82));  // ASC, on while bit 2 is 1
+            Action(m, 124, true); V10Fixture.PutByte(m, 0xEF47, asc);
+            OverlayFeatureTests.Execute(m); OverlayFeatureTests.Active(m, 124, engaged);
         }
     }
 
@@ -97,8 +96,8 @@ public abstract class TriggerTests
     public void ValidationAcceptsTriggersAndRefusesTheRest(int group, byte config, bool accepted)
     {
         var m = Start();
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(group, 0))[0]);
-        var reply = OverlayV9Tests.Mutate(m, Write(group, With(group, config)));
+        Assert.Equal(0xA0, V10Fixture.Mutate(m, V10Fixture.Load(group, 0))[0]);
+        var reply = V10Fixture.Mutate(m, Write(group, With(group, config)));
         if (accepted) Assert.Equal(0xA0, reply[0]);
         else Assert.Equal(new byte[] { 0xB1, 4 }, reply);
     }
@@ -107,19 +106,16 @@ public abstract class TriggerTests
     public void RalsNeighbourRuleStillRefusesAChangedByte7()
     {
         var m = Start();
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(126, 0))[0]);
+        Assert.Equal(0xA0, V10Fixture.Mutate(m, V10Fixture.Load(126, 0))[0]);
         var data = With(126, AirConOn); data[7] ^= 1;
-        Assert.Equal(new byte[] { 0xB1, 4 }, OverlayV9Tests.Mutate(m, Write(126, data)));
+        Assert.Equal(new byte[] { 0xB1, 4 }, V10Fixture.Mutate(m, Write(126, data)));
     }
 
     [Fact]
     public void AFlashedTriggerWorksWithoutTheApp()
     {
-        var m = OverlayV6Tests.Feature(124, state: "uninitialised", version: Version, flashed: AirConOn);
-        OverlayV6Tests.Inputs(m, speed: 0, pedal: 255); AirCon(m, 0x80);     // the car's own flashed gates apply
-        OverlayV6Tests.Execute(m); OverlayV6Tests.Active(m, 124, true);
+        var m = OverlayFeatureTests.Feature(124, state: "uninitialised", flashed: AirConOn);
+        OverlayFeatureTests.Inputs(m, speed: 0, pedal: 255); AirCon(m, 0x80);     // the car's own flashed gates apply
+        OverlayFeatureTests.Execute(m); OverlayFeatureTests.Active(m, 124, true);
     }
 }
-
-public sealed class TriggerTestsOnV9 : TriggerTests { protected override int Version => 9; }
-public sealed class TriggerTestsOnV10 : TriggerTests { protected override int Version => 10; }

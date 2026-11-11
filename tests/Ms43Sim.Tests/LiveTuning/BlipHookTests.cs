@@ -22,28 +22,28 @@ public sealed class BlipHookTests
 
     private static byte[] Image(bool v10, Action<byte[]>? change = null)
     {
-        var image = v10 ? V10Fixture.Bytes : V9Fixture.Bytes;
-        Pops.CopyTo(image, V8Fixture.Defaults);
+        var image = v10 ? V10Fixture.Bytes : V10Fixture.Bytes;
+        Pops.CopyTo(image, V10Fixture.Defaults);
         change?.Invoke(image);
         return image;
     }
 
     private static Machine Seed(byte[] image, ushort mode, ushort fdf8, ushort psw, int sample, ushort fd2e = 0, ushort fd30 = 1 << 2)
     {
-        var m = V8Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
+        var m = V10Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19 + sample * 0x0101));
         m.Cpu.SetR(0, 0xF780);
         m.Cpu.SetR(4, (ushort)(1000 + sample * 9000));
         m.Cpu.Psw = psw;
-        V8Fixture.PutByte(m, 0x4007F, 100);
-        V8Fixture.PutByte(m, 0x4047F, 80);
-        V8Fixture.PutByte(m, 0x40433, 200);
+        V10Fixture.PutByte(m, 0x4007F, 100);
+        V10Fixture.PutByte(m, 0x4047F, 80);
+        V10Fixture.PutByte(m, 0x40433, 200);
         m.Bus.Poke16(0xFD2E, fd2e);
         m.Bus.Poke16(0xFD30, fd30);
         m.Bus.Poke16(0xFD2C, mode);
         m.Bus.Poke16(0xFDF8, fdf8);
         m.Bus.Poke16(0x41FBC, 50);
-        V8Fixture.PutByte(m, 0x41FBE, 100);
+        V10Fixture.PutByte(m, 0x41FBE, 100);
         m.Bus.Poke16(0xE2B4, (ushort)((10 + sample * 45) << 8));
         m.Bus.Poke16(0xE2B6, (ushort)((10 + sample * 45) << 8));
         return m;
@@ -94,8 +94,8 @@ public sealed class BlipHookTests
         var m = Seed(Image(v10: true, change), mode, (ushort)(0x4000 | 1 << V10Fixture.BlipOn | (guard ? 1 << V10Fixture.Guard : 0)),
             0x0800, 0, fd2e, fd30);
         m.Bus.Poke16(V10Fixture.BlipAdd, add);
-        V8Fixture.PutByte(m, V10Fixture.BlipTgt, 120);                 // a running blip has its target: 3,840 rpm, above the 3,200
-        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0x75);                // and its last spark, here the flashed blip angle (V10.2)
+        V10Fixture.PutByte(m, V10Fixture.BlipTgt, 120);                 // a running blip has its target: 3,840 rpm, above the 3,200
+        V10Fixture.PutByte(m, V10Fixture.BlipSpk, 0x75);                // and its last spark, here the flashed blip angle (V10.2)
         return m;
     }
 
@@ -123,7 +123,7 @@ public sealed class BlipHookTests
     public void DuringABlipTheGateStaysFuelled(ushort immediate, ushort request)
     {
         // pops is off and the clutch is in: the pops conditions fail, yet the blip keeps the fuel on
-        var m = Blipping(change: b => b[V8Fixture.Defaults] = 0, fd2e: (ushort)(1 << 6 | immediate), fd30: request);
+        var m = Blipping(change: b => b[V10Fixture.Defaults] = 0, fd2e: (ushort)(1 << 6 | immediate), fd30: request);
         var before = Enumerable.Range(0, 16).Select(r => m.Cpu.R(r)).ToArray();
         var psw = m.Cpu.Psw;
         Assert.Equal(Stay, Run(m, Gate));
@@ -151,9 +151,9 @@ public sealed class BlipHookTests
     /// </summary>
     private static Machine Capping(byte target, byte rpm, byte cap = 0)
     {
-        var m = Blipping(change: b => b[V8Fixture.Defaults + 3 * 8 + 7] = cap);
-        V8Fixture.PutByte(m, V10Fixture.BlipTgt, target);
-        V8Fixture.PutByte(m, 0x4007F, rpm);
+        var m = Blipping(change: b => b[V10Fixture.Defaults + 3 * 8 + 7] = cap);
+        V10Fixture.PutByte(m, V10Fixture.BlipTgt, target);
+        V10Fixture.PutByte(m, 0x4007F, rpm);
         return m;
     }
 
@@ -213,7 +213,7 @@ public sealed class BlipHookTests
     public void AnAdvanceRisesAStepASpark(byte last, byte rpm, byte expected)
     {
         var m = Capping(target: 120, rpm: rpm);
-        V8Fixture.PutByte(m, V10Fixture.BlipSpk, last);
+        V10Fixture.PutByte(m, V10Fixture.BlipSpk, last);
         Run(m, Spark);
         Assert.Equal(expected << 8, m.Bus.Peek16(0xE2B4));
         Assert.Equal(expected, V10Fixture.Byte(m, V10Fixture.BlipSpk));
@@ -224,7 +224,7 @@ public sealed class BlipHookTests
     public void TheBlipsFirstSparkIsWhole(byte rpm)
     {
         var m = Capping(target: 120, rpm: rpm);
-        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0xFF);                // as bt_go leaves it
+        V10Fixture.PutByte(m, V10Fixture.BlipSpk, 0xFF);                // as bt_go leaves it
         Run(m, Spark);
         Assert.Equal(0x7500, m.Bus.Peek16(0xE2B4));
         Assert.Equal(0x75, V10Fixture.Byte(m, V10Fixture.BlipSpk));
@@ -244,8 +244,8 @@ public sealed class BlipHookTests
     {
         // no blip and no window, the speed above a stale target: the stock path leaves the angle as it came
         var m = Seed(Image(v10: true), Overrun, 0x4000, 0x0800, 0, 1 << 6);
-        V8Fixture.PutByte(m, V10Fixture.BlipTgt, 75);
-        V8Fixture.PutByte(m, 0x4007F, 90);
+        V10Fixture.PutByte(m, V10Fixture.BlipTgt, 75);
+        V10Fixture.PutByte(m, 0x4007F, 90);
         var stock = m.Bus.Peek16(0xE2B4);
         Run(m, Spark);
         Assert.Equal(stock, m.Bus.Peek16(0xE2B4));
@@ -259,8 +259,8 @@ public sealed class BlipHookTests
     {
         var m = Seed(Image(v10: true), 1 << 12, (ushort)(0x4000 | (blip ? 1 << V10Fixture.BlipOn : 0)), 0x0800, 0, 1 << 6);
         m.Bus.Poke16(0xFD9A, 0); m.Bus.Poke16(0xFD48, 0); m.Bus.Poke16(0xFD36, 0);
-        V8Fixture.PutByte(m, 0x4007F, 100);                          // 3,200 rpm, above the re-entry rpm
-        V8Fixture.PutByte(m, 0x401AB, 40);
+        V10Fixture.PutByte(m, 0x4007F, 100);                          // 3,200 rpm, above the re-entry rpm
+        V10Fixture.PutByte(m, 0x401AB, 40);
         return m;
     }
 

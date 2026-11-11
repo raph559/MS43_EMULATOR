@@ -81,7 +81,7 @@ public static class ProgramIdentity
     /// <summary>
     /// The live-tuning overlay 10.4 (V10.3 with the code review's fixes, 2026-11-09: the pops spark angle at most
     /// +30.0 deg, no blip under 800 rpm, a pops window's time in place before its flag; header minor 4), as
-    /// tools/build_live_overlay_v10.py builds it. Its flashed settings are V10.3's.
+    /// tools/build_live_overlay.py builds it. Its flashed settings are V10.3's.
     /// </summary>
     public const string Ms43X001LiveOverlayV104 = "bb0c661eb8d7f87c628a7ae2fa35acf161b0893737b6a869c6644140ca077cdd";
 

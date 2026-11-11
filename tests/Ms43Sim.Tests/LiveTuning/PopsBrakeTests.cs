@@ -7,14 +7,14 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// V10: either brake switch (FD2E.3 the brake light switch, FD2E.4 the brake test switch) ends the pops, and the lift
 /// stays used up (FDF8.4) until the pedal is pressed with the clutch up, so the speed-holding pops never come back as
 /// the car turns in after braking (owner, 2026-11-05). V9's gate and tick facts with both switches clear are
-/// PopsGateTestsOnV10.
+/// PopsGateTests.
 /// </summary>
 public sealed class PopsBrakeTests
 {
     private const uint Stay = 0xAB0F2, Cut = 0xAA7C8;
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10;
 
-    private static Machine Overrun_() => PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);
+    private static Machine Overrun_() => PopsWindowTests.Machine(PopsWindowTests.Image());
 
     private static uint Gate(Machine m)
     {

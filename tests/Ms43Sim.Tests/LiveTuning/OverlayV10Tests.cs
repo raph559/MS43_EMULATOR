@@ -5,110 +5,13 @@ using Ms43Sim.Tests.Support;
 
 namespace Ms43Sim.Tests.LiveTuning;
 
-/// <summary>
-/// The V10.3 image: V9 plus the downshift blip, with four 8-byte settings groups after pops (139 reserved, 140 blip, 141
-/// its gears and tap, 142 its ratios). V10.3 is V10.2 without pops' throttle stabs: 139, V10.2's stabs, is reserved,
-/// every byte limited to 0. Its machines and helpers are V8's.
-/// </summary>
-public static class V10Fixture
-{
-    public const int Defaults = V8Fixture.Defaults;
-
-    /// <summary>
-    /// Groups 138..142 as V10.3 flashes them: pops (4.0 s, -23.625°, a real AFR of 7.0, 4,000 rpm, 3.0 °TPS), 139
-    /// reserved (0), blip (30.0 °TPS at +20.25°), gears and tap (a 150 ms lead, the cap angle -23.625°), ratios.
-    /// </summary>
-    public static readonly byte[] Flashed =
-    [
-        0x00, 0x28, 0x00, 0x46, 0x7D, 0x9E, 0x1E, 0x14,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x96, 0x19, 0x75,
-        0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x0F, 0x00,
-        0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
-    ];
-
-    /// <summary>
-    /// V10's flashed settings (4.0 s, 10.0 °TPS, 15.0 °TPS stabs and blip), with V10.1's two new bytes at V10's rules:
-    /// 139/4 = 5 (a window ends 160 rpm above its lowest, stabbing or not) and 141/6 = 0 (no lead). V10.2: 138/3 is 121,
-    /// a real 12.1, the fuel V10's 184 (shown 11.5) gave through the firmware's straight line (x 1.219, real 12.06).
-    /// </summary>
-    public static readonly byte[] Classic =
-    [
-        0x00, 0x28, 0x17, 0x79, 0x32, 0x9E, 0x64, 0x14,
-        0x14, 0x4B, 0x0F, 0x19, 0x05, 0x00, 0x00, 0x00,
-        0x00, 0x03, 0x1E, 0xBB, 0x0F, 0x4B, 0x19, 0x5A,
-        0x01, 0x01, 0x01, 0x00, 0x15, 0x28, 0x00, 0x00,
-        0xE2, 0x86, 0x59, 0x43, 0x00, 0x00, 0x00, 0x00,
-    ];
-
-    public static byte[] Group(int id) => Flashed.AsSpan((id - 138) * 8, 8).ToArray();
-
-    public static byte[] ClassicGroup(int id) => Classic.AsSpan((id - 138) * 8, 8).ToArray();
-
-    // V10's state at the end of pool A (logical 668..679), below the watch record, and its FDF8 bits.
-    public const uint PopsT = 0x41F9C, BlipAdd = 0x41F9E, BlipLeft = 0x41FA0, PopsPh = 0x41FA2, BlipCl = 0x41FA3,
-        BlipTgt = 0x41FA4, BlipTap = 0x41FA5, BlipPrev = 0x41FA6, BlipRate = 0x41FA7, Flags = 0xFDF8;
-
-    /// <summary>V10.2: the spark angle the blip wrote last (E2B5's encoding); shares POPS_PH, as no blip runs in a pops window.</summary>
-    public const uint BlipSpk = PopsPh;
-
-    /// <summary>V10.2's stab count, pops' spare byte after POPS_MIN, and its stab bit FDF8.7: both free on V10.3.</summary>
-    public const uint PopsStabs = 0x41FBF;
-    public const int PopsStab = 7, BlipOn = 8, BlipUsed = 9, BlipArmed = 10, BlipTapping = 11, BlipHold = 12, Guard = 13;
-
-    public static byte[] Bytes
-    {
-        get
-        {
-            var image = TestBins.CarBytes;
-            foreach (var (at, data) in LiveOverlayBin.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
-                         "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex")))) data.CopyTo(image, at);
-            return image;
-        }
-    }
-
-    /// <summary>The V10.1 image with <see cref="Classic"/> flashed: V10.1's code deciding with V10's settings.</summary>
-    public static byte[] ClassicBytes
-    {
-        get
-        {
-            var image = Bytes;
-            Classic.CopyTo(image, Defaults);
-            return image;
-        }
-    }
-
-    public static int Symbol(string name)
-    {
-        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
-            "defs/live_overlay_v10_symbols.json")));
-        return json.RootElement.GetProperty(name).GetInt32();
-    }
-
-    public static Machine Direct(byte[] image, byte[] call) => V8Fixture.Direct(image, call);
-
-    public static byte[] CallA(string symbol)
-    {
-        var target = Symbol(symbol) & 0xFFFF;
-        return [0xCA, 0x00, (byte)target, (byte)(target >> 8)];
-    }
-
-    public static void Execute(Machine m, uint end = 0xC1004, ulong cycles = 100_000) => V8Fixture.Execute(m, end, cycles);
-
-    public static void PutByte(Machine m, uint address, byte value) => V8Fixture.PutByte(m, address, value);
-
-    public static byte Byte(Machine m, uint address) => V9Fixture.Byte(m, address);
-
-    public static bool Flag(Machine m, int bit) => (m.Bus.Peek16(Flags) & 1 << bit) != 0;
-}
-
 public sealed class OverlayV10Tests
 {
-    private static Machine Start(byte[]? image = null) => OverlayV9Tests.Start(image ?? V10Fixture.Bytes, V10Fixture.Symbol);
-    private static byte[] Command(Machine m, byte[] payload) => OverlayV9Tests.Command(m, payload);
-    private static byte[] Mutate(Machine m, byte[] payload) => OverlayV9Tests.Mutate(m, payload);
-    private static uint Revision(Machine m) => OverlayV9Tests.Revision(m);
-    private static int Free(Machine m) => BinaryPrimitives.ReadUInt16BigEndian(Command(m, [0x6D, 0]).AsSpan(47, 2));
+    private static Machine Start(byte[]? image = null) => V10Fixture.Start(image);
+    private static byte[] Command(Machine m, byte[] payload) => V10Fixture.Command(m, payload);
+    private static byte[] Mutate(Machine m, byte[] payload) => V10Fixture.Mutate(m, payload);
+    private static uint Revision(Machine m) => V10Fixture.Revision(m);
+    private static int Free(Machine m) => V10Fixture.Free(m);
     private static byte[] Write(int id, byte[] bytes) => [0x6D, 2, (byte)id, 0, 0, .. bytes];
 
     private static byte[] With(int id, params (int Index, byte Value)[] changes)
@@ -116,6 +19,21 @@ public sealed class OverlayV10Tests
         var bytes = V10Fixture.Group(id);
         foreach (var (index, value) in changes) bytes[index] = value;
         return bytes;
+    }
+
+    [AslFact] // the source is patches/live_overlay.asm with its section files put in place of their INCLUDE lines
+    public void TheFixtureIsTheSourcesAssembly()
+    {
+        var patches = Path.Combine(LiveOverlayBin.RepositoryRoot, "patches");
+        var source = string.Join('\n', File.ReadAllLines(Path.Combine(patches, "live_overlay.asm")).Select(line =>
+        {
+            var words = line.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return words.Length == 2 && words[0] == "INCLUDE" ? File.ReadAllText(Path.Combine(patches, words[1].Trim('"'))) : line;
+        })) + '\n';
+        var fixture = LiveOverlayBin.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
+            "sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v10.hex")));
+        Assert.Equal(fixture.Select(r => (r.Offset, Convert.ToHexString(r.Bytes))),
+            LiveOverlayBin.Parse(Asl.Assemble(source)).Select(r => (r.Offset, Convert.ToHexString(r.Bytes))));
     }
 
     [Fact] // V10.4: the low byte stays 10, so every V10 rule holds; the high byte is the minor (V8.5's way)
@@ -214,20 +132,40 @@ public sealed class OverlayV10Tests
     {
         var m = Start();
         Assert.Equal(896, Free(m));
-        Assert.NotEqual(0xA0, Mutate(m, V5Fixture.Load(138, 664))[0]);
+        Assert.NotEqual(0xA0, Mutate(m, V10Fixture.Load(138, 664))[0]);
         Assert.Equal(896, Free(m));
-        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(138, 660))[0]);
+        Assert.Equal(0xA0, Mutate(m, V10Fixture.Load(138, 660))[0]);
         Assert.Equal(888, Free(m));
     }
 
-    [Theory, MemberData(nameof(OverlayV9Tests.FittingSets), MemberType = typeof(OverlayV9Tests))] // RF5, at 668
+    public static TheoryData<int[], int[]> FittingSets => new()
+    {
+        { [2, 3, 4, 1], [0, 192, 384, 576] },          // the four without the main ignition map, in pool A alone
+        { [0, 3, 1, 4], [0, 320, 512, 704] },          // each four without one 192-byte table, that one in pool B
+        { [0, 2, 1, 4], [0, 320, 512, 704] },
+        { [0, 2, 1, 3], [0, 320, 512, 704] },
+    };
+
+    [Theory] // owner, 2026-10-29: the pops throttle opening goes to 20.0 deg TPS
+    [InlineData(200, true)] [InlineData(201, false)] [InlineData(255, false)]
+    public void PopsThrottleOpeningGoesTo200(byte value, bool accepted)
+    {
+        var m = Start();
+        var copy = V10Fixture.Group(138); copy[6] = value;
+        Assert.Equal(0xA0, Mutate(m, V10Fixture.Load(138, 704))[0]);
+        var reply = Mutate(m, [0x6D, 2, 138, 0, 0, .. copy]);
+        if (accepted) Assert.Equal(0xA0, reply[0]);
+        else Assert.Equal(new byte[] { 0xB1, 4 }, reply);
+    }
+
+    [Theory, MemberData(nameof(FittingSets))] // RF5, at 668
     public void V8sFittingCombinationsStillFit(int[] ids, int[] offsets)
     {
         var m = Start();
         for (var i = 0; i < ids.Length; i++)
         {
-            Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(ids[i], offsets[i]))[0]);
-            Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(ids[i], LiveOverlay.Crc32(V5Fixture.Flash(ids[i]))))[0]);
+            Assert.Equal(0xA0, Mutate(m, V10Fixture.Load(ids[i], offsets[i]))[0]);
+            Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(ids[i], LiveOverlay.Crc32(V10Fixture.Flash(ids[i]))))[0]);
         }
     }
 
@@ -312,23 +250,23 @@ public sealed class OverlayV10Tests
     private static void Refused(int id, byte[] bad)
     {
         var m = Start(); var flashed = V10Fixture.Group(id);
-        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(id, 704))[0]);
+        Assert.Equal(0xA0, Mutate(m, V10Fixture.Load(id, 704))[0]);
         var revision = Revision(m);
         Assert.Equal(new byte[] { 0xB1, 4 }, Mutate(m, Write(id, bad)));
-        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V5Fixture.Read(m, 0xE6E0, 8));
+        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V10Fixture.Read(m, 0xE6E0, 8));
         Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(id, LiveOverlay.Crc32(flashed)))[0]);
         revision = Revision(m);
-        Assert.Equal(new byte[] { 0xB1, 4 }, Command(m, V5Fixture.Patch(id, 0, bad, revision)));
-        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V5Fixture.Read(m, 0xE6E0, 8));
+        Assert.Equal(new byte[] { 0xB1, 4 }, Command(m, V10Fixture.Patch(id, 0, bad, revision)));
+        Assert.Equal(revision, Revision(m)); Assert.Equal(flashed, V10Fixture.Read(m, 0xE6E0, 8));
     }
 
     private static void Accepted(int id, byte[] good)
     {
         var m = Start();
-        Assert.Equal(0xA0, Mutate(m, V5Fixture.Load(id, 704))[0]);
+        Assert.Equal(0xA0, Mutate(m, V10Fixture.Load(id, 704))[0]);
         Assert.Equal(0xA0, Mutate(m, Write(id, good))[0]);
         Assert.Equal(0xA0, Mutate(m, LiveOverlay.On(id, LiveOverlay.Crc32(good)))[0]);
-        Assert.Equal(good, V5Fixture.Read(m, 0xE6E0, 8));
+        Assert.Equal(good, V10Fixture.Read(m, 0xE6E0, 8));
     }
 
     [Fact]

@@ -8,23 +8,21 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// firmware's own throttle monitoring stores nothing. The drive sets the shaft's speed, so the extra air cannot make the
 /// car pull here; the +160 rpm stop is V8's and is tested there.
 /// </summary>
-public sealed class PopsV9DriveTests
+public sealed class PopsThrottleDriveTests
 {
     private static int Column(string name) => VariableTrace.Columns.ToList().IndexOf(name);
 
     private static DriveResult Run(byte[] image, byte[]? settings)
     {
         var bytes = image;
-        settings?.CopyTo(bytes, V9Fixture.Defaults);
+        settings?.CopyTo(bytes, V10Fixture.Defaults);
         return DriveRun.RunWithChecks(TestImages.AsFlashed(bytes), PopsDriveFixture.Load("lift"));
     }
 
-    public static TheoryData<string> Overlays => new() { "V9", "V8.5" };
-
-    [Theory, MemberData(nameof(Overlays))]
-    public void TwentyDegreesTpsIsAddedAndNothingIsStored(string overlay)
+    [Fact]
+    public void TwentyDegreesTpsIsAddedAndNothingIsStored()
     {
-        byte[] Image() => overlay == "V9" ? V9Fixture.Bytes : V85Fixture.Bytes;
+        byte[] Image() => V10Fixture.Bytes;
         var settings = PopsDriveFixture.On.ToArray(); settings[6] = 200;
         var results = new[] { (byte[]?)null, settings }.Select(s => Run(Image(), s)).ToArray();
         var (reference, run) = (results[0], results[1]);

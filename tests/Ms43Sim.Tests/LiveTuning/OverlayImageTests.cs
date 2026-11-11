@@ -130,14 +130,6 @@ public class OverlayImageTests
         Assert.Null(ProgramIdentity.Name(old));
     }
 
-    [AslFact] public void TheFixture_IsTheSourcesAssembly()
-    {
-        var source = File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot, "patches", "live_overlay.asm"));
-        var assembled = LiveOverlayBin.Parse(Asl.Assemble(source));
-        Assert.Equal(LiveOverlayBin.Records().Select(r => (r.Offset, Convert.ToHexString(r.Bytes))),
-            assembled.Select(r => (r.Offset, Convert.ToHexString(r.Bytes))));
-    }
-
     static IReadOnlyList<byte> OneReply(FlashedImage image, string payload)
     {
         var r = DriveRun.Run(image, DriveParser.Parse($"drive one\n3 on\nkline send {payload}\n2 on"));

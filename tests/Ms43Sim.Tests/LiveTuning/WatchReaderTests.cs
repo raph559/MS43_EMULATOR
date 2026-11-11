@@ -28,13 +28,13 @@ public sealed class WatchReaderTests
     private static Machine Seed(byte[] image, Reader reader, int sample, Watch watch, ushort r13 = Page, ushort r12 = Offset)
     {
         var call = new byte[] { 0xDA, (byte)(reader.Entry >> 16), (byte)reader.Entry, (byte)(reader.Entry >> 8) };
-        var m = V9Fixture.Direct(image, call);
+        var m = V10Fixture.Direct(image, call);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19 + sample * 0x0101));
         m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(12, r12); m.Cpu.SetR(13, r13);
         m.Cpu.Psw = 0xF800;
         var i = Indices[sample];
-        V9Fixture.PutByte(m, 0xFB6B, i.Row); m.Bus.Poke16(0xE390, i.RowF);
-        V9Fixture.PutByte(m, 0xFB6C, i.Col); m.Bus.Poke16(0xE392, i.ColF); V9Fixture.PutByte(m, 0xFB6D, i.Cols);
+        V10Fixture.PutByte(m, 0xFB6B, i.Row); m.Bus.Poke16(0xE390, i.RowF);
+        V10Fixture.PutByte(m, 0xFB6C, i.Col); m.Bus.Poke16(0xE392, i.ColF); V10Fixture.PutByte(m, 0xFB6D, i.Cols);
         var (page, offset) = watch switch
         {
             Watch.OtherMap => ((ushort)0x1F, (ushort)0x169C),
@@ -43,11 +43,11 @@ public sealed class WatchReaderTests
             Watch.LiveCopy => ((ushort)0x1F, (ushort)0x169C),        // the flash map is elsewhere; the read is its live copy
             _ => ((ushort)0xFFFF, (ushort)0),
         };
-        V9Fixture.Arm(m, page, offset, watch == Watch.LiveCopy ? r13 : (ushort)0xFFFF, watch == Watch.LiveCopy ? r12 : (ushort)0);
+        V10Fixture.Arm(m, page, offset, watch == Watch.LiveCopy ? r13 : (ushort)0xFFFF, watch == Watch.LiveCopy ? r12 : (ushort)0);
         return m;
     }
 
-    private static void Run(Machine m) => V9Fixture.Execute(m, cycles: 200_000);
+    private static void Run(Machine m) => V10Fixture.Execute(m, cycles: 200_000);
 
     private static void EqualCpu(Machine expected, Machine actual, string context)
     {
@@ -78,7 +78,7 @@ public sealed class WatchReaderTests
         for (var sample = 0; sample < Indices.Length; sample++)
         {
             var expected = Seed(TestBins.CarBytes, reader, sample, watch); Run(expected);
-            var actual = Seed(V9Fixture.Bytes, reader, sample, watch); Run(actual);
+            var actual = Seed(V10Fixture.Bytes, reader, sample, watch); Run(actual);
             EqualCpu(expected, actual, $"reader {index}, {watch}, sample {sample}");
             EqualMemory(expected, actual, $"reader {index}, {watch}, sample {sample}");
         }
@@ -89,19 +89,19 @@ public sealed class WatchReaderTests
     {
         var reader = Readers[index];
         var expected = Seed(TestBins.CarBytes, reader, 0, Watch.This); Run(expected);
-        var actual = Seed(V9Fixture.Bytes, reader, 0, Watch.This); Run(actual);
-        Assert.Equal(reader.Map ? 1 : 2, V9Fixture.Byte(actual, V9Fixture.Kind));
-        Assert.Equal(3, actual.Bus.Peek16(V9Fixture.Row));
-        Assert.Equal(0x8000, actual.Bus.Peek16(V9Fixture.RowF));
-        Assert.Equal(reader.Map ? 5 : 0, actual.Bus.Peek16(V9Fixture.Col));
-        Assert.Equal(reader.Map ? 0x4000 : 0, actual.Bus.Peek16(V9Fixture.ColF));
-        Assert.Equal(reader.Map ? 12 : 0, V9Fixture.Byte(actual, V9Fixture.Cols));
-        Assert.Equal(1, V9Fixture.Byte(actual, V9Fixture.Count));
+        var actual = Seed(V10Fixture.Bytes, reader, 0, Watch.This); Run(actual);
+        Assert.Equal(reader.Map ? 1 : 2, V10Fixture.Byte(actual, V10Fixture.Kind));
+        Assert.Equal(3, actual.Bus.Peek16(V10Fixture.Row));
+        Assert.Equal(0x8000, actual.Bus.Peek16(V10Fixture.RowF));
+        Assert.Equal(reader.Map ? 5 : 0, actual.Bus.Peek16(V10Fixture.Col));
+        Assert.Equal(reader.Map ? 0x4000 : 0, actual.Bus.Peek16(V10Fixture.ColF));
+        Assert.Equal(reader.Map ? 12 : 0, V10Fixture.Byte(actual, V10Fixture.Cols));
+        Assert.Equal(1, V10Fixture.Byte(actual, V10Fixture.Count));
         EqualCpu(expected, actual, $"reader {index}");
 
-        var wrap = Seed(V9Fixture.Bytes, reader, 0, Watch.This);
-        V9Fixture.PutByte(wrap, V9Fixture.Count, 255); Run(wrap);
-        Assert.Equal(0, V9Fixture.Byte(wrap, V9Fixture.Count));
+        var wrap = Seed(V10Fixture.Bytes, reader, 0, Watch.This);
+        V10Fixture.PutByte(wrap, V10Fixture.Count, 255); Run(wrap);
+        Assert.Equal(0, V10Fixture.Byte(wrap, V10Fixture.Count));
     }
 
     public static IEnumerable<object[]> AllReaders() => Enumerable.Range(0, 8).Select(i => new object[] { i });
@@ -111,9 +111,9 @@ public sealed class WatchReaderTests
     {
         var reader = Readers[index];
         var expected = Seed(TestBins.CarBytes, reader, 0, Watch.LiveCopy, 0x10, 0x1D40); Run(expected);
-        var actual = Seed(V9Fixture.Bytes, reader, 0, Watch.LiveCopy, 0x10, 0x1D40); Run(actual);
-        Assert.Equal(reader.Map ? 1 : 2, V9Fixture.Byte(actual, V9Fixture.Kind));
-        Assert.Equal(1, V9Fixture.Byte(actual, V9Fixture.Count));
+        var actual = Seed(V10Fixture.Bytes, reader, 0, Watch.LiveCopy, 0x10, 0x1D40); Run(actual);
+        Assert.Equal(reader.Map ? 1 : 2, V10Fixture.Byte(actual, V10Fixture.Kind));
+        Assert.Equal(1, V10Fixture.Byte(actual, V10Fixture.Count));
         EqualCpu(expected, actual, $"reader {index}");
     }
 
@@ -121,14 +121,14 @@ public sealed class WatchReaderTests
     public void RecordWritesRunWithInterruptsHeldOff(int index)
     {
         var reader = Readers[index];
-        var m = Seed(V9Fixture.Bytes, reader, 0, Watch.This);
-        var start = (uint)V9Fixture.Symbol($"wr{index}_rec"); var end = (uint)V9Fixture.Symbol($"wr{index}_end");
+        var m = Seed(V10Fixture.Bytes, reader, 0, Watch.This);
+        var start = (uint)V10Fixture.Symbol($"wr{index}_rec"); var end = (uint)V10Fixture.Symbol($"wr{index}_end");
         var seen = 0;
         for (var at = start; at < end; at += 2)
             m.OnInstruction(at, x => { seen++; Assert.True((x.Cpu.Psw & 0x0800) == 0, $"IEN set at {x.Cpu.Address:X5}"); });
         Run(m);
         Assert.True(seen > 5, $"only {seen} instructions seen");
         Assert.Equal(0x0800, m.Cpu.Psw & 0x0800);
-        Assert.Equal(1, V9Fixture.Byte(m, V9Fixture.Count));
+        Assert.Equal(1, V10Fixture.Byte(m, V10Fixture.Count));
     }
 }

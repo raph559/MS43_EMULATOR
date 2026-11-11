@@ -8,19 +8,16 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// branch (0B:D434) and the throttle opening (09:B138). Direct CPU tests from the real sites against the donor.
 /// "Active" is FDF8.3 with the engine in fuelled overrun (FD2C.11).
 /// </summary>
-public abstract class PopsHookTests
+public sealed class PopsHookTests
 {
-    /// <summary>The overlay image under test: V8, or V9, which must behave the same.</summary>
-    protected abstract OverlayFixture Fixture { get; }
-
-    /// <summary>The throttle opening's limit (0.1 °TPS) and the 86A4 units it adds: V8 5.0, V9 20.0 (owner, 2026-10-29).</summary>
-    protected abstract (byte Limit, int Add) ThrottleLimit { get; }
+    /// <summary>The throttle opening's limit, 20.0 deg TPS in 0.1 deg, and the 86A4 units it adds (54.625 X by shifts).</summary>
+    private static (byte Limit, int Add) ThrottleLimit => (200, 10925);
 
     /// <summary>
-    /// The flashed AFR byte and what the shared path then receives in R12 and R13. V8 and V9 pass the firmware's own
-    /// target byte (184, 11.5 shown); V10.2's byte is the real AFR × 10, so 70 (7.0) forces the rich path with 255.
+    /// The flashed AFR byte, the real AFR x 10, and what the shared path then receives in R12 and R13: 70 (7.0) forces
+    /// the rich path with 255.
     /// </summary>
-    protected virtual (byte Setting, int Passed) Afr => (184, 184);
+    private static (byte Setting, int Passed) Afr => (70, 255);
 
     private const ushort Overrun = 1 << 11, PartLoad = 1 << 10, Idle = 1 << 9;
     private byte[] Settings => [1, 20, 23, Afr.Setting, 50, 158, 30, 20];
@@ -33,14 +30,14 @@ public abstract class PopsHookTests
 
     private byte[] Image(byte[] settings, bool donor)
     {
-        var image = donor ? TestBins.CarBytes : Fixture.Bytes();
-        if (!donor) settings.CopyTo(image, V8Fixture.Defaults);
+        var image = donor ? TestBins.CarBytes : V10Fixture.Bytes;
+        if (!donor) settings.CopyTo(image, V10Fixture.Defaults);
         return image;
     }
 
     private static Machine Seed(byte[] image, ushort mode, ushort fdf8, ushort psw, int sample)
     {
-        var m = V8Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
+        var m = V10Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19 + sample * 0x0101));
         m.Cpu.SetR(0, 0xF780);
         m.Cpu.SetR(4, (ushort)(1000 + sample * 9000));
@@ -167,32 +164,13 @@ public abstract class PopsHookTests
     {
         var m = Seed(Image(Settings, donor: false), Overrun, 0x4008, 0x0800, 0);
         m.Cpu.SetR(6, 0x80);   // the stock overrun target: lambda 1
-        V8Fixture.PutByte(m, 0x4007F, rpm);
+        V10Fixture.PutByte(m, 0x4007F, rpm);
         m.Bus.Poke16(0xFD34, 0); m.Bus.Poke16(0xFD9A, 0); m.Bus.Poke16(0xFD42, 0); m.Bus.Poke16(0x40C5E, 0);
         m.Cpu.Jump(0x0B, 0xD42C);
         m.Run(200_000, x => x.Cpu.Address == 0xBD4D4);
         Assert.Equal(0xBD4D4u, m.Cpu.Address);
         Assert.Equal(open, (m.Bus.Peek16(0xFD9A) & 1 << 10) != 0);
     }
-}
-
-public sealed class PopsHookTestsOnV8 : PopsHookTests
-{
-    protected override OverlayFixture Fixture => OverlayFixture.V8;
-    protected override (byte Limit, int Add) ThrottleLimit => (50, 2731);
-}
-
-public sealed class PopsHookTestsOnV9 : PopsHookTests
-{
-    protected override OverlayFixture Fixture => OverlayFixture.V9;
-    protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);    // 54.625 X by shifts
-}
-
-public sealed class PopsHookTestsOnV10 : PopsHookTests
-{
-    protected override OverlayFixture Fixture => OverlayFixture.V10;
-    protected override (byte Limit, int Add) ThrottleLimit => (200, 10925);
-    protected override (byte Setting, int Passed) Afr => (70, 255);    // V10.2: a real 7.0 forces the rich path
 }
 
 /// <summary>
@@ -212,8 +190,8 @@ public sealed class PopsRealAfrHookTests
     private static Machine Seed(byte afr, ushort fdf8 = Window, ushort fd9a = 1 << 10, ushort enrichment = 2032, byte xStock = 128)
     {
         var image = V10Fixture.Bytes;
-        new byte[] { 1, 20, 23, afr, 50, 158, 30, 20 }.CopyTo(image, V8Fixture.Defaults);
-        var m = V8Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
+        new byte[] { 1, 20, 23, afr, 50, 158, 30, 20 }.CopyTo(image, V10Fixture.Defaults);
+        var m = V10Fixture.Direct(image, [0xCC, 0x00, 0xCC, 0x00]);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
         m.Cpu.SetR(0, 0xF780);
         m.Cpu.Psw = 0x0800;
@@ -223,7 +201,7 @@ public sealed class PopsRealAfrHookTests
         m.Bus.Poke16(0xFD9A, fd9a);
         m.Bus.Poke16(Enrichment, enrichment);
         m.Bus.Poke16(Stoich, 0x5500 | 147);                            // 91B8 = 147 (14.7); 91B9 = 55h, which only a write changes
-        V8Fixture.PutByte(m, XStock, xStock);
+        V10Fixture.PutByte(m, XStock, xStock);
         return m;
     }
 

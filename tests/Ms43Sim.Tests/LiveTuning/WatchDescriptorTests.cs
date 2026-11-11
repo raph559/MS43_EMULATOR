@@ -36,17 +36,17 @@ public sealed class WatchDescriptorTests
     private static Machine Seed(byte[] image, Lookup lookup, int sample, bool watched)
     {
         var call = new byte[] { 0xDA, (byte)(lookup.Entry >> 16), (byte)lookup.Entry, (byte)(lookup.Entry >> 8) };
-        var m = V9Fixture.Direct(image, call);
+        var m = V10Fixture.Direct(image, call);
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19 + sample * 0x0101));
         m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(12, lookup.Descriptor);
         m.Cpu.SetR(13, Inputs[sample].Row); m.Cpu.SetR(14, Inputs[sample].Col);
         m.Cpu.Psw = 0xF800;
         var (page, offset) = watched ? Data(lookup) : ((ushort)0x1F, (ushort)0x169C);
-        V9Fixture.Arm(m, page, offset);
+        V10Fixture.Arm(m, page, offset);
         return m;
     }
 
-    private static void Run(Machine m) => V9Fixture.Execute(m, cycles: 400_000);
+    private static void Run(Machine m) => V10Fixture.Execute(m, cycles: 400_000);
 
     private static void EqualCpu(Machine expected, Machine actual, string context)
     {
@@ -69,8 +69,8 @@ public sealed class WatchDescriptorTests
         for (var sample = 0; sample < Inputs.Length; sample++)
         {
             var expected = Seed(TestBins.CarBytes, lookup, sample, false);
-            var actual = Seed(V9Fixture.Bytes, lookup, sample, false);
-            if (watch == "none") foreach (var m in new[] { expected, actual }) V9Fixture.Arm(m, 0xFFFF, 0);
+            var actual = Seed(V10Fixture.Bytes, lookup, sample, false);
+            if (watch == "none") foreach (var m in new[] { expected, actual }) V10Fixture.Arm(m, 0xFFFF, 0);
             ushort dppExpected = 0, dppActual = 0;
             var after = lookup.Site + 4;
             expected.OnInstruction(after, x => dppExpected = x.Cpu.Dpp(0));
@@ -78,7 +78,7 @@ public sealed class WatchDescriptorTests
             Run(expected); Run(actual);
             EqualCpu(expected, actual, $"lookup {index}, {watch}, sample {sample}");
             Assert.Equal(dppExpected, dppActual);
-            Assert.Equal(0, V9Fixture.Byte(actual, V9Fixture.Count));
+            Assert.Equal(0, V10Fixture.Byte(actual, V10Fixture.Count));
         }
     }
 
@@ -87,14 +87,14 @@ public sealed class WatchDescriptorTests
     {
         var lookup = Lookups[index];
         var expected = Seed(TestBins.CarBytes, lookup, 0, true); Run(expected);
-        var actual = Seed(V9Fixture.Bytes, lookup, 0, true); Run(actual);
-        Assert.Equal(lookup.Map ? 3 : 4, V9Fixture.Byte(actual, V9Fixture.Kind));
-        Assert.Equal(0x1234, actual.Bus.Peek16(V9Fixture.Row));
-        Assert.Equal(lookup.Map ? 0x0056 : 0, actual.Bus.Peek16(V9Fixture.Col));
-        Assert.Equal(0, actual.Bus.Peek16(V9Fixture.RowF));
-        Assert.Equal(0, actual.Bus.Peek16(V9Fixture.ColF));
-        Assert.Equal(0, V9Fixture.Byte(actual, V9Fixture.Cols));
-        Assert.Equal(1, V9Fixture.Byte(actual, V9Fixture.Count));
+        var actual = Seed(V10Fixture.Bytes, lookup, 0, true); Run(actual);
+        Assert.Equal(lookup.Map ? 3 : 4, V10Fixture.Byte(actual, V10Fixture.Kind));
+        Assert.Equal(0x1234, actual.Bus.Peek16(V10Fixture.Row));
+        Assert.Equal(lookup.Map ? 0x0056 : 0, actual.Bus.Peek16(V10Fixture.Col));
+        Assert.Equal(0, actual.Bus.Peek16(V10Fixture.RowF));
+        Assert.Equal(0, actual.Bus.Peek16(V10Fixture.ColF));
+        Assert.Equal(0, V10Fixture.Byte(actual, V10Fixture.Cols));
+        Assert.Equal(1, V10Fixture.Byte(actual, V10Fixture.Count));
         EqualCpu(expected, actual, $"lookup {index}");
     }
 
@@ -102,37 +102,37 @@ public sealed class WatchDescriptorTests
     public void RecordWritesRunWithInterruptsHeldOff(int index)
     {
         var lookup = Lookups[index];
-        var m = Seed(V9Fixture.Bytes, lookup, 0, true);
-        var start = (uint)V9Fixture.Symbol($"wd{index}_rec"); var end = (uint)V9Fixture.Symbol($"wd{index}_end");
+        var m = Seed(V10Fixture.Bytes, lookup, 0, true);
+        var start = (uint)V10Fixture.Symbol($"wd{index}_rec"); var end = (uint)V10Fixture.Symbol($"wd{index}_end");
         var seen = 0;
         for (var at = start; at < end; at += 2)
             m.OnInstruction(at, x => { seen++; Assert.True((x.Cpu.Psw & 0x0800) == 0, $"IEN set at {x.Cpu.Address:X5}"); });
         Run(m);
         Assert.True(seen > 5, $"only {seen} instructions seen");
         Assert.Equal(0x0800, m.Cpu.Psw & 0x0800);
-        Assert.Equal(1, V9Fixture.Byte(m, V9Fixture.Count));
+        Assert.Equal(1, V10Fixture.Byte(m, V10Fixture.Count));
     }
 
     [Fact]
     public void V7LiveWordMapsAreSeenThroughTheirRamCopy()
     {
-        var map = V7Fixture.NewMaps.Single(m => m.GetProperty("id").GetInt32() == 131);
+        var map = WordMapFixture.Maps.Single(m => m.GetProperty("id").GetInt32() == 131);
         var site = map.GetProperty("sites")[0].GetInt32();
         var address = map.GetProperty("address").GetInt32();
         var descriptor = map.GetProperty("descriptor").GetInt32();
 
         byte Counted(bool alias)
         {
-            var image = V9Fixture.Bytes;
-            var m = V9Fixture.Direct(image, image.AsSpan(site, 4).ToArray());
-            m.Bus.Poke16(0xE6B0, 0xC0D9); m.Bus.Xram[0x6DB] = 255;
+            var image = V10Fixture.Bytes;
+            var m = V10Fixture.Direct(image, image.AsSpan(site, 4).ToArray());
+            m.Bus.Poke16(0xE6B0, 0xC0DA); m.Bus.Xram[0x6DB] = 255;
             m.Bus.Poke16(0xF900, 2); m.Bus.Poke16(0xFD2C, 0x0400); m.Bus.Poke16(0xE2A6, 0);
             m.Bus.Poke16(0xE6D8, (ushort)(131 << 8 | 3)); m.Bus.Poke16(0xE6DA, 0xFF00);      // On, at logical 0
             for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
             m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(12, (ushort)descriptor); m.Cpu.SetR(13, 1000); m.Cpu.SetR(14, 128);
-            V9Fixture.Arm(m, (ushort)(address / 0x4000), (ushort)(address % 0x4000), alias ? (ushort)0x10 : (ushort)0xFFFF, 0x1D00);
-            V7Fixture.Execute(m);
-            return V9Fixture.Byte(m, V9Fixture.Count);
+            V10Fixture.Arm(m, (ushort)(address / 0x4000), (ushort)(address % 0x4000), alias ? (ushort)0x10 : (ushort)0xFFFF, 0x1D00);
+            WordMapFixture.Execute(m);
+            return V10Fixture.Byte(m, V10Fixture.Count);
         }
 
         Assert.Equal(1, Counted(alias: true));

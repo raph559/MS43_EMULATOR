@@ -23,14 +23,14 @@ public sealed class PopsWindowTests
         return bytes;
     }
 
-    /// <summary>A V10 (or V9) machine with the DS2 handler at 0C:1000, housekeeping at 0C:1010 and the gate at 0C:1030.</summary>
-    internal static Machine Machine(byte[] image, Func<string, int> symbol)
+    /// <summary>A machine with the DS2 handler at 0C:1000, housekeeping at 0C:1010 and the gate at 0C:1030.</summary>
+    internal static Machine Machine(byte[] image)
     {
         new byte[] { 0xFA, 0x0A, 0xBC, 0xA7 }.CopyTo(image, 0x41030);
-        var m = OverlayV9Tests.Boot(image, symbol);
-        V8Fixture.PutByte(m, 0x4007F, 100);                          // 3,200 rpm
-        V8Fixture.PutByte(m, 0x4047F, 80);                           // 80 km/h
-        V8Fixture.PutByte(m, 0x40433, 200);                          // 102 deg C
+        var m = V10Fixture.Boot(image);
+        V10Fixture.PutByte(m, 0x4007F, 100);                          // 3,200 rpm
+        V10Fixture.PutByte(m, 0x4047F, 80);                           // 80 km/h
+        V10Fixture.PutByte(m, 0x40433, 200);                          // 102 deg C
         m.Bus.Poke16(0xFD2E, 0);
         m.Bus.Poke16(0xFD30, 1 << 2);                                // the stock cut is requested
         m.Bus.Poke16(0xFD18, 0);
@@ -74,8 +74,8 @@ public sealed class PopsWindowTests
     /// <summary>A window with the image's flashed settings and pops on, started at 4,160 rpm (the flashed minimum is 4,000).</summary>
     private static Machine Started(Action<byte[]>? change = null)
     {
-        var m = Machine(Image(V10Fixture.Bytes, change), V10Fixture.Symbol);
-        V8Fixture.PutByte(m, 0x4007F, 130);
+        var m = Machine(Image(V10Fixture.Bytes, change));
+        V10Fixture.PutByte(m, 0x4007F, 130);
         Gate(m);
         return m;
     }
@@ -83,13 +83,13 @@ public sealed class PopsWindowTests
     /// <summary>V10.2's flashed stabs, written into the reserved group 139: a 2.0 s load, +5.0 deg TPS, 150/250 ms, 480 rpm.</summary>
     private static void V102Stabs(byte[] b) => new byte[] { 0x14, 0x19, 0x0F, 0x19, 0x0F, 0, 0, 0 }.CopyTo(b, V10Fixture.Defaults + 8);
 
-    [Theory] // with V10.2's stabs flashed in 139, the store is still V9's: group 139 is never read
+    [Theory] // with V10.2's stabs flashed in 139, the store is the same as with 139 at 0: the group is never read
     [InlineData(0)] [InlineData(100)] [InlineData(200)]
-    public void TheThrottleIsV9sWhatever139Holds(byte opening)
+    public void TheThrottleIsTheSameWhatever139Holds(byte opening)
     {
         void Settings(byte[] b) { b[V10Fixture.Defaults + 1] = 50; b[V10Fixture.Defaults + 6] = opening; }
-        var v10 = Machine(Image(change: b => { Settings(b); V102Stabs(b); }), V10Fixture.Symbol);
-        var v9 = Machine(Image(V9Fixture.Bytes, Settings), V9Fixture.Symbol);
+        var v10 = Machine(Image(change: b => { Settings(b); V102Stabs(b); }));
+        var v9 = Machine(Image(change: Settings));          // the reference: 139 at 0
         Gate(v10); Gate(v9);
         for (var tick = 1; tick <= 500; tick++)
         {
@@ -125,7 +125,7 @@ public sealed class PopsWindowTests
         var m = Started(V102Stabs);
         for (var tick = 1; tick <= ticks; tick++) Tick(m);
         Assert.True(Window(m));
-        V8Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
+        V10Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
         Tick(m);
         Assert.Equal(kept, Window(m));
     }
@@ -145,7 +145,7 @@ public sealed class PopsWindowTests
     {
         var m = Started(V102Stabs);
         for (var tick = 1; tick <= ticks; tick++) Tick(m);
-        V8Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
+        V10Fixture.PutByte(m, 0x4007F, (byte)(130 + rise));
         Assert.Equal(kept ? Stay : Cut, GateExit(m));
         Assert.Equal(kept, Window(m));
     }
@@ -153,20 +153,20 @@ public sealed class PopsWindowTests
     [Fact] // group 139 is reserved: a live copy of V10.2's stabs is refused, a copy of zeros is taken
     public void TheReservedGroupTakesOnlyZeros()
     {
-        var m = Machine(Image(V10Fixture.Bytes), V10Fixture.Symbol);
-        Assert.Equal(0xA0, OverlayV9Tests.Command(m, V3Fixture.Open())[0]);
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, V5Fixture.Load(139, 704))[0]);
+        var m = Machine(Image(V10Fixture.Bytes));
+        Assert.Equal(0xA0, V10Fixture.Command(m, V10Fixture.Open())[0]);
+        Assert.Equal(0xA0, V10Fixture.Mutate(m, V10Fixture.Load(139, 704))[0]);
         byte[] v102 = [0x14, 0x19, 0x0F, 0x19, 0x0F, 0, 0, 0];
-        Assert.NotEqual(0xA0, OverlayV9Tests.Mutate(m, [0x6D, 2, 139, 0, 0, .. v102])[0]);
-        Assert.Equal(0xA0, OverlayV9Tests.Mutate(m, [0x6D, 2, 139, 0, 0, .. new byte[8]])[0]);
+        Assert.NotEqual(0xA0, V10Fixture.Mutate(m, [0x6D, 2, 139, 0, 0, .. v102])[0]);
+        Assert.Equal(0xA0, V10Fixture.Mutate(m, [0x6D, 2, 139, 0, 0, .. new byte[8]])[0]);
     }
 
     [Fact] // V10.2's stab count byte, 09FBF, is no longer written by a window
     public void AWindowLeavesTheOldStabCountAlone()
     {
-        var m = Machine(Image(V10Fixture.Bytes), V10Fixture.Symbol);
-        V8Fixture.PutByte(m, 0x4007F, 130);
-        V8Fixture.PutByte(m, V10Fixture.PopsStabs, 7);
+        var m = Machine(Image(V10Fixture.Bytes));
+        V10Fixture.PutByte(m, 0x4007F, 130);
+        V10Fixture.PutByte(m, V10Fixture.PopsStabs, 7);
         Gate(m);
         while (Window(m)) Tick(m);
         Assert.Equal(7, V10Fixture.Byte(m, V10Fixture.PopsStabs));

@@ -13,15 +13,15 @@ public sealed class TorqueGuardTests
 {
     private static void Torque(Machine m, byte estimate, byte permitted)
     {
-        V8Fixture.PutByte(m, 0x40013, estimate);
-        V8Fixture.PutByte(m, 0x406AD, permitted);
+        V10Fixture.PutByte(m, 0x40013, estimate);
+        V10Fixture.PutByte(m, 0x406AD, permitted);
     }
 
     private static bool Guard(Machine m) => V10Fixture.Flag(m, V10Fixture.Guard);
 
     private static Machine Window()
     {
-        var m = PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);
+        var m = PopsWindowTests.Machine(PopsWindowTests.Image());
         PopsWindowTests.Gate(m);
         return m;
     }
@@ -56,7 +56,7 @@ public sealed class TorqueGuardTests
     [Fact]
     public void TheGuardRestsOutsideAWindowOrBlip()
     {
-        var m = PopsWindowTests.Machine(PopsWindowTests.Image(), V10Fixture.Symbol);   // overrun, no window yet
+        var m = PopsWindowTests.Machine(PopsWindowTests.Image());   // overrun, no window yet
         Torque(m, 255, 0);
         m.Bus.Poke16(0xFDF8, (ushort)(m.Bus.Peek16(0xFDF8) | 1 << V10Fixture.Guard));  // as RAM may power up
         PopsWindowTests.Tick(m);

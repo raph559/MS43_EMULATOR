@@ -21,12 +21,12 @@ public sealed class BlipTests
         var image = v101 ? V10Fixture.Bytes : V10Fixture.ClassicBytes;
         image[Blip] = 1;
         change?.Invoke(image);
-        var m = OverlayV9Tests.Boot(image, V10Fixture.Symbol);
-        V8Fixture.PutByte(m, 0x401AE, gear);
-        V8Fixture.PutByte(m, 0x4047F, speed);
-        V8Fixture.PutByte(m, 0x4007F, rpm);
-        V8Fixture.PutByte(m, 0x40433, 180);                         // 87 deg C
-        V8Fixture.PutByte(m, 0xE0FF, 0);                            // the pedal released
+        var m = V10Fixture.Boot(image);
+        V10Fixture.PutByte(m, 0x401AE, gear);
+        V10Fixture.PutByte(m, 0x4047F, speed);
+        V10Fixture.PutByte(m, 0x4007F, rpm);
+        V10Fixture.PutByte(m, 0x40433, 180);                         // 87 deg C
+        V10Fixture.PutByte(m, 0xE0FF, 0);                            // the pedal released
         m.Bus.Poke16(0xFD2C, 1 << 11);
         m.Bus.Poke16(0xFD18, 0);
         m.Bus.Poke16(0xFDF8, 0x4000);
@@ -39,7 +39,7 @@ public sealed class BlipTests
         m.Bus.Poke16(0xFD2E, (ushort)((clutch ? 1 << 6 : 0) | (lightSwitch ? 1 << 3 : 0) | (testSwitch ? 1 << 4 : 0)));
 
     private static void Braking(Machine m) => Clutch(m, true, true, true);
-    private static void Pedal(Machine m, byte value) => V8Fixture.PutByte(m, 0xE0FF, value);
+    private static void Pedal(Machine m, byte value) => V10Fixture.PutByte(m, 0xE0FF, value);
     private static void Ticks(Machine m, int n) { for (var i = 0; i < n; i++) PopsWindowTests.Tick(m); }
 
     private static bool On(Machine m) => V10Fixture.Flag(m, V10Fixture.BlipOn);
@@ -69,7 +69,7 @@ public sealed class BlipTests
     {
         var m = Machine();
         m.Bus.Poke16(0xE2B4, 0x1D00);                               // the car file's overrun angle, -12.75 deg
-        V8Fixture.PutByte(m, V10Fixture.BlipSpk, 0x1D);
+        V10Fixture.PutByte(m, V10Fixture.BlipSpk, 0x1D);
         Braking(m);
         PopsWindowTests.Tick(m);
         Assert.True(On(m));
@@ -204,7 +204,7 @@ public sealed class BlipTests
     {
         var m = Machine(gear: name == "1st" ? (byte)1 : (byte)4, speed: name == "speed" ? (byte)29 : (byte)60,
             rpm: name switch { "near" => (byte)78, "stalled" => (byte)0, "under800" => (byte)24, _ => (byte)40 });  // V10.4: under 800 rpm
-        if (name == "cold") V8Fixture.PutByte(m, 0x40433, 143);
+        if (name == "cold") V10Fixture.PutByte(m, 0x40433, 143);
         if (name is "lc" or "nls" or "ral")
             m.Bus.Poke16(0xFDF8, (ushort)(0x4000 | 1 << (name == "lc" ? 0 : name == "nls" ? 1 : 2)));
         if (name == "late") { Clutch(m, true); Ticks(m, 201); }
@@ -243,14 +243,14 @@ public sealed class BlipTests
         m.Bus.Poke16(0xFD18, 2);                                    // the cruise main switch on, no speed held
         Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
-        if (fromTheHold) { V8Fixture.PutByte(m, 0x4007F, 80); PopsWindowTests.Tick(m); Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold)); }
+        if (fromTheHold) { V10Fixture.PutByte(m, 0x4007F, 80); PopsWindowTests.Tick(m); Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold)); }
         switch (stop)
         {
             case "clutch": Clutch(m, false); break;
             case "pedal": Pedal(m, 30); break;
             case "time": m.Bus.Poke16(V10Fixture.BlipLeft, 0); break;
-            case "speed": V8Fixture.PutByte(m, 0x4047F, 29); break;
-            case "rpm": V8Fixture.PutByte(m, 0x4007F, 187); break;
+            case "speed": V10Fixture.PutByte(m, 0x4047F, 29); break;
+            case "rpm": V10Fixture.PutByte(m, 0x4007F, 187); break;
             case "switch": m.Bus.Poke16(0xFD18, 0); break;
             case "lc": m.Bus.Poke16(0xFDF8, (ushort)(m.Bus.Peek16(0xFDF8) | 1)); break;
         }
@@ -268,20 +268,20 @@ public sealed class BlipTests
         Assert.InRange(rise, 8191, 8195);
         foreach (byte rpm in new byte[] { 60, 76 })
         {
-            V8Fixture.PutByte(m, 0x4007F, rpm); PopsWindowTests.Tick(m);
+            V10Fixture.PutByte(m, 0x4007F, rpm); PopsWindowTests.Tick(m);
             Assert.False(V10Fixture.Flag(m, V10Fixture.BlipHold), $"{rpm}");
             Assert.Equal(rise, Add(m));
         }
-        V8Fixture.PutByte(m, 0x4007F, 77); PopsWindowTests.Tick(m);   // 77 + 6 reaches 83: the hold begins
+        V10Fixture.PutByte(m, 0x4007F, 77); PopsWindowTests.Tick(m);   // 77 + 6 reaches 83: the hold begins
         Assert.True(V10Fixture.Flag(m, V10Fixture.BlipHold));
         Assert.InRange(Add(m), hold - 2, hold + 2);
-        V8Fixture.PutByte(m, 0x4007F, 88); PopsWindowTests.Tick(m);   // in the band (83..88): unchanged
+        V10Fixture.PutByte(m, 0x4007F, 88); PopsWindowTests.Tick(m);   // in the band (83..88): unchanged
         Assert.InRange(Add(m), hold - 2, hold + 2);
-        V8Fixture.PutByte(m, 0x4007F, 89); PopsWindowTests.Tick(m);   // above 83 + 5: nothing
+        V10Fixture.PutByte(m, 0x4007F, 89); PopsWindowTests.Tick(m);   // above 83 + 5: nothing
         Assert.Equal(0, Add(m));
-        V8Fixture.PutByte(m, 0x4007F, 85); PopsWindowTests.Tick(m);   // back in the band: still nothing
+        V10Fixture.PutByte(m, 0x4007F, 85); PopsWindowTests.Tick(m);   // back in the band: still nothing
         Assert.Equal(0, Add(m));
-        V8Fixture.PutByte(m, 0x4007F, 82); PopsWindowTests.Tick(m);   // below the target: the hold opening
+        V10Fixture.PutByte(m, 0x4007F, 82); PopsWindowTests.Tick(m);   // below the target: the hold opening
         Assert.InRange(Add(m), hold - 2, hold + 2);
     }
 
@@ -291,7 +291,7 @@ public sealed class BlipTests
         var m = Machine();
         Braking(m); PopsWindowTests.Tick(m);
         Assert.Equal(83, Target(m));
-        V8Fixture.PutByte(m, 0x4047F, 50); PopsWindowTests.Tick(m);
+        V10Fixture.PutByte(m, 0x4047F, 50); PopsWindowTests.Tick(m);
         Assert.Equal(50 * 89 / 64, Target(m));
     }
 
@@ -318,11 +318,11 @@ public sealed class BlipTests
     public void HeldClutchSinceBootStartsNoBlipAtAStandstill()
     {
         var image = V10Fixture.Bytes; image[Blip] = 1;
-        var m = OverlayV9Tests.Boot(image, V10Fixture.Symbol);
-        V8Fixture.PutByte(m, V10Fixture.BlipCl, 5);                 // left in RAM
-        V8Fixture.PutByte(m, 0x401AE, 4);
-        V8Fixture.PutByte(m, 0x4047F, 0);
-        V8Fixture.PutByte(m, 0x40433, 180);
+        var m = V10Fixture.Boot(image);
+        V10Fixture.PutByte(m, V10Fixture.BlipCl, 5);                 // left in RAM
+        V10Fixture.PutByte(m, 0x401AE, 4);
+        V10Fixture.PutByte(m, 0x4047F, 0);
+        V10Fixture.PutByte(m, 0x40433, 180);
         m.Bus.Poke16(0xFDF8, 0x4000);
         Braking(m);
         Ticks(m, 30);
@@ -357,7 +357,7 @@ public sealed class BlipTests
         Assert.True(On(m));
         for (var rpm = 51; rpm < 83; rpm++)
         {
-            V8Fixture.PutByte(m, 0x4007F, (byte)rpm); PopsWindowTests.Tick(m);
+            V10Fixture.PutByte(m, 0x4007F, (byte)rpm); PopsWindowTests.Tick(m);
             Assert.True(On(m), $"{rpm}");
             if (V10Fixture.Flag(m, V10Fixture.BlipHold)) return rpm;
         }
@@ -384,7 +384,7 @@ public sealed class BlipTests
         var m = V10Fixture.Direct(image, V10Fixture.CallA("blip_lead"));
         for (var r = 1; r < 16; r++) m.Cpu.SetR(r, (ushort)(0x9100 + r * 19));
         m.Cpu.SetR(0, 0xF780); m.Cpu.SetR(5, rpm);
-        V8Fixture.PutByte(m, V10Fixture.BlipPrev, prev); V8Fixture.PutByte(m, V10Fixture.BlipRate, rate);
+        V10Fixture.PutByte(m, V10Fixture.BlipPrev, prev); V10Fixture.PutByte(m, V10Fixture.BlipRate, rate);
         V10Fixture.Execute(m);
         return (m.Cpu.R(4), V10Fixture.Byte(m, V10Fixture.BlipRate), V10Fixture.Byte(m, V10Fixture.BlipPrev),
             [.. Enumerable.Range(0, 16).Select(r => m.Cpu.R(r))]);
@@ -417,7 +417,7 @@ public sealed class BlipTests
         var m = Machine();
         Braking(m); PopsWindowTests.Tick(m);
         Assert.True(On(m));
-        V8Fixture.PutByte(m, 0x401AE, gear);
+        V10Fixture.PutByte(m, 0x401AE, gear);
         PopsWindowTests.Tick(m);
         Assert.False(On(m), $"gear {gear}");
         Assert.Equal(0, Add(m));

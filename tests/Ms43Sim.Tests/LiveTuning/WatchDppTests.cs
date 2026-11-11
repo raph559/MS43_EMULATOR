@@ -11,7 +11,7 @@ namespace Ms43Sim.Tests.LiveTuning;
 /// </summary>
 public sealed class WatchDppTests
 {
-    static FlashedImage Image => TestImages.AsFlashed(V9Fixture.Bytes);
+    static FlashedImage Image => TestImages.AsFlashed(V10Fixture.Bytes);
 
     public static TheoryData<string> Drives => new()
     {

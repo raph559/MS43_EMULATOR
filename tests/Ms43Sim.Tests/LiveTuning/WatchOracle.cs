@@ -74,8 +74,8 @@ public sealed class WatchOracle
                 if (m.Cpu.R(12) != page || m.Cpu.R(10) != offset || Again(m, at)) return;
                 Reads.Add(new WatchRead(origin + m.Cycles, map ? (byte)3 : (byte)4, m.Cpu.R(13), 0, map ? m.Cpu.R(14) : (ushort)0, 0, 0));
             });
-        machine.OnInstruction((uint)V9Fixture.Symbol("wl_rec"), m => Copies.Add(origin + m.Cycles));
-        machine.OnInstruction((uint)V9Fixture.Symbol("watch_set"), m => Sets.Add(origin + m.Cycles));
+        machine.OnInstruction((uint)V10Fixture.Symbol("wl_rec"), m => Copies.Add(origin + m.Cycles));
+        machine.OnInstruction((uint)V10Fixture.Symbol("watch_set"), m => Sets.Add(origin + m.Cycles));
     };
 
     /// <summary>The record a copy at <paramref name="cycle"/> must carry: the last read before it, and the reads since the last set.</summary>

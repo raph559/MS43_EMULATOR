@@ -5,27 +5,16 @@ using Xunit.Abstractions;
 
 namespace Ms43Sim.Tests.LiveTuning;
 
-public static class V6FeatureFixture
+public static class FeatureFixture
 {
     public sealed record Reader(string Name, int Group, int Offset, string Operation, int Site, byte[] Original);
-
-    public static byte[] Bytes => BytesOf(6);
-
-    /// <summary>V6's scalar hooks are inherited unchanged by V8, which adds group 138 beside them.</summary>
-    public static byte[] BytesOf(int version)
-    {
-        var bytes = TestBins.CarBytes;
-        foreach (var (at, data) in LiveOverlayBin.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
-            $"sim/tests/Ms43Sim.Tests/fixtures/live_overlay_v{version}.hex")))) data.CopyTo(bytes, at);
-        return bytes;
-    }
 
     public static Reader[] Readers
     {
         get
         {
             using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
-                "defs/live_overlay_v6_reads.json")));
+                "defs/live_overlay_v10_reads.json")));
             return json.RootElement.EnumerateArray().Select(e => new Reader(e.GetProperty("name").GetString()!,
                 e.GetProperty("group").GetInt32(), e.GetProperty("offset").GetInt32(),
                 e.GetProperty("operation").GetString()!, e.GetProperty("site").GetInt32(),
@@ -33,17 +22,10 @@ public static class V6FeatureFixture
         }
     }
 
-    public static int Symbol(string name, int version = 6)
-    {
-        using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(LiveOverlayBin.RepositoryRoot,
-            $"defs/live_overlay_v{version}_symbols.json")));
-        return json.RootElement.GetProperty(name).GetInt32();
-    }
-
     public static int Address(int group) => 0x7132C + (group - 124) * 8;
 }
 
-public sealed class OverlayV6Tests(ITestOutputHelper output)
+public sealed class OverlayFeatureTests(ITestOutputHelper output)
 {
     private const uint Trampoline = 0xC1000;
     private static readonly byte[] Values = [0, 1, 0x7F, 0x80, 0xFF];
@@ -84,26 +66,26 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     private static uint Allocation(Machine m, int group, byte[] data, bool poolB = false,
-        bool extra = false, string state = "live", int version = 6)
+        bool extra = false, string state = "live")
     {
         Array.Clear(m.Bus.Xram, 0x6B0, 0x118);
-        m.Bus.Poke16(0xE6B0, state == "uninitialised" ? (ushort)0 : (ushort)(0xC0D0 + version));
+        m.Bus.Poke16(0xE6B0, state == "uninitialised" ? (ushort)0 : (ushort)0xC0DA);
         m.Bus.Poke16(0xF900, 2);
         m.Bus.Poke16(0xFD2C, 0x0400);
         m.Bus.Poke16(0xE2A6, state == "expired" ? (ushort)300 : (ushort)0);
         m.Bus.Xram[0x6DB] = 255;
         var logical = poolB ? 704 : 0;
-        var record = extra ? (version >= 7 ? 0xE7A8u : 0xE7ACu) : 0xE6D8u;
+        var record = extra ? 0xE7A8u : 0xE6D8u;
         m.Bus.Poke16(record, (ushort)(group << 8 | (state == "disabled" ? 2 : 3)));
         m.Bus.Poke16(record + 2, (ushort)(0xFF00 | logical / 4));
         if (extra)
         {
-            m.Bus.Xram[0x6DB] = version >= 7 ? (byte)50 : (byte)51;
-            m.Bus.Xram[(version >= 7 ? 0x7B0 : 0x7B4) + group / 8] = (byte)(1 << (group % 8));
+            m.Bus.Xram[0x6DB] = 50;
+            m.Bus.Xram[0x7B0 + group / 8] = (byte)(1 << (group % 8));
         }
         if (poolB) data.CopyTo(m.Bus.Xram, 0x6E0);
         else data.CopyTo(m.Bus.ExternalRam, 0x1D00);
-        return V5Fixture.Physical(logical);
+        return V10Fixture.Physical(logical);
     }
 
     private static void EqualCpu(Machine expected, Machine actual, string context)
@@ -118,11 +100,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Assert.Equal(expected.Cpu.Sp, actual.Cpu.Sp);
     }
 
-    [Theory]
-    [InlineData(6)] [InlineData(8)] [InlineData(9)] [InlineData(10)]
-    public void AllCompiledFeatureHooksMatchOriginalInstructionsAcrossFallbacksAndAllocations(int version)
+    [Fact]
+    public void AllCompiledFeatureHooksMatchOriginalInstructionsAcrossFallbacksAndAllocations()
     {
-        var readers = V6FeatureFixture.Readers;
+        var readers = FeatureFixture.Readers;
         Assert.Equal(20, readers.Length);
         Assert.Equal(6, readers.Count(r => r.Operation == "PAIR"));
         Assert.Equal(26, readers.Sum(r => r.Operation == "PAIR" ? 2 : 1));
@@ -132,15 +113,15 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         {
             var flash = Enumerable.Range(0, 8).Select(i => Values[(sample + i) % Values.Length]).ToArray();
             var live = Enumerable.Range(0, 8).Select(i => Values[(sample + i + 1) % Values.Length]).ToArray();
-            var overlay = V6FeatureFixture.BytesOf(version);
+            var overlay = V10Fixture.Bytes;
             var donor = TestBins.CarBytes;
             Assert.Equal(read.Original, donor.AsSpan(read.Site, read.Original.Length).ToArray());
-            flash.CopyTo(overlay, V6FeatureFixture.Address(read.Group));
-            flash.CopyTo(donor, V6FeatureFixture.Address(read.Group));
+            flash.CopyTo(overlay, FeatureFixture.Address(read.Group));
+            flash.CopyTo(donor, FeatureFixture.Address(read.Group));
             var actual = Direct(overlay, overlay.AsSpan(read.Site, read.Original.Length).ToArray());
             var flashed = Direct(donor, read.Original);
             var changed = TestBins.CarBytes;
-            live.CopyTo(changed, V6FeatureFixture.Address(read.Group));
+            live.CopyTo(changed, FeatureFixture.Address(read.Group));
             var edited = Direct(changed, read.Original);
 
             foreach (var state in new[] { "uninitialised", "disabled", "expired", "live" })
@@ -148,9 +129,9 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
             foreach (var extra in new[] { false, true })
             for (var cv = 0; cv < 4; cv++)
             {
-                Allocation(actual, read.Group, live, poolB, extra, state, version);
+                Allocation(actual, read.Group, live, poolB, extra, state);
                 // From V9 an activation byte of 80h and up is a trigger, by design: TriggerTests covers it, not the raw read.
-                if (version >= 9 && read.Offset == 0 && (state == "live" ? live : flash)[0] >= 0x80) continue;
+                if (read.Offset == 0 && (state == "live" ? live : flash)[0] >= 0x80) continue;
                 var expected = state == "live" ? edited : flashed;
                 var psw = (ushort)(0x0459 | cv << 1);
                 var operand = new byte[] { 0, 0x7F, 0x80, 0xFF }[cv];
@@ -172,16 +153,14 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(3, false, 6)] [InlineData(3, true, 6)]
-    [InlineData(16, false, 6)] [InlineData(16, true, 6)]
-    [InlineData(3, false, 8)] [InlineData(16, true, 8)]
-    [InlineData(3, false, 9)] [InlineData(16, true, 9)]
-    public void EveryCompiledPairKeepsItsTwoLoadsTogetherAcrossInterruptAndPecRequests(int page, bool pec, int version)
+    [InlineData(3, false)] [InlineData(3, true)]
+    [InlineData(16, false)] [InlineData(16, true)]
+    public void EveryCompiledPairKeepsItsTwoLoadsTogetherAcrossInterruptAndPecRequests(int page, bool pec)
     {
-        foreach (var read in V6FeatureFixture.Readers.Where(r => r.Operation == "PAIR"))
+        foreach (var read in FeatureFixture.Readers.Where(r => r.Operation == "PAIR"))
         {
-            var image = V6FeatureFixture.BytesOf(version);
-            var start = V6FeatureFixture.Symbol("feature_" + read.Name + "_read", version) & 0x7FFFF;
+            var image = V10Fixture.Bytes;
+            var start = V10Fixture.Symbol("feature_" + read.Name + "_read") & 0x7FFFF;
             var code = image.AsSpan(start, 8).ToArray();
             var offset = page == 3 ? 0x26E0 : 0x1D00;
             var physical = (uint)(page * 0x4000 + offset);
@@ -222,14 +201,14 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     };
 
     internal static Machine Feature(int group, byte[]? data = null, bool flashedDisabled = false,
-        string state = "live", int version = 6, byte? flashed = null)
+        string state = "live", byte? flashed = null)
     {
-        var image = V6FeatureFixture.BytesOf(version);
-        if (flashedDisabled) image[V6FeatureFixture.Address(group)] = 0;
-        if (flashed is { } config) image[V6FeatureFixture.Address(group)] = config;
+        var image = V10Fixture.Bytes;
+        if (flashedDisabled) image[FeatureFixture.Address(group)] = 0;
+        if (flashed is { } config) image[FeatureFixture.Address(group)] = config;
         var function = group switch { 124 => 0xFCF2, 125 => 0xFD44, 126 => 0xFDA4, _ => throw new ArgumentOutOfRangeException(nameof(group)) };
         var m = Direct(image, [0xDA, 0x0B, (byte)function, (byte)(function >> 8)]);
-        Allocation(m, group, data ?? FeatureData(group), state: state, version: version);
+        Allocation(m, group, data ?? FeatureData(group), state: state);
         Inputs(m);
         return m;
     }
@@ -255,11 +234,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     internal static void Active(Machine m, int group, bool expected) =>
         Assert.Equal(expected, (m.Bus.Peek16(0xFDF8) & 1 << (group - 124)) != 0);
 
-    [Theory]
-    [InlineData(6)] [InlineData(9)] [InlineData(10)]
-    public void LaunchControlUsesLiveEntryAndExitThresholdsAndRetainsItsClutchReleaseBehavior(int version)
+    [Fact]
+    public void LaunchControlUsesLiveEntryAndExitThresholdsAndRetainsItsClutchReleaseBehavior()
     {
-        var m = Feature(124, version: version);
+        var m = Feature(124);
         Inputs(m, speed: 0, pedal: 99);
         Execute(m); Active(m, 124, false);
         Inputs(m, speed: 1);
@@ -280,11 +258,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Execute(m); Active(m, 124, false);
     }
 
-    [Theory]
-    [InlineData(6)] [InlineData(9)] [InlineData(10)]
-    public void NoLiftShiftUsesLiveEntryGatesAndReleasesOnClutchOrPedal(int version)
+    [Fact]
+    public void NoLiftShiftUsesLiveEntryGatesAndReleasesOnClutchOrPedal()
     {
-        var m = Feature(125, version: version);
+        var m = Feature(125);
         Inputs(m, speed: 19);
         Execute(m); Active(m, 125, false);
         Inputs(m, speed: 20, pedal: 99);
@@ -304,11 +281,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
         Execute(m); Active(m, 125, false);
     }
 
-    [Theory]
-    [InlineData(6)] [InlineData(9)] [InlineData(10)]
-    public void RollingAntiLagUsesLivePedalThresholdAndReleasesOnEveryOriginalGate(int version)
+    [Fact]
+    public void RollingAntiLagUsesLivePedalThresholdAndReleasesOnEveryOriginalGate()
     {
-        var m = Feature(126, version: version);
+        var m = Feature(126);
         Inputs(m, sport: true);
         Execute(m); Active(m, 126, false);
         Inputs(m, cruise: 5);
@@ -327,11 +303,11 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(124, 9)] [InlineData(125, 9)]
-    public void ConditionalConfigurationRequiresItsOriginalEntryGate(int group, int version)
+    [InlineData(124)] [InlineData(125)]
+    public void ConditionalConfigurationRequiresItsOriginalEntryGate(int group)
     {
         var data = FeatureData(group); data[0] = 2;
-        var m = Feature(group, data, version: version);
+        var m = Feature(group, data);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30);
         Execute(m); Active(m, group, false);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30, sport: true);
@@ -341,10 +317,10 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(126, 6)] [InlineData(124, 9)] [InlineData(125, 9)] [InlineData(126, 9)]
-    public void LiveConfigurationZeroReleasesOnlyItsOwnLatchAndCanBeEnabledAgain(int group, int version)
+    [InlineData(124)] [InlineData(125)] [InlineData(126)]
+    public void LiveConfigurationZeroReleasesOnlyItsOwnLatchAndCanBeEnabledAgain(int group)
     {
-        var m = Feature(group, version: version);
+        var m = Feature(group);
         Inputs(m, speed: group == 124 ? (byte)0 : (byte)30);
         Execute(m); Active(m, group, true);
         m.Bus.Poke16(0xFDF8, 0xA5F7);
@@ -360,12 +336,12 @@ public sealed class OverlayV6Tests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(124, 6)] [InlineData(125, 6)] [InlineData(126, 6)] [InlineData(124, 9)] [InlineData(125, 9)] [InlineData(126, 9)]
-    public void FallingBackToFlashedConfigurationZeroAlsoReleasesTheActiveLatch(int group, int version)
+    [InlineData(124)] [InlineData(125)] [InlineData(126)]
+    public void FallingBackToFlashedConfigurationZeroAlsoReleasesTheActiveLatch(int group)
     {
         foreach (var state in new[] { "uninitialised", "disabled", "expired" })
         {
-            var m = Feature(group, flashedDisabled: true, state: state, version: version);
+            var m = Feature(group, flashedDisabled: true, state: state);
             m.Bus.Poke16(0xFDF8, 0xA5F7);
             Execute(m);
             Assert.Equal((ushort)(0xA5F7 & ~(1 << (group - 124))), m.Bus.Peek16(0xFDF8));

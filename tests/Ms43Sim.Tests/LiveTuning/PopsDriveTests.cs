@@ -10,8 +10,8 @@ namespace Ms43Sim.Tests.LiveTuning;
 public sealed class PopsDriveFixture
 {
     public const double Lift = 16.5;
-    // Switch on, 2.0 s, -15 deg, 11.5 AFR, 1,600 rpm, 70.5 deg C, 3.0 deg TPS, 20 km/h.
-    public static readonly byte[] On = [1, 20, 23, 184, 50, 158, 30, 20];
+    // Switch on, 2.0 s, -15 deg, a real AFR of 11.5 (the byte is AFR x 10), 1,600 rpm, 70.5 deg C, 3.0 deg TPS, 20 km/h.
+    public static readonly byte[] On = [1, 20, 23, 115, 50, 158, 30, 20];
 
     public static byte[] Long(int index = -1, byte value = 0)
     {
@@ -20,8 +20,8 @@ public sealed class PopsDriveFixture
         return settings;
     }
 
-    /// <summary>The lift settings with the AFR at lambda 1 (128), the stock overrun target.</summary>
-    public static byte[] Lambda1() { var settings = On.ToArray(); settings[3] = 128; return settings; }
+    /// <summary>The lift settings with the AFR at 14.7 (147): the car file's own overrun target, as stock.</summary>
+    public static byte[] Lambda1() { var settings = On.ToArray(); settings[3] = 147; return settings; }
 
     /// <summary>The lift settings with the switch on the A/C frame's bit 7 (615h byte 0), on while it is 1.</summary>
     public static byte[] AcSwitch() { var settings = On.ToArray(); settings[0] = 0x97; return settings; }
@@ -30,8 +30,8 @@ public sealed class PopsDriveFixture
 
     public static FlashedImage Image(byte[]? settings)
     {
-        var bytes = V8Fixture.Bytes;
-        settings?.CopyTo(bytes, V8Fixture.Defaults);
+        var bytes = V10Fixture.Bytes;
+        settings?.CopyTo(bytes, V10Fixture.Defaults);
         return TestImages.AsFlashed(bytes);
     }
 
@@ -82,10 +82,10 @@ public sealed class PopsDriveTests(PopsDriveFixture fixture) : IClassFixture<Pop
         run.Trace.MinBy(t => Math.Abs(t.Seconds - seconds))!.Values[Column(column)] ?? double.NaN;
 
     [Fact]
-    public void V8ImagesAreKnownWhateverTheirPopsSettings()
+    public void TheImageIsKnownWhateverItsPopsSettings()
     {
-        Assert.Equal("MS43X001 with the live-tuning overlay 8", ProgramIdentity.Name(PopsDriveFixture.Image(null).Image));
-        Assert.Equal("MS43X001 with the live-tuning overlay 8", ProgramIdentity.Name(PopsDriveFixture.Image(PopsDriveFixture.On).Image));
+        Assert.Equal("MS43X001 live overlay V10.4", ProgramIdentity.Name(PopsDriveFixture.Image(null).Image));
+        Assert.Equal("MS43X001 live overlay V10.4", ProgramIdentity.Name(PopsDriveFixture.Image(PopsDriveFixture.On).Image));
     }
 
     [Fact]
